@@ -1175,7 +1175,7 @@ EOF
     sudo su - deploy <<EOF
     cd /home/deploy/${empresa}/frontend
     sed -i 's/3000/'"${frontend_port}"'/g' server.js
-    npm run build
+    NODE_OPTIONS=--openssl-legacy-provider npm run build
 EOF
 
     sleep 2
