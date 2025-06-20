@@ -1494,9 +1494,7 @@ EOF
 printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
-git checkout main > /dev/null 2>&1
-git fetch origin > /dev/null 2>&1
-git reset --hard origin/main > /dev/null 2>&1
+git reset --hard
 git pull
 cd /home/deploy/${empresa}/backend
 npm prune --force > /dev/null 2>&1
