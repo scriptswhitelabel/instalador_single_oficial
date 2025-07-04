@@ -1515,7 +1515,7 @@ cd /home/deploy/${empresa}/frontend
 npm prune --force > /dev/null 2>&1
 npm install --force
 sed -i 's/3000/'"$frontend_port"'/g' server.js
-npm run build
+NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
 pm2 flush
 pm2 start all
