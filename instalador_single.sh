@@ -28,12 +28,13 @@ fi
 banner() {
   printf " ${BLUE}"
   printf "\n\n"
-  printf "██╗███╗   ██╗███████╗████████╗ █████╗ ██╗      █████╗ ██████╗  ██████╗ ██████╗ \n"
-  printf "██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██╔══██╗██╔══██╗██╔═══██╗██╔══██╗\n"
-  printf "██║██╔██╗ ██║███████╗   ██║   ███████║██║     ███████║██║  ██║██║   ██║██████╔╝\n"
-  printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██╔══██║██║  ██║██║   ██║██╔══██╗\n"
-  printf "██║██║ ╚████║███████║   ██║   ██║  ██║███████╗██║  ██║██████╔╝╚██████╔╝██║  ██║\n"
-  printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝\n"
+  printf "███████╗██╗    ██╗██╗        ██████╗      ██████╗ \n"
+  printf "██╔════╝██║    ██║██║        ╚════██╗     ╚════██╗\n"
+  printf "███████╗██║ █╗ ██║██║         █████╔╝      █████╔╝\n"
+  printf "╚════██║██║███╗██║██║        ██╔═══╝      ██╔═══╝ \n"
+  printf "███████║╚███╔███╔╝███████╗   ███████╗██╗  ███████╗\n"
+  printf "╚══════╝ ╚══╝╚══╝ ╚══════╝   ╚══════╝╚═╝  ╚══════╝\n"
+  printf "                   SWL  -  2.0                        \n"
   printf "\n\n"
 }
 
@@ -51,7 +52,7 @@ salvar_variaveis() {
   echo "email_deploy=${email_deploy}" >>$ARQUIVO_VARIAVEIS
   echo "empresa=${empresa}" >>$ARQUIVO_VARIAVEIS
   echo "senha_deploy=${senha_deploy}" >>$ARQUIVO_VARIAVEIS
-  echo "subdominio_perfex=${subdominio_perfex}" >>$ARQUIVO_VARIAVEIS
+  # echo "subdominio_perfex=${subdominio_perfex}" >>$ARQUIVO_VARIAVEIS
   echo "senha_master=${senha_master}" >>$ARQUIVO_VARIAVEIS
   echo "nome_titulo=${nome_titulo}" >>$ARQUIVO_VARIAVEIS
   echo "numero_suporte=${numero_suporte}" >>$ARQUIVO_VARIAVEIS
@@ -69,8 +70,8 @@ carregar_variaveis() {
   if [ -f $ARQUIVO_VARIAVEIS ]; then
     source $ARQUIVO_VARIAVEIS
   else
-    empresa="multi100"
-    nome_titulo="Multi100"
+    empresa="multiflow"
+    nome_titulo="MultiFlow"
   fi
 }
 
@@ -149,6 +150,7 @@ menu() {
     echo
     printf "   [${BLUE}1${WHITE}] Instalar ${nome_titulo}\n"
     printf "   [${BLUE}2${WHITE}] Atualizar ${nome_titulo}\n"
+    printf "   [${BLUE}3${WHITE}] Instalar Transcrição de Audio Nativa\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
     read -p "> " option
@@ -158,6 +160,9 @@ menu() {
       ;;
     2)
       atualizar_base
+      ;;
+    3)
+      instalar_transcricao_audio_nativa
       ;;
     0)
       sair
@@ -374,10 +379,10 @@ questoes_variaveis_base() {
   read -p "> " senha_deploy
   echo
   # ARMAZENA URL BACKEND
-  banner
-  printf "${WHITE} >> Insira a URL do PerfexCRM: \n"
-  echo
-  read -p "> " subdominio_perfex
+  # banner
+  # printf "${WHITE} >> Insira a URL do PerfexCRM: \n"
+  # echo
+  # read -p "> " subdominio_perfex
   echo
   # DEFINE SENHA MASTER
   banner
@@ -499,7 +504,7 @@ dados_instalacao_base() {
   printf "   ${WHITE}Seu Email: ------------->> ${YELLOW}${email_deploy}\n"
   printf "   ${WHITE}Nome da Empresa: ------->> ${YELLOW}${empresa}\n"
   printf "   ${WHITE}Senha Deploy: ---------->> ${YELLOW}${senha_deploy}\n"
-  printf "   ${WHITE}Subdominio Perfex: ----->> ${YELLOW}${subdominio_perfex}\n"
+  # printf "   ${WHITE}Subdominio Perfex: ----->> ${YELLOW}${subdominio_perfex}\n"
   printf "   ${WHITE}Senha Master: ---------->> ${YELLOW}${senha_master}\n"
   printf "   ${WHITE}Titulo da Aplicação: --->> ${YELLOW}${nome_titulo}\n"
   printf "   ${WHITE}Numero de Suporte: ----->> ${YELLOW}${numero_suporte}\n"
@@ -1035,9 +1040,9 @@ instala_backend_base() {
     subdominio_frontend=$(echo "${subdominio_frontend/https:\/\//}")
     subdominio_frontend=${subdominio_frontend%%/*}
     subdominio_frontend=https://${subdominio_frontend}
-    subdominio_perfex=$(echo "${subdominio_perfex/https:\/\//}")
-    subdominio_perfex=${subdominio_perfex%%/*}
-    subdominio_perfex=https://${subdominio_perfex}
+    # subdominio_perfex=$(echo "${subdominio_perfex/https:\/\//}")
+    # subdominio_perfex=${subdominio_perfex%%/*}
+    # subdominio_perfex=https://${subdominio_perfex}
     sudo su - deploy <<EOF
   cat <<[-]EOF > /home/deploy/${empresa}/backend/.env
 NODE_ENV=
@@ -1070,8 +1075,8 @@ JWT_SECRET=${jwt_secret}
 JWT_REFRESH_SECRET=${jwt_refresh_secret}
 MASTER_KEY=${senha_master}
 
-PERFEX_URL=${subdominio_perfex}
-PERFEX_MODULE=Multi100
+# PERFEX_URL=${subdominio_perfex}
+# PERFEX_MODULE=Multi100
 VERIFY_TOKEN=whaticket
 FACEBOOK_APP_ID=${facebook_app_id}
 FACEBOOK_APP_SECRET=${facebook_app_secret}
@@ -1556,3 +1561,20 @@ EOF
 
 carregar_variaveis
 menu
+
+# Adicionar função para instalar transcrição de áudio nativa
+instalar_transcricao_audio_nativa() {
+  banner
+  printf "${WHITE} >> Instalando Transcrição de Áudio Nativa...\n"
+  echo
+  local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
+  if [ -f "$script_path" ]; then
+    chmod 775 "$script_path"
+    bash "$script_path"
+  else
+    printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
+    sleep 2
+  fi
+  printf "${GREEN} >> Processo de instalação da transcrição finalizado. Voltando ao menu...${WHITE}\n"
+  sleep 2
+}
