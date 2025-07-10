@@ -1135,7 +1135,9 @@ EOF
   export PUPPETEER_SKIP_DOWNLOAD=true
   npm install --force
   npm install puppeteer-core --force
-  npm install --save-dev @types/glob --legacy-peer-deps
+  # npm install --save-dev @types/glob --legacy-peer-deps
+  npm install jimp@^1.6.0
+  npm i glob
   npm run build
 EOF
 
