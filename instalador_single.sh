@@ -1045,6 +1045,7 @@ instala_backend_base() {
     # subdominio_perfex=https://${subdominio_perfex}
     sudo su - deploy <<EOF
   cat <<[-]EOF > /home/deploy/${empresa}/backend/.env
+# Scripts WhiteLabel - All Rights Reserved - (18) 9 8802-9627
 NODE_ENV=
 BACKEND_URL=${subdominio_backend}
 FRONTEND_URL=${subdominio_frontend}
@@ -1061,9 +1062,9 @@ DB_NAME=${empresa}
 
 # DADOS REDIS
 REDIS_URI=redis://:${senha_deploy}@127.0.0.1:6379
-# REDIS_URI_ACK=redis://:${senha_deploy}@127.0.0.1:6379
 REDIS_OPT_LIMITER_MAX=1
 REDIS_OPT_LIMITER_DURATION=3000
+# REDIS_URI_ACK=redis://:${senha_deploy}@127.0.0.1:6379
 # BULL_BOARD=true
 # BULL_USER=${email_deploy}
 # BULL_PASS=${senha_deploy}
@@ -1080,6 +1081,47 @@ MASTER_KEY=${senha_master}
 VERIFY_TOKEN=whaticket
 FACEBOOK_APP_ID=${facebook_app_id}
 FACEBOOK_APP_SECRET=${facebook_app_secret}
+
+#METODOS DE PAGAMENTO
+
+STRIPE_PRIVATE=
+STRIPE_OK_URL=BACKEND_URL/subscription/stripewebhook
+STRIPE_CANCEL_URL=FRONTEND_URL/financeiro
+
+# MERCADO PAGO
+
+MPACCESSTOKEN=SEU TOKEN
+MPNOTIFICATIONURL=https://SUB_DOMINIO_API/subscription/mercadopagowebhook
+
+MP_ACCESS_TOKEN=SEU TOKEN
+MP_NOTIFICATION_URL=https://SUB_DOMINIO_API/subscription/mercadopagowebhook
+
+ASAAS_TOKEN=SEU TOKEN
+MP_NOTIFICATION_URL=https://SUB_DOMINIO_API/subscription/asaaswebhook
+
+MPNOTIFICATION_URL=https://SUB_DOMINIO_API/subscription/asaaswebhook
+ASAASTOKEN=SEU TOKEN
+
+GERENCIANET_SANDBOX=
+GERENCIANET_CLIENT_ID=
+GERENCIANET_CLIENT_SECRET=
+GERENCIANET_PIX_CERT=
+GERENCIANET_PIX_KEY=
+
+# EMAIL
+MAIL_HOST="smtp.gmail.com"
+MAIL_USER="SEUGMAIL@gmail.com"
+MAIL_PASS="SENHA DE APP"
+MAIL_FROM="Recuperação de Senha <SEU GMAIL@gmail.com>"
+MAIL_PORT="465"
+
+# WhatsApp Oficial
+USE_WHATSAPP_OFICIAL=true
+URL_API_OFICIAL=https://SubDominioDaOficial.SEUDOMINIO.com.br
+TOKEN_API_OFICIAL="adminpro"
+
+# API de Transcrição de Audio
+TRANSCRIBE_URL=http://localhost:4002
 [-]EOF
 EOF
 
