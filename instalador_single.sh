@@ -1093,7 +1093,7 @@ EOF
   export PUPPETEER_SKIP_DOWNLOAD=true
   npm install --force
   npm install puppeteer-core --force
-  npm install --save-dev @types/glob
+  npm install --save-dev @types/glob --legacy-peer-deps
   npm run build
 EOF
 
