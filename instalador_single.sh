@@ -1559,9 +1559,6 @@ EOF
   } || trata_erro "otimiza_banco_atualizar"
 }
 
-carregar_variaveis
-menu
-
 # Adicionar função para instalar transcrição de áudio nativa
 instalar_transcricao_audio_nativa() {
   banner
@@ -1578,3 +1575,6 @@ instalar_transcricao_audio_nativa() {
   printf "${GREEN} >> Processo de instalação da transcrição finalizado. Voltando ao menu...${WHITE}\n"
   sleep 2
 }
+
+carregar_variaveis
+menu
