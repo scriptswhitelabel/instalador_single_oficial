@@ -1133,8 +1133,6 @@ EOF
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
   export PUPPETEER_SKIP_DOWNLOAD=true
-  rm -r node_modules
-  rm package-lock.json
   npm install --force
   npm install puppeteer-core --force
   # npm install --save-dev @types/glob --legacy-peer-deps
@@ -1551,8 +1549,12 @@ git pull
 cd /home/deploy/${empresa}/backend
 npm prune --force > /dev/null 2>&1
 export PUPPETEER_SKIP_DOWNLOAD=true
+rm -r node_modules
+rm package-lock.json
 npm install --force
 npm install puppeteer-core --force
+npm install jimp@^1.6.0
+npm i glob
 npm run build
 sleep 2
 printf "${WHITE} >> Atualizando Banco...\n"
