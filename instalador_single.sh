@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 2.3\n"
+  printf "                                INSTALADOR 3.0\n"
   printf "\n\n"
 }
 
@@ -1133,6 +1133,8 @@ EOF
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
   export PUPPETEER_SKIP_DOWNLOAD=true
+  rm -r node_modules
+  rm package-lock.json
   npm install --force
   npm install puppeteer-core --force
   # npm install --save-dev @types/glob --legacy-peer-deps
