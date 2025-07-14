@@ -714,7 +714,7 @@ instala_postgres_base() {
   sudo apt-get install gnupg -y
   sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
   wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-  sudo apt-get update -y && sudo apt-get -y install postgresql-15
+  sudo apt-get update -y && sudo apt-get -y install postgresql-17
 EOF
     sleep 2
   } || trata_erro "instala_postgres_base"
