@@ -151,7 +151,6 @@ USER_ID=""   # Se necessário, preencha
 QUEUE_ID="15"  # Se necessário, preencha
 
 # Se o uso for maior ou igual ao limite, envia mensagem pelo Whaticket
-if [ "$USO" -ge "$LIMITE" ]; then
   curl -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -163,7 +162,6 @@ if [ "$USO" -ge "$LIMITE" ]; then
     \"sendSignature\": false,
     \"closeTicket\": true
   }"
-fi
 
 }
 
