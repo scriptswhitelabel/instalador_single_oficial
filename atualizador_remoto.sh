@@ -46,7 +46,7 @@ backup_app_atualizar() {
   dummy_carregar_variaveis
   source /home/deploy/${empresa}/backend/.env
   {
-    printf "${WHITE} >> Fazendo backup do banco de dados...\n"
+    printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
     [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
     backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
@@ -57,7 +57,7 @@ backup_app_atualizar() {
 }
 
 otimiza_banco_atualizar() {
-  printf "${WHITE} >> Realizando Manutenção do Banco de Dados... \n"
+  printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
   {
     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
     sudo su - root <<EOF
@@ -70,7 +70,7 @@ EOF
 }
 
 baixa_codigo_atualizar() {
-  printf "${WHITE} >> Recuperando Permissões... \n"
+  printf "${WHITE} >> Recuperando Permissões da empresa ${empresa}... \n"
   sleep 2
   chown deploy -R /home/deploy/${empresa}
   chmod 775 -R /home/deploy/${empresa}
@@ -87,7 +87,7 @@ EOF
 
   otimiza_banco_atualizar
 
-  printf "${WHITE} >> Atualizando a Aplicação... \n"
+  printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
 
   source /home/deploy/${empresa}/frontend/.env
@@ -109,12 +109,12 @@ npm i glob
 npm install jimp@^1.6.0
 npm run build
 sleep 2
-printf "${WHITE} >> Atualizando Banco...\n"
+printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
 echo
 sleep 2
 npx sequelize db:migrate
 sleep 2
-printf "${WHITE} >> Atualizando Frontend...\n"
+printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
 echo
 sleep 2
 cd /home/deploy/${empresa}/frontend
@@ -124,6 +124,7 @@ sed -i 's/3000/'"$frontend_port"'/g' server.js
 NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
 pm2 flush
+pm2 reset all
 pm2 start all
 EOF
 
@@ -141,6 +142,29 @@ EOF
   printf "${WHITE} >> Atualização do ${nome_titulo} concluída...\n"
   echo
   sleep 5
+
+# Dados do Whaticket
+TOKEN="ultranotificacoes"
+NUMERO="5518998020650"  # Número de destino no formato E.164
+MENSAGEM="🚨 Atualização do ${nome_titulo} concluída"
+USER_ID=""   # Se necessário, preencha
+QUEUE_ID="15"  # Se necessário, preencha
+
+# Se o uso for maior ou igual ao limite, envia mensagem pelo Whaticket
+if [ "$USO" -ge "$LIMITE" ]; then
+  curl -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"number\": \"$NUMERO\",
+    \"body\": \"$MENSAGEM\",
+    \"userId\": \"$USER_ID\",
+    \"queueId\": \"$QUEUE_ID\",
+    \"sendSignature\": false,
+    \"closeTicket\": true
+  }"
+fi
+
 }
 
 # Execução automática do fluxo de atualização
