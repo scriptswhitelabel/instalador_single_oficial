@@ -43,6 +43,27 @@ dummy_carregar_variaveis() {
 
 # Funções de atualização
 backup_app_atualizar() {
+
+# Dados do Whaticket
+TOKEN="ultranotificacoes"
+NUMERO="${numero_suporte}"  # Número de destino no formato E.164
+MENSAGEM="🚨 INICIANDO Atualização do ${nome_titulo}"
+USER_ID=""   # Se necessário, preencha
+QUEUE_ID="15"  # Se necessário, preencha
+
+# Notifica quando concluir o update, envia mensagem pelo Whaticket
+  curl -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"number\": \"$NUMERO\",
+    \"body\": \"$MENSAGEM\",
+    \"userId\": \"$USER_ID\",
+    \"queueId\": \"$QUEUE_ID\",
+    \"sendSignature\": false,
+    \"closeTicket\": true
+  }"
+
   dummy_carregar_variaveis
   source /home/deploy/${empresa}/backend/.env
   {
@@ -150,7 +171,7 @@ MENSAGEM="🚨 Atualização do ${nome_titulo} concluída"
 USER_ID=""   # Se necessário, preencha
 QUEUE_ID="15"  # Se necessário, preencha
 
-# Se o uso for maior ou igual ao limite, envia mensagem pelo Whaticket
+# Notifica quando concluir o update, envia mensagem pelo Whaticket
   curl -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
