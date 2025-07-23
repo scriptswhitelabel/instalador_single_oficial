@@ -145,7 +145,7 @@ EOF
 
 # Dados do Whaticket
 TOKEN="ultranotificacoes"
-NUMERO="5518998020650"  # Número de destino no formato E.164
+NUMERO="${numero_suporte}"  # Número de destino no formato E.164
 MENSAGEM="🚨 Atualização do ${nome_titulo} concluída"
 USER_ID=""   # Se necessário, preencha
 QUEUE_ID="15"  # Se necessário, preencha
