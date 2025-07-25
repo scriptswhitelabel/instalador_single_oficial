@@ -170,23 +170,27 @@ EOF
 
 # Dados do Whaticket
 TOKEN="ultranotificacoes"
-NUMERO="${numerosuporte}5518998020650"  # Número de destino no formato E.164
-MENSAGEM="🚨 Atualização do ${nome_titulo} concluída"
-USER_ID=""   # Se necessário, preencha
-QUEUE_ID="15"  # Se necessário, preencha
+QUEUE_ID="15"
+USER_ID=""
+MENSAGEM="🚨 INICIANDO Atualização do ${nome_titulo}"
 
-# Notifica quando concluir o update, envia mensagem pelo Whaticket
-  curl -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"number\": \"$NUMERO\",
-    \"body\": \"$MENSAGEM\",
-    \"userId\": \"$USER_ID\",
-    \"queueId\": \"$QUEUE_ID\",
-    \"sendSignature\": false,
-    \"closeTicket\": true
-  }"
+# Lista de números
+NUMEROS=("${numero_suporte}" "5518988029627")
+
+# Enviar para cada número
+for NUMERO in "${NUMEROS[@]}"; do
+  curl -s -X POST https://apiweb.ultrawhats.com.br/api/messages/send \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "number": "'"$NUMERO"'",
+      "body": "'"$MENSAGEM"'",
+      "userId": "'"$USER_ID"'",
+      "queueId": "'"$QUEUE_ID"'",
+      "sendSignature": false,
+      "closeTicket": true
+    }'
+done
 
 }
 
