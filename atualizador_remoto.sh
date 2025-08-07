@@ -44,6 +44,18 @@ dummy_carregar_variaveis() {
 # Funções de atualização
 backup_app_atualizar() {
 
+  dummy_carregar_variaveis
+  source /home/deploy/${empresa}/backend/.env
+  {
+    printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
+    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
+    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
+    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
+    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
+    sleep 2
+  } || trata_erro "backup_app_atualizar"
+
 # Dados do Whaticket
 TOKEN="ultranotificacoes"
 QUEUE_ID="15"
@@ -67,18 +79,7 @@ for NUMERO in "${NUMEROS[@]}"; do
       "closeTicket": true
     }'
 done
-
-  dummy_carregar_variaveis
-  source /home/deploy/${empresa}/backend/.env
-  {
-    printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
-    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
-    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
-    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
-    sleep 2
-  } || trata_erro "backup_app_atualizar"
+  
 }
 
 otimiza_banco_atualizar() {
@@ -172,7 +173,7 @@ EOF
 TOKEN="ultranotificacoes"
 QUEUE_ID="15"
 USER_ID=""
-MENSAGEM="🚨 INICIANDO Atualização do ${nome_titulo}"
+MENSAGEM="🚨 Atualização do ${nome_titulo} FINALIZADA"
 
 # Lista de números
 NUMEROS=("${numero_suporte}" "5518988029627")
