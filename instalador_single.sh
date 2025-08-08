@@ -1117,7 +1117,7 @@ MAIL_PORT="465"
 
 # WhatsApp Oficial
 USE_WHATSAPP_OFICIAL=true
-URL_API_OFICIAL=https://SubDominioDaOficial.SEUDOMINIO.com.br
+# URL_API_OFICIAL=https://SubDominioDaOficial.SEUDOMINIO.com.br
 TOKEN_API_OFICIAL="adminpro"
 
 # API de Transcrição de Audio

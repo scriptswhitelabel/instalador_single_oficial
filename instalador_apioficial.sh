@@ -172,6 +172,9 @@ configurar_env_apioficial() {
     # Carregar variáveis necessárias
     source $ARQUIVO_VARIAVEIS
     
+    # Buscar JWT_REFRESH_SECRET do backend existente
+    jwt_refresh_secret_backend=$(grep "JWT_REFRESH_SECRET=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    
     # Criar diretório da API Oficial se não existir
     mkdir -p /home/deploy/${empresa}/api_oficial
     
@@ -184,13 +187,13 @@ DATABASE_USER=${empresa}
 DATABASE_PASSWORD=${senha_deploy}
 DATABASE_NAME=oficialseparado
 TOKEN_ADMIN=adminpro
-URL_BACKEND_MULT100=https://servermulti100apioficial.scriptswhitelabel.com.br 
+URL_BACKEND_MULT100=https://${subdominio_backend}
 REDIS_URI=redis://:${senha_deploy}@127.0.0.1:6379
 PORT=${default_apioficial_port}
 NAME_ADMIN=SetupAutomatizado
 EMAIL_ADMIN=admin@multi100.com.br
 PASSWORD_ADMIN=adminpro
-JWT_REFRESH_SECRET=${jwt_refresh_secret}
+JWT_REFRESH_SECRET=${jwt_refresh_secret_backend}
 URL_API_OFICIAL=https://${subdominio_oficial}
 EOF
 
