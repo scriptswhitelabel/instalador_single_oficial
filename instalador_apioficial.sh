@@ -11,7 +11,6 @@ ARCH=$(uname -m)
 UBUNTU_VERSION=$(lsb_release -sr)
 ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
 ip_atual=$(curl -s http://checkip.amazonaws.com)
-jwt_refresh_secret=$(openssl rand -base64 32)
 default_apioficial_port=6000
 
 if [ "$EUID" -ne 0 ]; then
@@ -173,7 +172,10 @@ configurar_env_apioficial() {
     source $ARQUIVO_VARIAVEIS
     
     # Buscar JWT_REFRESH_SECRET do backend existente
-    jwt_refresh_secret_backend=$(grep "JWT_REFRESH_SECRET=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    jwt_refresh_secret_backend=$(grep "^JWT_REFRESH_SECRET=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2-)
+    
+    # Buscar BACKEND_URL do backend existente
+    backend_url=$(grep "^BACKEND_URL=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2-)
     
     # Criar diretório da API Oficial se não existir
     mkdir -p /home/deploy/${empresa}/api_oficial
@@ -187,7 +189,7 @@ DATABASE_USER=${empresa}
 DATABASE_PASSWORD=${senha_deploy}
 DATABASE_NAME=oficialseparado
 TOKEN_ADMIN=adminpro
-URL_BACKEND_MULT100=https://${subdominio_backend}
+URL_BACKEND_MULT100=${subdominio_backend}
 REDIS_URI=redis://:${senha_deploy}@127.0.0.1:6379
 PORT=${default_apioficial_port}
 NAME_ADMIN=SetupAutomatizado
