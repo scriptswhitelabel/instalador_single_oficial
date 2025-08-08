@@ -208,28 +208,30 @@ instalar_apioficial() {
   printf "${WHITE} >> Instalando e configurando API Oficial...\n"
   echo
   {
-    cd /home/deploy/${empresa}/api_oficial
-    
-    printf "${WHITE} >> Instalando dependências...\n"
-    npm install
-    
-    printf "${WHITE} >> Gerando Prisma...\n"
-    npx prisma generate
-    
-    printf "${WHITE} >> Buildando aplicação...\n"
-    npm run build
-    
-    printf "${WHITE} >> Executando migrações...\n"
-    npx prisma migrate dev
-    
-    printf "${WHITE} >> Gerando cliente Prisma...\n"
-    npx prisma generate client
-    
-    printf "${WHITE} >> Iniciando aplicação com PM2...\n"
-    pm2 start dist/main.js --name=api_oficial
-    
-    printf "${GREEN} >> API Oficial instalada e configurada com sucesso!${WHITE}\n"
-    sleep 2
+    sudo su - deploy <<EOF
+cd /home/deploy/${empresa}/api_oficial
+
+printf "${WHITE} >> Instalando dependências...\n"
+npm install
+
+printf "${WHITE} >> Gerando Prisma...\n"
+npx prisma generate
+
+printf "${WHITE} >> Buildando aplicação...\n"
+npm run build
+
+printf "${WHITE} >> Executando migrações...\n"
+npx prisma migrate dev
+
+printf "${WHITE} >> Gerando cliente Prisma...\n"
+npx prisma generate client
+
+printf "${WHITE} >> Iniciando aplicação com PM2...\n"
+pm2 start dist/main.js --name=api_oficial
+
+printf "${GREEN} >> API Oficial instalada e configurada com sucesso!${WHITE}\n"
+sleep 2
+EOF
   } || trata_erro "instalar_apioficial"
 }
 
