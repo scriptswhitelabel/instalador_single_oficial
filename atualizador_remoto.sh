@@ -169,11 +169,14 @@ EOF
   echo
   sleep 5
 
+# Extrair versão atual do package.json
+versao_atual=$(grep '"version":' /home/deploy/${empresa}/frontend/package.json | cut -d'"' -f4)
+
 # Dados do Whaticket
 TOKEN="ultranotificacoes"
 QUEUE_ID="15"
 USER_ID=""
-MENSAGEM="🚨 Atualização do ${nome_titulo} FINALIZADA"
+MENSAGEM="🚨 Atualização do ${nome_titulo} FINALIZADA - Versão ${versao_atual}"
 
 # Lista de números
 NUMEROS=("${numero_suporte}" "5518988029627")
