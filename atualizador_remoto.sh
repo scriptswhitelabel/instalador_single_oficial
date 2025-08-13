@@ -132,7 +132,7 @@ rm package-lock.json
 npm install --force
 npm install puppeteer-core --force
 npm i glob
-npm install jimp@^1.6.0
+# npm install jimp@^1.6.0
 npm run build
 sleep 2
 printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
