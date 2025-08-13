@@ -17,6 +17,9 @@ ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
 
+# Token do Git - Variável Fixa
+GIT_TOKEN="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"
+
 if [ "$EUID" -ne 0 ]; then
   echo
   printf "${WHITE} >> Este script precisa ser executado como root ${RED}ou com privilégios de superusuário${WHITE}.\n"
@@ -42,6 +45,27 @@ dummy_carregar_variaveis() {
 }
 
 # Funções de atualização
+atualiza_token_git() {
+  printf "${WHITE} >> Atualizando token do Git para a empresa ${empresa}...\n"
+  {
+    git_config_file="/home/deploy/${empresa}/.git/config"
+    
+    if [ -f "$git_config_file" ]; then
+      # Fazer backup do arquivo original
+      cp "$git_config_file" "${git_config_file}.backup"
+      
+      # Atualizar o token na URL do GitHub
+      sed -i "s|https://ghp_[^@]*@github.com|https://${GIT_TOKEN}@github.com|g" "$git_config_file"
+      
+      printf "${GREEN} >> Token do Git atualizado com sucesso para a empresa ${empresa}\n"
+    else
+      printf "${YELLOW} >> Arquivo de configuração do Git não encontrado para a empresa ${empresa}\n"
+    fi
+    
+    sleep 2
+  } || trata_erro "atualiza_token_git"
+}
+
 backup_app_atualizar() {
 
   dummy_carregar_variaveis
@@ -115,6 +139,9 @@ EOF
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
+
+  # Atualizar token do Git antes de fazer o pull
+  atualiza_token_git
 
   source /home/deploy/${empresa}/frontend/.env
   frontend_port=${SERVER_PORT:-3000}
