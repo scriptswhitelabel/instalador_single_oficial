@@ -44,7 +44,7 @@ dummy_carregar_variaveis() {
   fi
 }
 
-# Funções de atualização
+# Função para atualizar token do Git
 atualiza_token_git() {
   printf "${WHITE} >> Atualizando token do Git para a empresa ${empresa}...\n"
   {
@@ -66,6 +66,7 @@ atualiza_token_git() {
   } || trata_erro "atualiza_token_git"
 }
 
+# Funções de atualização
 backup_app_atualizar() {
 
   dummy_carregar_variaveis
