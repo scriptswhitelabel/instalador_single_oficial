@@ -1143,7 +1143,7 @@ EOF
   npm install puppeteer-core --force
   # npm install --save-dev @types/glob --legacy-peer-deps
   npm i glob
-  npm install jimp@^1.6.0
+  # npm install jimp@^1.6.0
   npm run build
 EOF
 
