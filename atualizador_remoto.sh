@@ -20,6 +20,9 @@ jwt_refresh_secret=$(openssl rand -base64 32)
 # Token do Git - Variável Fixa
 GIT_TOKEN="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"
 
+# Capturar sinais de interrupção
+trap 'printf "\n${YELLOW}Script interrompido pelo usuário.${WHITE}\n"; exit 1' INT TERM
+
 if [ "$EUID" -ne 0 ]; then
   echo
   printf "${WHITE} >> Este script precisa ser executado como root ${RED}ou com privilégios de superusuário${WHITE}.\n"
@@ -32,6 +35,14 @@ fi
 trata_erro() {
   printf "${RED}Erro encontrado na etapa $1. Encerrando o script.${WHITE}\n"
   exit 1
+}
+
+# Função para verificar se o processo foi interrompido
+verifica_interrupcao() {
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW}Processo interrompido. Tentando continuar...${WHITE}\n"
+    sleep 2
+  fi
 }
 
 # Carregar variáveis
@@ -143,11 +154,12 @@ EOF
 
   # Atualizar token do Git antes de fazer o pull
   atualiza_token_git
+  verifica_interrupcao
 
   source /home/deploy/${empresa}/frontend/.env
   frontend_port=${SERVER_PORT:-3000}
   sudo su - deploy <<EOF
-printf "${WHITE} >> Atualizando Backend...\n"
+echo " >> Atualizando Backend..."
 echo
 cd /home/deploy/${empresa}
 git reset --hard
@@ -163,12 +175,12 @@ npm i glob
 # npm install jimp@^1.6.0
 npm run build
 sleep 2
-printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
+echo " >> Atualizando Banco da empresa ${empresa}..."
 echo
 sleep 2
 npx sequelize db:migrate
 sleep 2
-printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
+echo " >> Atualizando Frontend da ${empresa}..."
 echo
 sleep 2
 cd /home/deploy/${empresa}/frontend
@@ -188,7 +200,7 @@ EOF
     elif systemctl is-active --quiet traefik; then
       sudo systemctl restart traefik.service
     else
-      printf "${GREEN}Nenhum serviço de proxy (Nginx ou Traefik) está em execução.${WHITE}"
+      echo "Nenhum serviço de proxy (Nginx ou Traefik) está em execução."
     fi
 EOF
 
