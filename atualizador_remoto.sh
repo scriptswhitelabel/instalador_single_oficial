@@ -17,12 +17,6 @@ ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
 
-# Token do Git - Variável Fixa
-GIT_TOKEN="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"
-
-# Capturar sinais de interrupção
-trap 'printf "\n${YELLOW}Script interrompido pelo usuário.${WHITE}\n"; exit 1' INT TERM
-
 if [ "$EUID" -ne 0 ]; then
   echo
   printf "${WHITE} >> Este script precisa ser executado como root ${RED}ou com privilégios de superusuário${WHITE}.\n"
@@ -37,14 +31,6 @@ trata_erro() {
   exit 1
 }
 
-# Função para verificar se o processo foi interrompido
-verifica_interrupcao() {
-  if [ $? -ne 0 ]; then
-    printf "${YELLOW}Processo interrompido. Tentando continuar...${WHITE}\n"
-    sleep 2
-  fi
-}
-
 # Carregar variáveis
 dummy_carregar_variaveis() {
   if [ -f $ARQUIVO_VARIAVEIS ]; then
@@ -53,28 +39,6 @@ dummy_carregar_variaveis() {
     empresa="multiflow"
     nome_titulo="MultiFlow"
   fi
-}
-
-# Função para atualizar token do Git
-atualiza_token_git() {
-  printf "${WHITE} >> Atualizando token do Git para a empresa ${empresa}...\n"
-  {
-    git_config_file="/home/deploy/${empresa}/.git/config"
-    
-    if [ -f "$git_config_file" ]; then
-      # Fazer backup do arquivo original
-      cp "$git_config_file" "${git_config_file}.backup"
-      
-      # Atualizar o token na URL do GitHub
-      sed -i "s|https://ghp_[^@]*@github.com|https://${GIT_TOKEN}@github.com|g" "$git_config_file"
-      
-      printf "${GREEN} >> Token do Git atualizado com sucesso para a empresa ${empresa}\n"
-    else
-      printf "${YELLOW} >> Arquivo de configuração do Git não encontrado para a empresa ${empresa}\n"
-    fi
-    
-    sleep 2
-  } || trata_erro "atualiza_token_git"
 }
 
 # Funções de atualização
@@ -152,88 +116,53 @@ EOF
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
 
-  # Atualizar token do Git antes de fazer o pull
-  atualiza_token_git
-  verifica_interrupcao
-
   source /home/deploy/${empresa}/frontend/.env
   frontend_port=${SERVER_PORT:-3000}
-  
-  # Verificar se o diretório existe
-  if [ ! -d "/home/deploy/${empresa}" ]; then
-    printf "${RED} >> Diretório da empresa ${empresa} não encontrado!${WHITE}\n"
-    trata_erro "verificacao_diretorio"
-  fi
-  
-  printf "${WHITE} >> Atualizando Backend...\n"
-  echo
-  
-  # Mudar para o diretório da empresa
-  cd /home/deploy/${empresa}
-  
-  # Executar comandos Git como usuário deploy
-  sudo -u deploy git reset --hard
-  verifica_interrupcao
-  
-  sudo -u deploy git pull
-  verifica_interrupcao
-  
-  # Atualizar Backend
-  cd /home/deploy/${empresa}/backend
-  sudo -u deploy npm prune --force > /dev/null 2>&1
-  sudo -u deploy bash -c 'export PUPPETEER_SKIP_DOWNLOAD=true'
-  sudo -u deploy rm -rf node_modules
-  sudo -u deploy rm -f package-lock.json
-  sudo -u deploy npm install --force
-  verifica_interrupcao
-  
-  sudo -u deploy npm install puppeteer-core --force
-  verifica_interrupcao
-  
-  sudo -u deploy npm i glob
-  verifica_interrupcao
-  
-  # sudo -u deploy npm install jimp@^1.6.0
-  sudo -u deploy npm run build
-  verifica_interrupcao
-  
-  sleep 2
-  
-  printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
-  echo
-  sleep 2
-  
-  sudo -u deploy npx sequelize db:migrate
-  
-  sleep 2
-  
-  printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
-  echo
-  sleep 2
-  
-  cd /home/deploy/${empresa}/frontend
-  sudo -u deploy npm prune --force > /dev/null 2>&1
-  sudo -u deploy npm install --force
-  sudo -u deploy sed -i 's/3000/'"$frontend_port"'/g' server.js
-  sudo -u deploy bash -c 'NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build'
-  
-  sleep 2
-  
-  # Reiniciar PM2
-  sudo -u deploy pm2 flush
-  sudo -u deploy pm2 reset all
-  sudo -u deploy pm2 start all
+  sudo su - deploy <<EOF
+printf "${WHITE} >> Atualizando Backend...\n"
+echo
+cd /home/deploy/${empresa}
+git reset --hard
+git pull
+cd /home/deploy/${empresa}/backend
+npm prune --force > /dev/null 2>&1
+export PUPPETEER_SKIP_DOWNLOAD=true
+rm -r node_modules
+rm package-lock.json
+npm install --force
+npm install puppeteer-core --force
+npm i glob
+# npm install jimp@^1.6.0
+npm run build
+sleep 2
+printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
+echo
+sleep 2
+npx sequelize db:migrate
+sleep 2
+printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
+echo
+sleep 2
+cd /home/deploy/${empresa}/frontend
+npm prune --force > /dev/null 2>&1
+npm install --force
+sed -i 's/3000/'"$frontend_port"'/g' server.js
+NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
+sleep 2
+pm2 flush
+pm2 reset all
+pm2 start all
+EOF
 
-  # Reiniciar serviços de proxy
-  if systemctl is-active --quiet nginx; then
-    systemctl restart nginx
-    printf "${GREEN} >> Nginx reiniciado com sucesso${WHITE}\n"
-  elif systemctl is-active --quiet traefik; then
-    systemctl restart traefik.service
-    printf "${GREEN} >> Traefik reiniciado com sucesso${WHITE}\n"
-  else
-    printf "${YELLOW} >> Nenhum serviço de proxy (Nginx ou Traefik) está em execução.${WHITE}\n"
-  fi
+  sudo su - root <<EOF
+    if systemctl is-active --quiet nginx; then
+      sudo systemctl restart nginx
+    elif systemctl is-active --quiet traefik; then
+      sudo systemctl restart traefik.service
+    else
+      printf "${GREEN}Nenhum serviço de proxy (Nginx ou Traefik) está em execução.${WHITE}"
+    fi
+EOF
 
   echo
   printf "${WHITE} >> Atualização do ${nome_titulo} concluída...\n"
