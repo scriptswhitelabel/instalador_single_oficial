@@ -152,6 +152,8 @@ sleep 2
 pm2 flush
 pm2 reset all
 pm2 start all
+pm2 save
+pm2 startup
 EOF
 
   sudo su - root <<EOF
