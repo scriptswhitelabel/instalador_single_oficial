@@ -17,11 +17,6 @@ ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
 
-# --- Identidade Git p/ commits/merges automáticos ---
-GIT_USER_NAME="${GIT_USER_NAME:-Cliente Atualizador}"
-GIT_USER_EMAIL="${GIT_USER_EMAIL:-cliente@scriptswhitelabel.com.br}"
-# ----------------------------------------------------
-
 if [ "$EUID" -ne 0 ]; then
   echo
   printf "${WHITE} >> Este script precisa ser executado como root ${RED}ou com privilégios de superusuário${WHITE}.\n"
@@ -128,39 +123,9 @@ printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
 
-# ===== Atualização segura sem commits/merges =====
-BRANCH="${GIT_BRANCH:-MULTI100-OFICIAL-u21}"
-# Coloque sua URL com PAT aqui OU deixe vazio para manter a atual
-# Ex.: https://<PAT>@github.com/scriptswhitelabel/multiflow
-REMOTE_URL_DEFAULT=""
-REMOTE_URL="${GIT_REMOTE_URL:-$REMOTE_URL_DEFAULT}"
-
-# Se quiser forçar a URL do origin a cada update (igual ao gitconfig que funciona):
-if [ -n "$REMOTE_URL" ]; then
-  git remote set-url origin "$REMOTE_URL"
-fi
-
-# Garante configurações equivalentes ao seu gitconfig
-git config pull.rebase false
-git config branch."$BRANCH".remote origin
-git config branch."$BRANCH".merge "refs/heads/$BRANCH"
-
-# Busca últimas refs e limpa refs antigas
-git fetch --tags --prune origin
-
-# Garante que estamos na branch desejada
-if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
-  git checkout "$BRANCH"
-else
-  # cria a branch local rastreando a remota
-  git checkout -B "$BRANCH" "origin/$BRANCH"
-fi
-
-# Evita qualquer merge/commit: força estado igual ao remoto
-git reset --hard "origin/$BRANCH"
-# Remove arquivos/pastas não rastreados (ex.: build antigos)
-git clean -fd
-# ================================================
+git fetch origin
+git checkout MULTI100-OFICIAL-u21
+git reset --hard origin/MULTI100-OFICIAL-u21
 
 cd /home/deploy/${empresa}/backend
 npm prune --force > /dev/null 2>&1
