@@ -17,6 +17,11 @@ ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
 
+# --- Identidade Git p/ commits/merges automáticos ---
+GIT_USER_NAME="${GIT_USER_NAME:-Cliente Atualizador}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-cliente@scriptswhitelabel.com.br}"
+# ----------------------------------------------------
+
 if [ "$EUID" -ne 0 ]; then
   echo
   printf "${WHITE} >> Este script precisa ser executado como root ${RED}ou com privilégios de superusuário${WHITE}.\n"
@@ -122,6 +127,29 @@ EOF
 printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
+
+# === Guardião de Identidade Git (repo + submódulos) ===
+# Garante user.name e user.email no repositório atual
+if [ -z "\$(git config user.name || true)" ]; then
+  git config user.name "${GIT_USER_NAME}"
+  echo "[git-id] user.name definido -> ${GIT_USER_NAME}"
+fi
+if [ -z "\$(git config user.email || true)" ]; then
+  git config user.email "${GIT_USER_EMAIL}"
+  echo "[git-id] user.email definido -> ${GIT_USER_EMAIL}"
+fi
+
+# Garante nos submódulos (se houver)
+if git submodule status --recursive >/dev/null 2>&1; then
+  git submodule foreach --recursive '
+    n=\$(git config user.name || true)
+    e=\$(git config user.email || true)
+    if [ -z "\$n" ]; then git config user.name "'"${GIT_USER_NAME}"'"; echo "[git-id] submódulo: user.name set"; fi
+    if [ -z "\$e" ]; then git config user.email "'"${GIT_USER_EMAIL}"'"; echo "[git-id] submódulo: user.email set"; fi
+  '
+fi
+# ======================================================
+
 git reset --hard
 git pull
 cd /home/deploy/${empresa}/backend
