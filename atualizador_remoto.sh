@@ -123,9 +123,12 @@ printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
 
-git fetch origin
-git checkout MULTI100-OFICIAL-u21
-git reset --hard origin/MULTI100-OFICIAL-u21
+# git fetch origin
+# git checkout MULTI100-OFICIAL-u21
+# git reset --hard origin/MULTI100-OFICIAL-u21
+
+git reset --hard
+git pull
 
 cd /home/deploy/${empresa}/backend
 npm prune --force > /dev/null 2>&1
