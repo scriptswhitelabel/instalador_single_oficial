@@ -1550,11 +1550,11 @@ EOF
 printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
-# git reset --hard
-# git pull
-git fetch origin
-git checkout MULTI100-OFICIAL-u21
-git reset --hard origin/MULTI100-OFICIAL-u21
+git reset --hard
+git pull
+# git fetch origin
+# git checkout MULTI100-OFICIAL-u21
+# git reset --hard origin/MULTI100-OFICIAL-u21
 cd /home/deploy/${empresa}/backend
 npm prune --force > /dev/null 2>&1
 export PUPPETEER_SKIP_DOWNLOAD=true
