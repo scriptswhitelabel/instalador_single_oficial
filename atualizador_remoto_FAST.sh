@@ -48,11 +48,11 @@ backup_app_atualizar() {
   source /home/deploy/${empresa}/backend/.env
   {
     printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
-    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
-    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
-    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
+    # db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    # [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
+    # backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
+    # PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
+    # printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
     sleep 2
   } || trata_erro "backup_app_atualizar"
 
@@ -106,7 +106,7 @@ baixa_codigo_atualizar() {
   printf "${WHITE} >> Parando Instancias... \n"
   sleep 2
   sudo su - deploy <<EOF
-  pm2 stop all
+  # pm2 stop all
 EOF
 
   sleep 2
@@ -131,13 +131,13 @@ git reset --hard
 git pull
 
 cd /home/deploy/${empresa}/backend
-npm prune --force > /dev/null 2>&1
-export PUPPETEER_SKIP_DOWNLOAD=true
-rm -r node_modules
-rm package-lock.json
-npm install --force
-npm install puppeteer-core --force
-npm i glob
+# npm prune --force > /dev/null 2>&1
+# export PUPPETEER_SKIP_DOWNLOAD=true
+# rm -r node_modules
+# rm package-lock.json
+# npm install --force
+# npm install puppeteer-core --force
+# npm i glob
 # npm install jimp@^1.6.0
 npm run build
 sleep 2
@@ -150,8 +150,8 @@ printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
 echo
 sleep 2
 cd /home/deploy/${empresa}/frontend
-npm prune --force > /dev/null 2>&1
-npm install --force
+# npm prune --force > /dev/null 2>&1
+# npm install --force
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
