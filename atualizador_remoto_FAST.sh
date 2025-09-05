@@ -41,84 +41,6 @@ dummy_carregar_variaveis() {
   fi
 }
 
-# Função para verificar e instalar Node.js 20.19.4
-verificar_e_instalar_nodejs() {
-  printf "${WHITE} >> Verificando versão do Node.js instalada...\n"
-  
-  # Verificar se o Node.js está instalado e qual versão
-  if command -v node >/dev/null 2>&1; then
-    NODE_VERSION=$(node -v | sed 's/v//')
-    printf "${BLUE} >> Versão atual do Node.js: ${NODE_VERSION}\n"
-    
-    # Verificar se a versão é diferente de 20.19.4
-    if [ "$NODE_VERSION" != "20.19.4" ]; then
-      printf "${YELLOW} >> Versão do Node.js diferente de 20.19.4. Iniciando atualização...\n"
-      
-      {
-        echo "=== Removendo Node.js antigo (apt) ==="
-        sudo apt remove -y nodejs npm || true
-        sudo apt purge -y nodejs || true
-        sudo apt autoremove -y || true
-
-        echo "=== Limpando links antigos ==="
-        sudo rm -f /usr/bin/node || true
-        sudo rm -f /usr/bin/npm || true
-
-        echo "=== Instalando Node.js temporário para ter npm ==="
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt install -y nodejs
-
-        echo "=== Instalando gerenciador 'n' ==="
-        sudo npm install -g n
-
-        echo "=== Instalando Node.js 20.19.4 ==="
-        sudo n 20.19.4
-
-        echo "=== Ajustando links globais para a versão correta ==="
-        sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
-        sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
-
-        echo "=== Versões instaladas ==="
-        node -v
-        npm -v
-
-        printf "${GREEN}✅ Instalação finalizada! Node.js 20.19.4 está ativo.\n"
-        
-      } || trata_erro "verificar_e_instalar_nodejs"
-      
-    else
-      printf "${GREEN} >> Node.js já está na versão correta (20.19.4). Prosseguindo...\n"
-    fi
-  else
-    printf "${YELLOW} >> Node.js não encontrado. Iniciando instalação...\n"
-    
-    {
-      echo "=== Instalando Node.js temporário para ter npm ==="
-      curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-      sudo apt install -y nodejs
-
-      echo "=== Instalando gerenciador 'n' ==="
-      sudo npm install -g n
-
-      echo "=== Instalando Node.js 20.19.4 ==="
-      sudo n 20.19.4
-
-      echo "=== Ajustando links globais para a versão correta ==="
-      sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
-      sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
-
-      echo "=== Versões instaladas ==="
-      node -v
-      npm -v
-
-      printf "${GREEN}✅ Instalação finalizada! Node.js 20.19.4 está ativo.\n"
-      
-    } || trata_erro "verificar_e_instalar_nodejs"
-  fi
-  
-  sleep 2
-}
-
 # Funções de atualização
 backup_app_atualizar() {
 
@@ -201,21 +123,21 @@ printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
 
-git fetch origin
-git checkout MULTI100-OFICIAL-u21
-git reset --hard origin/MULTI100-OFICIAL-u21
+# git fetch origin
+# git checkout MULTI100-OFICIAL-u21
+# git reset --hard origin/MULTI100-OFICIAL-u21
 
-# git reset --hard
-# git pull
+git reset --hard
+git pull
 
 cd /home/deploy/${empresa}/backend
-npm prune --force > /dev/null 2>&1
-export PUPPETEER_SKIP_DOWNLOAD=true
-rm -r node_modules
-rm package-lock.json
-npm install --force
-npm install puppeteer-core --force
-npm i glob
+# npm prune --force > /dev/null 2>&1
+# export PUPPETEER_SKIP_DOWNLOAD=true
+# rm -r node_modules
+# rm package-lock.json
+# npm install --force
+# npm install puppeteer-core --force
+# npm i glob
 # npm install jimp@^1.6.0
 npm run build
 sleep 2
@@ -228,16 +150,14 @@ printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
 echo
 sleep 2
 cd /home/deploy/${empresa}/frontend
-npm prune --force > /dev/null 2>&1
-rm -r node_modules
-rm package-lock.json
-npm install --force
+# npm prune --force > /dev/null 2>&1
+# npm install --force
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
 pm2 flush
 pm2 reset all
-pm2 restart all
+pm2 start all
 pm2 save
 pm2 startup
 EOF
@@ -284,6 +204,5 @@ done
 }
 
 # Execução automática do fluxo de atualização
-verificar_e_instalar_nodejs
 backup_app_atualizar
 baixa_codigo_atualizar

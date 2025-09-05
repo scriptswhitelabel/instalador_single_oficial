@@ -727,18 +727,38 @@ EOF
 # Instala NodeJS
 instala_node_base() {
   banner
-  printf "${WHITE} >> Instalando nodejs...\n"
+  printf "${WHITE} >> Instalando Node.js 20.19.4...\n"
   echo
   {
     sudo su - root <<EOF
-  curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add -
-  sudo sh -c "echo deb https://deb.nodesource.com/node_20.x focal main \
-  > /etc/apt/sources.list.d/nodesource.list"
-  sudo apt-get update && apt-get install nodejs -y
+  cd /usr/local/src
+  curl -fsSL https://nodejs.org/dist/v20.19.4/node-v20.19.4-linux-x64.tar.xz -o node-v20.19.4-linux-x64.tar.xz
+  tar -xJf node-v20.19.4-linux-x64.tar.xz
+  rm -f node-v20.19.4-linux-x64.tar.xz
+  mv node-v20.19.4-linux-x64 /usr/local/node-20.19.4
+  ln -sf /usr/local/node-20.19.4/bin/node /usr/bin/node
+  ln -sf /usr/local/node-20.19.4/bin/npm /usr/bin/npm
+  ln -sf /usr/local/node-20.19.4/bin/npx /usr/bin/npx
 EOF
     sleep 2
   } || trata_erro "instala_node_base"
 }
+
+# Instala NodeJS
+# instala_node_base() {
+#   banner
+#  printf "${WHITE} >> Instalando nodejs...\n"
+#  echo
+#   {
+#     sudo su - root <<EOF
+#   curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add -
+#   sudo sh -c "echo deb https://deb.nodesource.com/node_20.x focal main \
+#   > /etc/apt/sources.list.d/nodesource.list"
+#   sudo apt-get update && apt-get install nodejs -y
+# EOF
+#     sleep 2
+#   } || trata_erro "instala_node_base"
+# }
 
 # Instala Redis
 instala_redis_base() {
