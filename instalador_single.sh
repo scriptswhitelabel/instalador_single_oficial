@@ -724,41 +724,24 @@ EOF
   } || trata_erro "instala_postgres_base"
 }
 
-# Instala NodeJS
+Instala NodeJS
 instala_node_base() {
   banner
-  printf "${WHITE} >> Instalando Node.js 20.19.4...\n"
-  echo
+ printf "${WHITE} >> Instalando nodejs...\n"
+ echo
   {
     sudo su - root <<EOF
-  cd /usr/local/src
-  curl -fsSL https://nodejs.org/dist/v20.19.4/node-v20.19.4-linux-x64.tar.xz -o node-v20.19.4-linux-x64.tar.xz
-  tar -xJf node-v20.19.4-linux-x64.tar.xz
-  rm -f node-v20.19.4-linux-x64.tar.xz
-  mv node-v20.19.4-linux-x64 /usr/local/node-20.19.4
-  ln -sf /usr/local/node-20.19.4/bin/node /usr/bin/node
-  ln -sf /usr/local/node-20.19.4/bin/npm /usr/bin/npm
-  ln -sf /usr/local/node-20.19.4/bin/npx /usr/bin/npx
+  curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add -
+  sudo sh -c "echo deb https://deb.nodesource.com/node_20.x focal main \ > /etc/apt/sources.list.d/nodesource.list"
+  sudo apt-get update && apt-get install nodejs -y
+  sudo npm install -g n
+  sudo n 20.19.4
+  sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
+  sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
 EOF
     sleep 2
   } || trata_erro "instala_node_base"
 }
-
-# Instala NodeJS
-# instala_node_base() {
-#   banner
-#  printf "${WHITE} >> Instalando nodejs...\n"
-#  echo
-#   {
-#     sudo su - root <<EOF
-#   curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add -
-#   sudo sh -c "echo deb https://deb.nodesource.com/node_20.x focal main \
-#   > /etc/apt/sources.list.d/nodesource.list"
-#   sudo apt-get update && apt-get install nodejs -y
-# EOF
-#     sleep 2
-#   } || trata_erro "instala_node_base"
-# }
 
 # Instala Redis
 instala_redis_base() {
