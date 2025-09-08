@@ -126,11 +126,11 @@ backup_app_atualizar() {
   source /home/deploy/${empresa}/backend/.env
   {
     printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    # db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    # [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
-    # backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
-    # PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
-    # printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
+    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+     [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
+    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
+    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
+    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
     sleep 2
   } || trata_erro "backup_app_atualizar"
 
