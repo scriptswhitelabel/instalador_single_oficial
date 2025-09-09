@@ -213,6 +213,7 @@ npm prune --force > /dev/null 2>&1
 export PUPPETEER_SKIP_DOWNLOAD=true
 rm -r node_modules
 rm package-lock.json
+rm -r dist
 npm install --force
 npm install puppeteer-core --force
 npm i glob
