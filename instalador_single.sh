@@ -658,52 +658,45 @@ instala_ffmpeg_base() {
 
     {
       sudo apt install ffmpeg -y
-
+      # Dynamic fetch of latest FFmpeg build from BtbN/FFmpeg-Builds
+      download_ok=false
+      asset_url=""
       if [ "${ARCH}" = "x86_64" ]; then
-        if [ "${UBUNTU_VERSION}" = "20.04" ] || [ "${UBUNTU_VERSION}" = "22.04" ]; then
-          FFMPEG_FILE="ffmpeg-n6.1-latest-linux64-gpl-6.1.tar.xz"
-          wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_FILE}
-          if [ $? -ne 0 ]; then
-            printf "${RED} >> Erro ao baixar o arquivo ${FFMPEG_FILE}. Pressione Enter para continuar...${WHITE} \n"
-            read
-          fi
-          mkdir -p ${FFMPEG_DIR}
-          tar -xvf ${FFMPEG_FILE} -C ${FFMPEG_DIR} >/dev/null 2>&1
-
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linux64-gpl-6.1/bin/ffmpeg /usr/bin/ >/dev/null 2>&1
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linux64-gpl-6.1/bin/ffprobe /usr/bin/ >/dev/null 2>&1
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linux64-gpl-6.1/bin/ffplay /usr/bin/ >/dev/null 2>&1
-
-          rm -rf ${FFMPEG_DIR} >/dev/null 2>&1
-          rm ${FFMPEG_FILE} >/dev/null 2>&1
-        fi
+        asset_url=$(curl -sL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep -E 'linux64-gpl.*\.tar\.xz$' | head -n1)
       elif [ "${ARCH}" = "aarch64" ]; then
-        if [ "${UBUNTU_VERSION}" = "20.04" ] || [ "${UBUNTU_VERSION}" = "22.04" ]; then
-          FFMPEG_FILE="ffmpeg-n6.1-latest-linuxarm64-gpl-6.1.tar.xz"
-          wget -q https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_FILE}
-          if [ $? -ne 0 ]; then
-            printf "${RED} >> Erro ao baixar o arquivo ${FFMPEG_FILE}. Pressione Enter para continuar...${WHITE} \n"
-            read
-          fi
+        asset_url=$(curl -sL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep -E 'linuxarm64-gpl.*\.tar\.xz$' | head -n1)
+      else
+        echo "Arquitetura não suportada: ${ARCH}"
+      fi
+
+      if [ -n "${asset_url}" ]; then
+        FFMPEG_FILE="${asset_url##*/}"
+        wget -q "${asset_url}" -O "${FFMPEG_FILE}"
+        if [ $? -eq 0 ]; then
           mkdir -p ${FFMPEG_DIR}
           tar -xvf ${FFMPEG_FILE} -C ${FFMPEG_DIR} >/dev/null 2>&1
-
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linuxarm64-gpl-6.1/bin/ffmpeg /usr/bin/ >/dev/null 2>&1
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linuxarm64-gpl-6.1/bin/ffprobe /usr/bin/ >/dev/null 2>&1
-          sudo cp ${FFMPEG_DIR}/ffmpeg-n6.1-latest-linuxarm64-gpl-6.1/bin/ffplay /usr/bin/ >/dev/null 2>&1
-
-          rm -rf ${FFMPEG_DIR} >/dev/null 2>&1
-          rm ${FFMPEG_FILE} >/dev/null 2>&1
+          extracted_dir=$(tar -tf ${FFMPEG_FILE} | head -1 | cut -d/ -f1)
+          if [ -n "${extracted_dir}" ] && [ -d "${FFMPEG_DIR}/${extracted_dir}/bin" ]; then
+            sudo cp ${FFMPEG_DIR}/${extracted_dir}/bin/ffmpeg /usr/bin/ >/dev/null 2>&1
+            sudo cp ${FFMPEG_DIR}/${extracted_dir}/bin/ffprobe /usr/bin/ >/dev/null 2>&1
+            sudo cp ${FFMPEG_DIR}/${extracted_dir}/bin/ffplay /usr/bin/ >/dev/null 2>&1
+            rm -rf ${FFMPEG_DIR} >/dev/null 2>&1
+            rm -f ${FFMPEG_FILE} >/dev/null 2>&1
+            download_ok=true
+          fi
         fi
-      else
-        echo "Arquitetura não suportada."
-        exit 1
+      fi
+
+      if [ "${download_ok}" != true ]; then
+        printf "${YELLOW} >> Não foi possível baixar o FFmpeg dos builds oficiais. Usando pacote da distribuição...${WHITE}\n"
       fi
 
       export PATH=/usr/bin:${PATH}
       echo 'export PATH=/usr/bin:${PATH}' >>~/.bashrc
       source ~/.bashrc >/dev/null 2>&1
-      touch "${FFMPEG}"
+      if command -v ffmpeg >/dev/null 2>&1; then
+        touch "${FFMPEG}"
+      fi
     } || trata_erro "instala_ffmpeg_base"
   fi
 }
