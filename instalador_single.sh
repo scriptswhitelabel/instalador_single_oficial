@@ -152,6 +152,7 @@ menu() {
     printf "   [${BLUE}2${WHITE}] Atualizar ${nome_titulo}\n"
     printf "   [${BLUE}3${WHITE}] Instalar Transcrição de Audio Nativa\n"
     printf "   [${BLUE}4${WHITE}] Instalar API Oficial\n"
+    printf "   [${BLUE}5${WHITE}] Atualizar API Oficial\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
     read -p "> " option
@@ -167,6 +168,9 @@ menu() {
       ;;
     4)
       instalar_api_oficial
+      ;;
+    5)
+      atualizar_api_oficial
       ;;
     0)
       sair
@@ -1644,6 +1648,23 @@ instalar_api_oficial() {
     sleep 2
   fi
   printf "${GREEN} >> Processo de instalação da API Oficial finalizado. Voltando ao menu...${WHITE}\n"
+  sleep 2
+}
+
+# Adicionar função para atualizar API Oficial
+atualizar_api_oficial() {
+  banner
+  printf "${WHITE} >> Atualizando API Oficial...\n"
+  echo
+  local script_path="$(pwd)/atualizar_apioficial.sh"
+  if [ -f "$script_path" ]; then
+    chmod 775 "$script_path"
+    bash "$script_path"
+  else
+    printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
+    sleep 2
+  fi
+  printf "${GREEN} >> Processo de atualização da API Oficial finalizado. Voltando ao menu...${WHITE}\n"
   sleep 2
 }
 
