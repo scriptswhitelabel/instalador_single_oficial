@@ -66,8 +66,10 @@ verificar_instalacao_apioficial() {
     exit 1
   fi
   
-  # Verificar se o processo PM2 está rodando
-  if ! pm2 list | grep -q "api_oficial"; then
+  # Verificar se o processo PM2 está rodando (como usuário deploy)
+  pm2_status=$(sudo su - deploy -c "pm2 list | grep -q 'api_oficial' && echo 'running' || echo 'not_running'")
+  
+  if [ "$pm2_status" = "not_running" ]; then
     printf "${RED} >> AVISO: API Oficial não está rodando no PM2!${WHITE}\n"
     printf "${YELLOW} >> Tentando iniciar a API Oficial...${WHITE}\n"
     echo
