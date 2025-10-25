@@ -128,7 +128,7 @@ reiniciar_apioficial() {
     pm2 stop api_oficial 2>/dev/null || true
     
     # Iniciar a API Oficial
-    pm2 start dist/main.js --name=api_oficial
+    pm2 restart api_oficial
     
     # Salvar configuração do PM2
     pm2 save
