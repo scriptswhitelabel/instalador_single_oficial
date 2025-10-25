@@ -88,10 +88,12 @@ atualizar_codigo_apioficial() {
   echo
   {
     sudo su - deploy <<EOF
-cd /home/deploy/${empresa}/api_oficial
+cd /home/deploy/${empresa}
 
 printf "${WHITE} >> Fazendo pull das atualizações...\n"
 git pull origin main
+
+cd /home/deploy/${empresa}/api_oficial
 
 printf "${WHITE} >> Instalando dependências atualizadas...\n"
 npm install
