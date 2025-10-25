@@ -91,7 +91,8 @@ atualizar_codigo_apioficial() {
 cd /home/deploy/${empresa}
 
 printf "${WHITE} >> Fazendo pull das atualizações...\n"
-git pull origin main
+git reset --hard
+git pull
 
 cd /home/deploy/${empresa}/api_oficial
 
