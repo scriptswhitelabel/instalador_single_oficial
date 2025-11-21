@@ -155,6 +155,30 @@ atualizar_git_config() {
     echo
     sleep 2
     
+    # Testar o token fazendo um git clone de teste
+    printf "${WHITE} >> Validando token com teste de git clone...\n"
+    echo
+    
+    TEST_DIR="${INSTALADOR_DIR}/test_clone_$(date +%s)"
+    REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro.git"
+    
+    # Tentar fazer clone de teste
+    if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
+      # Clone bem-sucedido, remover diretório de teste
+      rm -rf "${TEST_DIR}" >/dev/null 2>&1
+      printf "${GREEN}✅ Token validado com sucesso! Git clone funcionou corretamente.${WHITE}\n"
+      echo
+      sleep 2
+    else
+      # Clone falhou, token inválido
+      rm -rf "${TEST_DIR}" >/dev/null 2>&1
+      printf "${RED}❌ ERRO: Token de autorização inválido!${WHITE}\n"
+      printf "${RED}   O teste de git clone falhou. Verifique se o token está correto e tem as permissões necessárias.${WHITE}\n"
+      printf "${RED}   Atualização interrompida.${WHITE}\n"
+      echo
+      exit 1
+    fi
+    
   } || {
     printf "${RED}❌ ERRO: Falha ao atualizar configuração do Git na etapa atualizar_git_config.${WHITE}\n"
     trata_erro "atualizar_git_config"
