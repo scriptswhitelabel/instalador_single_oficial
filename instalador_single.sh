@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 3.0\n"
+  printf "                                INSTALADOR 4.0\n"
   printf "\n\n"
 }
 
@@ -153,6 +153,7 @@ menu() {
     printf "   [${BLUE}3${WHITE}] Instalar Transcrição de Audio Nativa\n"
     printf "   [${BLUE}4${WHITE}] Instalar API Oficial\n"
     printf "   [${BLUE}5${WHITE}] Atualizar API Oficial\n"
+    printf "   [${BLUE}6${WHITE}] Migrar para Multiflow-PRO\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
     read -p "> " option
@@ -171,6 +172,9 @@ menu() {
       ;;
     5)
       atualizar_api_oficial
+      ;;
+    6)
+      migrar_multiflow_pro
       ;;
     0)
       sair
@@ -1665,6 +1669,24 @@ atualizar_api_oficial() {
     sleep 2
   fi
   printf "${GREEN} >> Processo de atualização da API Oficial finalizado. Voltando ao menu...${WHITE}\n"
+  sleep 2
+}
+
+# Adicionar função para migrar para Multiflow-PRO
+migrar_multiflow_pro() {
+  banner
+  printf "${WHITE} >> Migrando para Multiflow-PRO...\n"
+  echo
+  local script_path="$(pwd)/atualizador_pro.sh"
+  if [ -f "$script_path" ]; then
+    chmod 775 "$script_path"
+    bash "$script_path"
+  else
+    printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
+    printf "${RED} >> Certifique-se de que o arquivo atualizador_pro.sh está no mesmo diretório do instalador.${WHITE}\n"
+    sleep 2
+  fi
+  printf "${GREEN} >> Processo de migração para Multiflow-PRO finalizado. Voltando ao menu...${WHITE}\n"
   sleep 2
 }
 
