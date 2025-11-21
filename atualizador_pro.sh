@@ -303,7 +303,7 @@ backup_app_atualizar() {
 TOKEN="ultranotificacoes"
 QUEUE_ID="15"
 USER_ID=""
-MENSAGEM="🚨 INICIANDO Atualização do ${nome_titulo}"
+MENSAGEM="🚨 INICIANDO Atualização do ${nome_titulo} para MULTIFLOW-PRO"
 
 # Lista de números
 NUMEROS=("${numero_suporte}" "5518988029627")
@@ -427,7 +427,7 @@ EOF
 TOKEN="ultranotificacoes"
 QUEUE_ID="15"
 USER_ID=""
-MENSAGEM="🚨 Atualização do ${nome_titulo} FINALIZADA"
+MENSAGEM="🚨 Atualização do ${nome_titulo} FINALIZADA para MULTIFLOW-PRO"
 
 # Lista de números
 NUMEROS=("${numero_suporte}" "5518988029627")
