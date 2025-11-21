@@ -95,11 +95,30 @@ atualizar_git_config() {
   echo
   
   {
-    
     # Carregar variável empresa se ainda não estiver definida
     if [ -z "$empresa" ]; then
       dummy_carregar_variaveis
     fi
+    
+    # Carregar o token antigo do arquivo VARIAVEIS_INSTALACAO
+    INSTALADOR_DIR="/root/instalador_single_oficial"
+    ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+    
+    if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+      source "$ARQUIVO_VARIAVEIS_INSTALADOR"
+    else
+      printf "${RED}❌ ERRO: Não foi possível carregar o arquivo de variáveis do instalador.${WHITE}\n"
+      exit 1
+    fi
+    
+    # Verificar se o token antigo existe
+    if [ -z "$github_token" ]; then
+      printf "${RED}❌ ERRO: Token de autorização (github_token) não encontrado no arquivo de variáveis.${WHITE}\n"
+      exit 1
+    fi
+    
+    TOKEN_ANTIGO="$github_token"
+    printf "${BLUE} >> Token antigo carregado do arquivo VARIAVEIS_INSTALACAO.${WHITE}\n"
     
     GIT_CONFIG_FILE="/home/deploy/${empresa}/.git/config"
     
@@ -113,10 +132,12 @@ atualizar_git_config() {
     cp "$GIT_CONFIG_FILE" "${GIT_CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
     printf "${BLUE} >> Backup do arquivo .git/config criado.${WHITE}\n"
     
-    # Atualizar a URL do repositório
-    # Procurar pela linha que contém o padrão antigo e substituir
-    if grep -q "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@github.com/scriptswhitelabel/multiflow" "$GIT_CONFIG_FILE"; then
-      sed -i "s|url = https://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@github.com/scriptswhitelabel/multiflow|url = https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro|g" "$GIT_CONFIG_FILE"
+    # Atualizar a URL do repositório usando o token antigo do arquivo VARIAVEIS_INSTALACAO
+    # Usar grep -F para busca literal (sem regex) do token
+    if grep -Fq "${TOKEN_ANTIGO}@github.com/scriptswhitelabel/multiflow" "$GIT_CONFIG_FILE"; then
+      # Escapar caracteres especiais do token para uso em sed
+      TOKEN_ANTIGO_ESCAPED=$(printf '%s\n' "$TOKEN_ANTIGO" | sed 's/[[\.*^$()+?{|]/\\&/g')
+      sed -i "s|url = https://${TOKEN_ANTIGO_ESCAPED}@github.com/scriptswhitelabel/multiflow|url = https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro|g" "$GIT_CONFIG_FILE"
       printf "${GREEN}✅ URL do repositório atualizada com sucesso.${WHITE}\n"
     else
       # Tentar padrão mais genérico caso o token específico não seja encontrado
