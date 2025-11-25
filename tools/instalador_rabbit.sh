@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DATA_FILE="${INSTALL_DATA_FILE:-${SCRIPT_DIR}/../VARIAVEIS_INSTALACAO}"
@@ -39,9 +39,81 @@ ensure_root() {
   fi
 }
 
-ensure_command() {
+check_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    error "Comando '$1' não encontrado. Instale-o antes de continuar."
+    return 1
+  fi
+  return 0
+}
+
+install_docker() {
+  if ! check_command "docker"; then
+    info "Docker não encontrado. Instalando Docker..."
+    local docker_version="5:28.5.2-1~ubuntu.22.04~jammy"
+    local codename
+    if command -v lsb_release >/dev/null 2>&1; then
+      codename=$(lsb_release -cs)
+    else
+      codename="jammy"
+    fi
+
+    apt-get update -qq
+    apt-get install -y -qq ca-certificates curl gnupg >/dev/null 2>&1
+
+    if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+    fi
+
+    if ! grep -q "download.docker.com" /etc/apt/sources.list.d/docker.list 2>/dev/null; then
+      info "Adicionando repositório oficial do Docker..."
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $codename stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+    fi
+
+    apt-get update -qq
+    apt-get install -y -qq \
+      docker-ce="$docker_version" \
+      docker-ce-cli="$docker_version" \
+      containerd.io \
+      docker-buildx-plugin \
+      docker-compose-plugin >/dev/null 2>&1
+
+    apt-mark hold docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
+    
+    # Iniciar e habilitar Docker
+    systemctl enable docker >/dev/null 2>&1
+    systemctl start docker >/dev/null 2>&1
+    
+    # Aguardar Docker estar pronto
+    sleep 3
+    
+    success "Docker instalado e iniciado com sucesso."
+  else
+    # Verificar se o serviço Docker está rodando
+    if ! systemctl is-active --quiet docker; then
+      info "Iniciando serviço Docker..."
+      systemctl start docker
+      sleep 2
+    fi
+  fi
+}
+
+ensure_docker() {
+  if ! check_command "docker"; then
+    install_docker
+  else
+    # Verificar se o serviço Docker está rodando
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+      info "Iniciando serviço Docker..."
+      systemctl start docker 2>/dev/null || true
+      sleep 2
+    fi
+  fi
+  
+  # Verificar se Docker está funcionando
+  if ! docker info >/dev/null 2>&1; then
+    error "Docker não está funcionando corretamente. Verifique a instalação."
   fi
 }
 
@@ -160,7 +232,7 @@ EOF
 
 main() {
   ensure_root
-  ensure_command docker
+  ensure_docker
   load_install_vars
   prompt_credentials
   prepare_host_path
