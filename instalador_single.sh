@@ -149,6 +149,7 @@ menu_ferramentas() {
     printf "${WHITE} Selecione abaixo a ferramenta desejada: \n"
     echo
     printf "   [${BLUE}1${WHITE}] Instalador RabbitMQ\n"
+    printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -165,6 +166,21 @@ menu_ferramentas() {
         read -r
       else
         printf "${RED} >> Erro: Arquivo ${RABBIT_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    2)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      PUSH_SCRIPT="${SCRIPT_DIR}/tools/instalar_push.sh"
+      if [ -f "$PUSH_SCRIPT" ]; then
+        printf "${GREEN} >> Executando Instalador Push Notifications...${WHITE}\n"
+        echo
+        bash "$PUSH_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${PUSH_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
       ;;
