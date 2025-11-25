@@ -144,6 +144,13 @@ if [ -f "$FRONTEND_ENV" ]; then
   
   printf "${GREEN}    REACT_APP_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}${WHITE}\n"
   echo
+  
+  printf "${WHITE} >> 🔨 Compilando o Frontend...${WHITE}\n"
+  echo
+  
+  sudo -u deploy bash -c "cd /home/deploy/${empresa}/frontend && NODE_OPTIONS='--max-old-space-size=4096 --openssl-legacy-provider' npm run build"
+  
+  sleep 5
 else
   printf "${YELLOW} >> Aviso: Arquivo .env do frontend não encontrado. Adicione manualmente:${WHITE}\n"
   printf "${YELLOW}    REACT_APP_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}${WHITE}\n"
