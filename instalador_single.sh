@@ -142,6 +142,43 @@ verificar_arquivos_existentes() {
   fi
 }
 
+# Menu de Ferramentas
+menu_ferramentas() {
+  while true; do
+    banner
+    printf "${WHITE} Selecione abaixo a ferramenta desejada: \n"
+    echo
+    printf "   [${BLUE}1${WHITE}] Instalador RabbitMQ\n"
+    printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
+    echo
+    read -p "> " option_tools
+    case "${option_tools}" in
+    1)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      RABBIT_SCRIPT="${SCRIPT_DIR}/tools/instalador_rabbit.sh"
+      if [ -f "$RABBIT_SCRIPT" ]; then
+        printf "${GREEN} >> Executando Instalador RabbitMQ...${WHITE}\n"
+        echo
+        bash "$RABBIT_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${RABBIT_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    0)
+      return
+      ;;
+    *)
+      printf "${RED}Opção inválida. Tente novamente.${WHITE}"
+      sleep 2
+      ;;
+    esac
+  done
+}
+
 # Menu principal
 menu() {
   while true; do
@@ -154,6 +191,7 @@ menu() {
     printf "   [${BLUE}4${WHITE}] Instalar API Oficial\n"
     printf "   [${BLUE}5${WHITE}] Atualizar API Oficial\n"
     printf "   [${BLUE}6${WHITE}] Migrar para Multiflow-PRO\n"
+    printf "   [${BLUE}10${WHITE}] Ferramentas\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
     read -p "> " option
@@ -175,6 +213,9 @@ menu() {
       ;;
     6)
       migrar_multiflow_pro
+      ;;
+    10)
+      menu_ferramentas
       ;;
     0)
       sair
@@ -1076,6 +1117,13 @@ REDIS_OPT_LIMITER_DURATION=3000
 # BULL_BOARD=true
 # BULL_USER=${email_deploy}
 # BULL_PASS=${senha_deploy}
+
+# --- RabbitMQ ---
+RABBITMQ_HOST=multiflow-rabbitmq
+RABBITMQ_PORT=5672
+RABBIT_USER=${empresa}
+RABBIT_PASS=${senha_deploy}
+RABBITMQ_URI=amqp://\${empresa}:\${senha_deploy}@multiflow-rabbitmq:5672/
 
 TIMEOUT_TO_IMPORT_MESSAGE=1000
 

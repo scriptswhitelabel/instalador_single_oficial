@@ -1,0 +1,41 @@
+# Environment & secret files
+.env
+.env.*
+*.env
+*.env.backup
+
+# Installer outputs & temp files
+logs/
+tmp/
+*.log
+*.tmp
+*.bak
+*.old
+*.orig
+
+# Docker / Compose state
+docker-compose.override.yml
+traefik_letsencrypt/
+letsencrypt/
+acme.json
+volumes/
+postgres_data/
+redis_data/
+rabbitmq_data/
+
+# Local tooling
+.vscode/
+.idea/
+*.code-workspace
+instalador-oplanov2/
+
+# Build artifacts (used when fazendo build local)
+node_modules/
+dist/
+build/
+coverage/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
