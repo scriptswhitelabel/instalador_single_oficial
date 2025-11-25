@@ -1175,6 +1175,7 @@ MAIL_PORT="465"
 USE_WHATSAPP_OFICIAL=true
 # URL_API_OFICIAL=https://SubDominioDaOficial.SEUDOMINIO.com.br
 TOKEN_API_OFICIAL="adminpro"
+OFFICIAL_CAMPAIGN_CONCURRENCY=10  # Processa até 10 campanhas ao mesmo tempo
 
 # API de Transcrição de Audio
 TRANSCRIBE_URL=http://localhost:4002
