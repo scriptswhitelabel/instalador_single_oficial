@@ -1119,11 +1119,11 @@ REDIS_OPT_LIMITER_DURATION=3000
 # BULL_PASS=${senha_deploy}
 
 # --- RabbitMQ ---
-RABBITMQ_HOST=multiflow-rabbitmq
+RABBITMQ_HOST=localhost
 RABBITMQ_PORT=5672
 RABBIT_USER=${empresa}
 RABBIT_PASS=${senha_deploy}
-RABBITMQ_URI=amqp://\${empresa}:\${senha_deploy}@multiflow-rabbitmq:5672/
+RABBITMQ_URI=amqp://\${empresa}:\${senha_deploy}@localhost:5672/
 
 TIMEOUT_TO_IMPORT_MESSAGE=1000
 

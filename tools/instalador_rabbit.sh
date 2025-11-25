@@ -212,6 +212,25 @@ run_rabbit() {
   success "RabbitMQ em execução."
 }
 
+update_backend_env() {
+  if [ -z "${empresa:-}" ]; then
+    return
+  fi
+  
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  if [ -f "$env_file" ]; then
+    info "Atualizando arquivo .env do backend para usar localhost..."
+    
+    # Atualizar RABBITMQ_HOST para localhost se estiver usando hostname do container
+    if grep -q "RABBITMQ_HOST=.*rabbitmq" "$env_file" 2>/dev/null; then
+      sed -i "s|RABBITMQ_HOST=.*|RABBITMQ_HOST=localhost|g" "$env_file"
+      sed -i "s|RABBITMQ_URI=amqp://.*@.*rabbitmq|RABBITMQ_URI=amqp://\${RABBIT_USER}:\${RABBIT_PASS}@localhost:5672/|g" "$env_file"
+      success "Arquivo .env do backend atualizado para usar localhost."
+      warn "Reinicie o backend (PM2) para aplicar as mudanças: pm2 restart ${empresa}-backend"
+    fi
+  fi
+}
+
 print_summary() {
   cat <<EOF
 
@@ -239,6 +258,7 @@ main() {
   create_bind_volume
   stop_existing_container
   run_rabbit
+  update_backend_env
   print_summary
 }
 
