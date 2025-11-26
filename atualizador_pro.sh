@@ -75,6 +75,43 @@ verificar_instalacao_original() {
   sleep 2
 }
 
+# Função para verificar se já está na versão PRO
+verificar_versao_pro() {
+  printf "${WHITE} >> Verificando se já está configurado para a versão PRO...\n"
+  echo
+  
+  # Carregar variáveis para obter o nome da empresa
+  dummy_carregar_variaveis
+  
+  GIT_CONFIG_FILE="/home/deploy/${empresa}/.git/config"
+  
+  # Verificar se o arquivo .git/config existe
+  if [ ! -f "$GIT_CONFIG_FILE" ]; then
+    printf "${YELLOW}⚠️  AVISO: O arquivo ${GIT_CONFIG_FILE} não foi encontrado. Continuando...${WHITE}\n"
+    echo
+    sleep 2
+    return 0
+  fi
+  
+  # Verificar se a URL já contém multiflow-pro
+  if grep -q "multiflow-pro" "$GIT_CONFIG_FILE"; then
+    printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${GREEN}✅ A versão PRO já está configurada!${WHITE}\n"
+    echo
+    printf "${WHITE}   O repositório já está apontando para ${BLUE}multiflow-pro${WHITE}.\n"
+    printf "${WHITE}   Não é necessário executar este atualizador.${WHITE}\n"
+    echo
+    printf "${YELLOW}   Para atualizar sua instalação, execute a ${WHITE}atualização normal${YELLOW}.${WHITE}\n"
+    printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    exit 0
+  fi
+  
+  printf "${BLUE} >> Versão PRO não detectada. Prosseguindo com a migração para PRO...${WHITE}\n"
+  echo
+  sleep 2
+}
+
 # Função para coletar token e atualizar .git/config
 atualizar_git_config() {
   printf "${WHITE} >> Coletando token de autorização e atualizando configuração do Git...\n"
@@ -475,6 +512,7 @@ done
 
 # Execução automática do fluxo de atualização
 verificar_instalacao_original
+verificar_versao_pro
 atualizar_git_config
 verificar_e_instalar_nodejs
 backup_app_atualizar
