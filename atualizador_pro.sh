@@ -99,9 +99,11 @@ verificar_versao_pro() {
     printf "${GREEN}✅ A versão PRO já está configurada!${WHITE}\n"
     echo
     printf "${WHITE}   O repositório já está apontando para ${BLUE}multiflow-pro${WHITE}.\n"
-    printf "${WHITE}   Não é necessário executar este atualizador.${WHITE}\n"
+    printf "${WHITE}   A migração para PRO já foi realizada anteriormente.${WHITE}\n"
     echo
-    printf "${YELLOW}   Para atualizar sua instalação, execute a ${WHITE}atualização normal${YELLOW}.${WHITE}\n"
+    printf "${YELLOW}   ⚠️  Não é necessário executar este atualizador novamente.${WHITE}\n"
+    echo
+    printf "${GREEN}   📌 Para atualizar sua instalação, execute a ${WHITE}atualização normal pelo instalador${GREEN}.${WHITE}\n"
     printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
     echo
     exit 0
@@ -137,8 +139,46 @@ atualizar_git_config() {
       dummy_carregar_variaveis
     fi
     
-    # Carregar o token antigo do arquivo VARIAVEIS_INSTALACAO
     INSTALADOR_DIR="/root/instalador_single_oficial"
+    
+    # VALIDAR O TOKEN ANTES DE FAZER QUALQUER ALTERAÇÃO
+    printf "${WHITE} >> Validando token com teste de git clone...\n"
+    echo
+    
+    TEST_DIR="${INSTALADOR_DIR}/test_clone_$(date +%s)"
+    REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro.git"
+    
+    # Tentar fazer clone de teste
+    if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
+      # Clone bem-sucedido, remover diretório de teste
+      rm -rf "${TEST_DIR}" >/dev/null 2>&1
+      printf "${GREEN}✅ Token validado com sucesso! Git clone funcionou corretamente.${WHITE}\n"
+      echo
+      sleep 2
+    else
+      # Clone falhou, token inválido
+      rm -rf "${TEST_DIR}" >/dev/null 2>&1
+      printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+      printf "${RED}❌ ERRO: Token de autorização inválido!${WHITE}\n"
+      echo
+      printf "${RED}   O teste de git clone falhou. O token informado não tem acesso ao repositório multiflow-pro.${WHITE}\n"
+      echo
+      printf "${YELLOW}   ⚠️  IMPORTANTE:${WHITE}\n"
+      printf "${YELLOW}   O MultiFlow PRO é um projeto fechado e requer autorização especial.${WHITE}\n"
+      printf "${YELLOW}   Para solicitar acesso ou analisar a disponibilidade de migração,${WHITE}\n"
+      printf "${YELLOW}   entre em contato com o administrador do projeto:${WHITE}\n"
+      echo
+      printf "${BLUE}   📱 WhatsApp:${WHITE}\n"
+      printf "${WHITE}   • https://wa.me/5518996755165${WHITE}\n"
+      printf "${WHITE}   • https://wa.me/558499418159${WHITE}\n"
+      echo
+      printf "${RED}   Atualização interrompida.${WHITE}\n"
+      printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+      echo
+      exit 1
+    fi
+    
+    # Carregar o token antigo do arquivo VARIAVEIS_INSTALACAO
     ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
     
     if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
@@ -191,30 +231,6 @@ atualizar_git_config() {
     
     echo
     sleep 2
-    
-    # Testar o token fazendo um git clone de teste
-    printf "${WHITE} >> Validando token com teste de git clone...\n"
-    echo
-    
-    TEST_DIR="${INSTALADOR_DIR}/test_clone_$(date +%s)"
-    REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro.git"
-    
-    # Tentar fazer clone de teste
-    if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
-      # Clone bem-sucedido, remover diretório de teste
-      rm -rf "${TEST_DIR}" >/dev/null 2>&1
-      printf "${GREEN}✅ Token validado com sucesso! Git clone funcionou corretamente.${WHITE}\n"
-      echo
-      sleep 2
-    else
-      # Clone falhou, token inválido
-      rm -rf "${TEST_DIR}" >/dev/null 2>&1
-      printf "${RED}❌ ERRO: Token de autorização inválido!${WHITE}\n"
-      printf "${RED}   O teste de git clone falhou. Verifique se o token está correto e tem as permissões necessárias.${WHITE}\n"
-      printf "${RED}   Atualização interrompida.${WHITE}\n"
-      echo
-      exit 1
-    fi
     
   } || {
     printf "${RED}❌ ERRO: Falha ao atualizar configuração do Git na etapa atualizar_git_config.${WHITE}\n"
