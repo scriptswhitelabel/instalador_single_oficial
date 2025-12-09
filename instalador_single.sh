@@ -902,9 +902,8 @@ instala_node_base() {
  echo
   {
     sudo su - root <<EOF
-  curl -s https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add -
-  sudo sh -c "echo deb https://deb.nodesource.com/node_20.x focal main \ > /etc/apt/sources.list.d/nodesource.list"
-  sudo apt-get update && apt-get install nodejs -y
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  apt install nodejs -y
   sudo npm install -g n
   sudo n 20.19.4
   sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
