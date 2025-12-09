@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.0\n"
+  printf "                                INSTALADOR 6.1\n"
   printf "\n\n"
 }
 
@@ -514,10 +514,23 @@ verificar_dns_base() {
   verificar_dns ${subdominio_frontend}
   if [ -n "${subdominios_incorretos}" ]; then
     echo
-    echo "Verifique os apontamentos de DNS dos seguintes subdomínios: ${subdominios_incorretos}"
-    sleep 2
-    menu
-    return 0
+    printf "${YELLOW} >> ATENÇÃO: Os seguintes subdomínios não estão apontando para o IP público atual (${ip_atual}):${WHITE}\n"
+    printf "${YELLOW} >> ${subdominios_incorretos}${WHITE}\n"
+    echo
+    printf "${WHITE} >> Deseja continuar a instalação mesmo assim? (S/N): ${WHITE}\n"
+    echo
+    read -p "> " continuar_dns
+    continuar_dns=$(echo "${continuar_dns}" | tr '[:lower:]' '[:upper:]')
+    echo
+    if [ "${continuar_dns}" != "S" ]; then
+      printf "${GREEN} >> Retornando ao menu principal...${WHITE}\n"
+      sleep 2
+      menu
+      return 0
+    else
+      printf "${YELLOW} >> Continuando a instalação mesmo com DNS não configurado corretamente...${WHITE}\n"
+      sleep 2
+    fi
   else
     echo "Todos os subdomínios estão apontando corretamente para o IP público da VPS."
     sleep 2
