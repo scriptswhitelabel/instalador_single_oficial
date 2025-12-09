@@ -1379,6 +1379,25 @@ instala_backend_base() {
   banner
   printf "${WHITE} >> Configurando variáveis de ambiente do ${BLUE}backend${WHITE}...\n"
   echo
+  
+  # Verifica se a variável empresa está definida
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    printf "${YELLOW} >> Carregando variáveis salvas...\n${WHITE}"
+    carregar_variaveis
+    if [ -z "${empresa}" ]; then
+      printf "${RED} >> ERRO: Não foi possível carregar a variável 'empresa'. Abortando.\n${WHITE}"
+      exit 1
+    fi
+  fi
+  
+  # Verifica se o diretório do código existe
+  if [ ! -d "/home/deploy/${empresa}" ]; then
+    printf "${RED} >> ERRO: Diretório /home/deploy/${empresa} não existe!\n${WHITE}"
+    printf "${YELLOW} >> O código precisa ser clonado primeiro. Verifique a etapa anterior.\n${WHITE}"
+    exit 1
+  fi
+  
   {
     sleep 2
     subdominio_backend=$(echo "${subdominio_backend/https:\/\//}")
@@ -1485,29 +1504,47 @@ EOF
     banner
     printf "${WHITE} >> Instalando dependências do ${BLUE}backend${WHITE}...\n"
     echo
-    sudo su - deploy <<'BACKENDINSTALL'
+    sudo su - deploy <<BACKENDINSTALL
   # Configura PATH para Node.js
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   elif [ -f /usr/bin/node ]; then
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   else
     # Tenta encontrar node no sistema
-    NODE_DIR=$(find /usr -type d -name "node" -o -type f -name "node" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-    if [ -n "$NODE_DIR" ]; then
-      export PATH=$NODE_DIR:/usr/bin:$PATH
+    NODE_DIR=\$(find /usr -type d -name "node" -o -type f -name "node" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+    if [ -n "\$NODE_DIR" ]; then
+      export PATH=\$NODE_DIR:/usr/bin:\$PATH
     fi
   fi
   
   # Verifica se node e npm estão disponíveis
   if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-    echo "ERRO: Node.js ou npm não encontrado. PATH atual: $PATH"
+    echo "ERRO: Node.js ou npm não encontrado. PATH atual: \$PATH"
     which node || echo "node não encontrado"
     which npm || echo "npm não encontrado"
     exit 1
   fi
   
-  cd /home/deploy/${empresa}/backend
+  # Verifica se o diretório existe antes de tentar acessar
+  BACKEND_DIR="/home/deploy/${empresa}/backend"
+  if [ ! -d "\$BACKEND_DIR" ]; then
+    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+    echo "Verificando diretórios disponíveis em /home/deploy/${empresa}/..."
+    ls -la /home/deploy/${empresa}/ 2>/dev/null || echo "Diretório /home/deploy/${empresa}/ não existe"
+    exit 1
+  fi
+  
+  cd "\$BACKEND_DIR"
+  
+  # Verifica se package.json existe
+  if [ ! -f "package.json" ]; then
+    echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+    echo "Conteúdo do diretório:"
+    ls -la
+    exit 1
+  fi
+  
   export PUPPETEER_SKIP_DOWNLOAD=true
   rm -rf node_modules 2>/dev/null || true
   rm -f package-lock.json 2>/dev/null || true
@@ -1519,26 +1556,44 @@ BACKENDINSTALL
 
     sleep 2
 
-    sudo su - deploy <<EOF
-  sed -i 's|npm3Binary = .*|npm3Binary = "/usr/bin/ffmpeg";|' ${empresa}/backend/node_modules/@ffmpeg-installer/ffmpeg/index.js
-  mkdir -p /home/deploy/${empresa}/backend/node_modules/@ffmpeg-installer/linux-x64/ && \
-  echo '{ "version": "1.1.0", "name": "@ffmpeg-installer/linux-x64" }' > ${empresa}/backend/node_modules/@ffmpeg-installer/linux-x64/package.json
-EOF
+    sudo su - deploy <<FFMPEGFIX
+  BACKEND_DIR="/home/deploy/${empresa}/backend"
+  FFMPEG_FILE="\${BACKEND_DIR}/node_modules/@ffmpeg-installer/ffmpeg/index.js"
+  
+  # Verifica se o arquivo existe antes de tentar modificá-lo
+  if [ -f "\$FFMPEG_FILE" ]; then
+    sed -i 's|npm3Binary = .*|npm3Binary = "/usr/bin/ffmpeg";|' "\$FFMPEG_FILE"
+  else
+    echo "Aviso: Arquivo ffmpeg-installer não encontrado. Pulando modificação."
+  fi
+  
+  # Cria o diretório e arquivo se necessário
+  mkdir -p "\${BACKEND_DIR}/node_modules/@ffmpeg-installer/linux-x64/" 2>/dev/null || true
+  if [ -d "\${BACKEND_DIR}/node_modules/@ffmpeg-installer/linux-x64/" ]; then
+    echo '{ "version": "1.1.0", "name": "@ffmpeg-installer/linux-x64" }' > "\${BACKEND_DIR}/node_modules/@ffmpeg-installer/linux-x64/package.json"
+  fi
+FFMPEGFIX
 
     sleep 2
 
     banner
     printf "${WHITE} >> Executando db:migrate...\n"
     echo
-    sudo su - deploy <<'MIGRATEINSTALL'
+    sudo su - deploy <<MIGRATEINSTALL
   # Configura PATH para Node.js
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  cd /home/deploy/${empresa}/backend
+  BACKEND_DIR="/home/deploy/${empresa}/backend"
+  if [ ! -d "\$BACKEND_DIR" ]; then
+    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$BACKEND_DIR"
   npx sequelize db:migrate
 MIGRATEINSTALL
 
@@ -1547,15 +1602,21 @@ MIGRATEINSTALL
     banner
     printf "${WHITE} >> Executando db:seed...\n"
     echo
-    sudo su - deploy <<'SEEDINSTALL'
+    sudo su - deploy <<SEEDINSTALL
   # Configura PATH para Node.js
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  cd /home/deploy/${empresa}/backend
+  BACKEND_DIR="/home/deploy/${empresa}/backend"
+  if [ ! -d "\$BACKEND_DIR" ]; then
+    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$BACKEND_DIR"
   npx sequelize db:seed:all
 SEEDINSTALL
 
@@ -1564,15 +1625,28 @@ SEEDINSTALL
     banner
     printf "${WHITE} >> Iniciando pm2 ${BLUE}backend${WHITE}...\n"
     echo
-    sudo su - deploy <<'PM2BACKEND'
+    sudo su - deploy <<PM2BACKEND
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  cd /home/deploy/${empresa}/backend
+  BACKEND_DIR="/home/deploy/${empresa}/backend"
+  if [ ! -d "\$BACKEND_DIR" ]; then
+    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$BACKEND_DIR"
+  
+  # Verifica se o arquivo dist/server.js existe
+  if [ ! -f "dist/server.js" ]; then
+    echo "ERRO: Arquivo dist/server.js não encontrado. O build pode ter falhado."
+    exit 1
+  fi
+  
   pm2 start dist/server.js --name ${empresa}-backend
 PM2BACKEND
 
@@ -1585,16 +1659,48 @@ instala_frontend_base() {
   banner
   printf "${WHITE} >> Instalando dependências do ${BLUE}frontend${WHITE}...\n"
   echo
-  {
-    sudo su - deploy <<'FRONTENDINSTALL'
-  # Configura PATH para Node.js
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
-  else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+  
+  # Verifica se a variável empresa está definida
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    printf "${YELLOW} >> Carregando variáveis salvas...\n${WHITE}"
+    carregar_variaveis
+    if [ -z "${empresa}" ]; then
+      printf "${RED} >> ERRO: Não foi possível carregar a variável 'empresa'. Abortando.\n${WHITE}"
+      exit 1
+    fi
   fi
   
-  cd /home/deploy/${empresa}/frontend
+  # Verifica se o diretório do código existe
+  if [ ! -d "/home/deploy/${empresa}" ]; then
+    printf "${RED} >> ERRO: Diretório /home/deploy/${empresa} não existe!\n${WHITE}"
+    printf "${YELLOW} >> O código precisa ser clonado primeiro. Verifique a etapa anterior.\n${WHITE}"
+    exit 1
+  fi
+  
+  {
+    sudo su - deploy <<FRONTENDINSTALL
+  # Configura PATH para Node.js
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  else
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
+  fi
+  
+  FRONTEND_DIR="/home/deploy/${empresa}/frontend"
+  if [ ! -d "\$FRONTEND_DIR" ]; then
+    echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$FRONTEND_DIR"
+  
+  # Verifica se package.json existe
+  if [ ! -f "package.json" ]; then
+    echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
+    exit 1
+  fi
+  
   npm install --force
   npx browserslist@latest --update-db
 FRONTENDINSTALL
@@ -1634,7 +1740,20 @@ EOF
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  cd /home/deploy/${empresa}/frontend
+  FRONTEND_DIR="/home/deploy/${empresa}/frontend"
+  if [ ! -d "\$FRONTEND_DIR" ]; then
+    echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$FRONTEND_DIR"
+  
+  # Verifica se server.js existe
+  if [ ! -f "server.js" ]; then
+    echo "ERRO: Arquivo server.js não encontrado em \$FRONTEND_DIR"
+    exit 1
+  fi
+  
   sed -i 's/3000/'"${frontend_port}"'/g' server.js
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 FRONTENDBUILD
@@ -1644,15 +1763,28 @@ FRONTENDBUILD
     banner
     printf "${WHITE} >> Iniciando pm2 ${BLUE}frontend${WHITE}...\n"
     echo
-    sudo su - deploy <<'PM2FRONTEND'
+    sudo su - deploy <<PM2FRONTEND
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  cd /home/deploy/${empresa}/frontend
+  FRONTEND_DIR="/home/deploy/${empresa}/frontend"
+  if [ ! -d "\$FRONTEND_DIR" ]; then
+    echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$FRONTEND_DIR"
+  
+  # Verifica se server.js existe
+  if [ ! -f "server.js" ]; then
+    echo "ERRO: Arquivo server.js não encontrado em \$FRONTEND_DIR"
+    exit 1
+  fi
+  
   pm2 start server.js --name ${empresa}-frontend
   pm2 save
 PM2FRONTEND
@@ -1990,13 +2122,35 @@ STOPPM2
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
+  APP_DIR="/home/deploy/${empresa}"
+  BACKEND_DIR="\${APP_DIR}/backend"
+  FRONTEND_DIR="\${APP_DIR}/frontend"
+  
+  # Verifica se os diretórios existem
+  if [ ! -d "\$APP_DIR" ]; then
+    echo "ERRO: Diretório da aplicação não existe: \$APP_DIR"
+    exit 1
+  fi
+  
   printf "${WHITE} >> Atualizando Backend...\n"
   echo
-  cd /home/deploy/${empresa}
+  cd "\$APP_DIR"
   git fetch origin
   git checkout MULTI100-OFICIAL-u21
   git reset --hard origin/MULTI100-OFICIAL-u21
-  cd /home/deploy/${empresa}/backend
+  
+  if [ ! -d "\$BACKEND_DIR" ]; then
+    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$BACKEND_DIR"
+  
+  if [ ! -f "package.json" ]; then
+    echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+    exit 1
+  fi
+  
   npm prune --force > /dev/null 2>&1
   export PUPPETEER_SKIP_DOWNLOAD=true
   rm -rf node_modules 2>/dev/null || true
@@ -2014,10 +2168,26 @@ STOPPM2
   printf "${WHITE} >> Atualizando Frontend...\n"
   echo
   sleep 2
-  cd /home/deploy/${empresa}/frontend
+  
+  if [ ! -d "\$FRONTEND_DIR" ]; then
+    echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+    exit 1
+  fi
+  
+  cd "\$FRONTEND_DIR"
+  
+  if [ ! -f "package.json" ]; then
+    echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
+    exit 1
+  fi
+  
   npm prune --force > /dev/null 2>&1
   npm install --force
-  sed -i 's/3000/'"$frontend_port"'/g' server.js
+  
+  if [ -f "server.js" ]; then
+    sed -i 's/3000/'"$frontend_port"'/g' server.js
+  fi
+  
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
   pm2 flush
