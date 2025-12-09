@@ -902,12 +902,42 @@ instala_node_base() {
  echo
   {
     sudo su - root <<EOF
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  # Configura o repositório do NodeSource
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  
+  # Atualiza a lista de pacotes e instala Node.js
+  apt-get update -y
   apt install nodejs -y
-  sudo npm install -g n
-  sudo n 20.19.4
-  sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
-  sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
+  
+  # Verifica se Node.js foi instalado
+  if ! command -v node &> /dev/null; then
+    echo "Erro: Node.js não foi instalado corretamente"
+    exit 1
+  fi
+  
+  # Verifica se npm está disponível
+  if ! command -v npm &> /dev/null; then
+    echo "Erro: npm não foi instalado corretamente"
+    exit 1
+  fi
+  
+  # Instala o gerenciador de versões 'n' e configura a versão específica
+  npm install -g n
+  n 20.19.4
+  
+  # Garante que os binários estão no PATH do sistema
+  if [ -f /usr/local/n/versions/node/20.19.4/bin/node ]; then
+    ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
+    ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
+  fi
+  
+  # Atualiza o PATH no perfil do sistema
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
+  echo 'export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH' >> /etc/profile
+  
+  # Verifica novamente se node e npm estão disponíveis
+  node --version
+  npm --version
 EOF
     sleep 2
   } || trata_erro "instala_node_base"
@@ -934,9 +964,32 @@ instala_pm2_base() {
   echo
   {
     sudo su - root <<EOF
+  # Verifica se Node.js e npm estão instalados
+  if ! command -v node &> /dev/null; then
+    echo "Erro: Node.js não está instalado. Instale o Node.js primeiro."
+    exit 1
+  fi
+  
+  if ! command -v npm &> /dev/null; then
+    echo "Erro: npm não está instalado. Instale o Node.js primeiro."
+    exit 1
+  fi
+  
+  # Garante que o PATH está correto
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
+  
+  # Instala PM2 globalmente
   npm install -g pm2
+  
+  # Verifica se PM2 foi instalado
+  if ! command -v pm2 &> /dev/null; then
+    echo "Erro: PM2 não foi instalado corretamente"
+    exit 1
+  fi
+  
+  # Configura o PM2 para iniciar automaticamente
   pm2 startup ubuntu -u deploy
-  env PATH=\${PATH}:/usr/bin pm2 startup ubuntu -u deploy --hp /home/deploy
+  env PATH=\${PATH}:/usr/local/n/versions/node/20.19.4/bin:/usr/bin pm2 startup ubuntu -u deploy --hp /home/deploy
 EOF
     sleep 2
   } || trata_erro "instala_pm2_base"
@@ -1317,6 +1370,7 @@ EOF
     echo
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   export PUPPETEER_SKIP_DOWNLOAD=true
   rm -r node_modules
   rm package-lock.json
@@ -1343,6 +1397,7 @@ EOF
     echo
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   npx sequelize db:migrate
 EOF
 
@@ -1353,6 +1408,7 @@ EOF
     echo
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   npx sequelize db:seed:all
 EOF
 
@@ -1363,6 +1419,7 @@ EOF
     echo
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/backend
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   pm2 start dist/server.js --name ${empresa}-backend
 EOF
 
@@ -1378,6 +1435,7 @@ instala_frontend_base() {
   {
     sudo su - deploy <<EOF
   cd /home/deploy/${empresa}/frontend
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   npm install --force
   npx browserslist@latest --update-db
 EOF
@@ -1411,6 +1469,7 @@ EOF
     echo
     sudo su - deploy <<EOF
     cd /home/deploy/${empresa}/frontend
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
     sed -i 's/3000/'"${frontend_port}"'/g' server.js
     NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 EOF
@@ -1422,6 +1481,7 @@ EOF
     echo
     sudo su - deploy <<EOF
     cd /home/deploy/${empresa}/frontend
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
     pm2 start server.js --name ${empresa}-frontend
     pm2 save
 EOF
@@ -1444,6 +1504,7 @@ config_cron_base() {
     chmod +x /home/deploy/atualiza_public.sh >/dev/null 2>&1
     chown deploy:deploy /home/deploy/atualiza_public.sh >/dev/null 2>&1
     echo '#!/bin/bash
+export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:$PATH
 pm2 restart all' >/home/deploy/reinicia_instancia.sh
     chmod +x /home/deploy/reinicia_instancia.sh
     chown deploy:deploy /home/deploy/reinicia_instancia.sh >/dev/null 2>&1
@@ -1645,6 +1706,7 @@ EOF
     sleep 2
 
     sudo su - deploy <<EOF
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   pm2 restart all
 EOF
 
@@ -1713,6 +1775,7 @@ baixa_codigo_atualizar() {
   echo
   sleep 2
   sudo su - deploy <<EOF
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
   pm2 stop all
 EOF
 
@@ -1728,6 +1791,7 @@ EOF
   source /home/deploy/${empresa}/frontend/.env
   frontend_port=${SERVER_PORT:-3000}
   sudo su - deploy <<EOF
+export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
 printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
