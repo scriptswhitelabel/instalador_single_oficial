@@ -572,7 +572,7 @@ main() {
   printf "${YELLOW}   https://${subdominio_limpo}${WHITE}\n"
   echo
   printf "${WHITE}   🔑 Access Token:${WHITE}\n"
-  printf "${YELLOW}   meowflow${WHITE}\n"
+  printf "${YELLOW}   ${senha_deploy}${WHITE}\n"
   echo
   printf "${WHITE}   📚 Para consultar os endpoints da API, acesse:${WHITE}\n"
   printf "${YELLOW}   https://${subdominio_limpo}/api${WHITE}\n"
