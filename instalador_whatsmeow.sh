@@ -339,7 +339,7 @@ services:
       - TZ=\${TZ}
       - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT}
       - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME}
-      - RABBITMQ_URL=amqp://wuzapi:meowuzapiwflow@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events
     depends_on:
       db:
