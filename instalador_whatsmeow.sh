@@ -421,8 +421,8 @@ atualizar_env_backend() {
 
 # WhatsMeow Configuration
 WUZAPI_URL=https://${subdominio_limpo}
-WUZAPI_ADMIN_TOKEN=meowflow
-WUZAPI_TOKEN=meowflow
+WUZAPI_ADMIN_TOKEN=${senha_deploy}
+WUZAPI_TOKEN=${senha_deploy}
 EOF
     
     printf "${GREEN} >> .env do backend atualizado com sucesso!${WHITE}\n"
