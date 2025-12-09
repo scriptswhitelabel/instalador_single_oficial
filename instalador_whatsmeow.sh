@@ -288,7 +288,7 @@ SESSION_DEVICE_NAME=WuzAPI
 
 # Database configuration
 DB_USER=wuzapi
-DB_PASSWORD=${senha_deploy}
+DB_PASSWORD=wuzapi
 DB_NAME=wuzapi
 DB_HOST=db
 DB_PORT=5432
@@ -296,7 +296,7 @@ DB_SSLMODE=false
 TZ=America/Sao_Paulo
 
 # RabbitMQ configuration Optional
-RABBITMQ_URL=amqp://wuzapi:${senha_deploy}@localhost:5672/%2F
+RABBITMQ_URL=amqp://wuzapi:wuzapi@localhost:5672/%2F
 RABBITMQ_QUEUE=whatsapp_events
 EOF
 
@@ -339,7 +339,7 @@ services:
       - TZ=\${TZ}
       - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT}
       - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME}
-      - RABBITMQ_URL=amqp://wuzapi:${senha_deploy}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://wuzapi:meowuzapiwflow@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events
     depends_on:
       db:
@@ -374,7 +374,7 @@ services:
     hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: wuzapi
-      RABBITMQ_DEFAULT_PASS: \${DB_PASSWORD}
+      RABBITMQ_DEFAULT_PASS: wuzapi
       RABBITMQ_DEFAULT_VHOST: /
     ports:
       - "5672:5672" # AMQP port
@@ -421,8 +421,8 @@ atualizar_env_backend() {
 
 # WhatsMeow Configuration
 WUZAPI_URL=https://${subdominio_limpo}
-WUZAPI_ADMIN_TOKEN=${senha_deploy}
-WUZAPI_TOKEN=${senha_deploy}
+WUZAPI_ADMIN_TOKEN=meowflow
+WUZAPI_TOKEN=meowflow
 EOF
     
     printf "${GREEN} >> .env do backend atualizado com sucesso!${WHITE}\n"
@@ -572,7 +572,7 @@ main() {
   printf "${YELLOW}   https://${subdominio_limpo}${WHITE}\n"
   echo
   printf "${WHITE}   🔑 Access Token:${WHITE}\n"
-  printf "${YELLOW}   ${senha_deploy}${WHITE}\n"
+  printf "${YELLOW}   meowflow${WHITE}\n"
   echo
   printf "${WHITE}   📚 Para consultar os endpoints da API, acesse:${WHITE}\n"
   printf "${YELLOW}   https://${subdominio_limpo}/api${WHITE}\n"
