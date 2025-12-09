@@ -895,7 +895,7 @@ EOF
   } || trata_erro "instala_postgres_base"
 }
 
-Instala NodeJS
+# Instala NodeJS
 instala_node_base() {
   banner
  printf "${WHITE} >> Instalando nodejs...\n"
