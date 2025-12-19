@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.1\n"
+  printf "                                INSTALADOR 6.2\n"
   printf "\n\n"
 }
 
@@ -247,6 +247,7 @@ menu_ferramentas() {
     printf "   [${BLUE}1${WHITE}] Instalador RabbitMQ\n"
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
+    printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -283,6 +284,21 @@ menu_ferramentas() {
       ;;
     3)
       instalar_whatsmeow
+      ;;
+    4)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      ROLLBACK_SCRIPT="${SCRIPT_DIR}/tools/roolback_versao.sh"
+      if [ -f "$ROLLBACK_SCRIPT" ]; then
+        printf "${GREEN} >> Executando Roolback Versão...${WHITE}\n"
+        echo
+        bash "$ROLLBACK_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${ROLLBACK_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
       ;;
     0)
       return
