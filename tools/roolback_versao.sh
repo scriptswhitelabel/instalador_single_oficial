@@ -548,6 +548,339 @@ RESTARTPM2
   printf "\n"
 }
 
-# Executar função principal
-rollback_versao
+# Função para retornar à versão principal
+retornar_versao_principal() {
+  banner
+  
+  # Carregar variáveis
+  carregar_variaveis
+  
+  # Verificar se a variável empresa está definida
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    printf "${YELLOW} >> Por favor, informe o nome da empresa:${WHITE}\n"
+    read -p "> " empresa
+    if [ -z "${empresa}" ]; then
+      printf "${RED} >> ERRO: Nome da empresa não pode ser vazio. Abortando.\n${WHITE}"
+      exit 1
+    fi
+  fi
+  
+  # Definir diretório da aplicação
+  APP_DIR="/home/deploy/${empresa}"
+  
+  # Verificar se o diretório existe
+  if [ ! -d "$APP_DIR" ]; then
+    printf "${RED} >> ERRO: Diretório da aplicação não existe: ${APP_DIR}\n${WHITE}"
+    exit 1
+  fi
+  
+  printf "${WHITE} >> Diretório da aplicação: ${BLUE}${APP_DIR}${WHITE}\n"
+  echo
+  
+  printf "\n${YELLOW} ⚠️  ATENÇÃO: Esta operação irá:${WHITE}\n"
+  printf "${YELLOW}    - Fazer checkout para a branch MULTI100-OFICIAL-u21${WHITE}\n"
+  printf "${YELLOW}    - Atualizar código com git pull${WHITE}\n"
+  printf "${YELLOW}    - Reinstalar dependências e rebuild${WHITE}\n"
+  printf "${YELLOW}    - Reiniciar aplicações no PM2${WHITE}\n"
+  echo
+  printf "${RED} >> Deseja continuar? (s/N):${WHITE}\n"
+  read -p "> " CONFIRMA
+  
+  if [ "$CONFIRMA" != "s" ] && [ "$CONFIRMA" != "S" ]; then
+    printf "${YELLOW} >> Operação cancelada pelo usuário.${WHITE}\n"
+    exit 0
+  fi
+  
+  echo
+  printf "${WHITE} >> Iniciando retorno para versão principal...\n"
+  echo
+  
+  # 1) Entrar na pasta do projeto e corrigir permissões
+  printf "${WHITE} [1/9] Entrando na pasta do projeto e corrigindo permissões...\n"
+  cd "$APP_DIR" || trata_erro "cd para pasta do projeto"
+  
+  # Corrigir permissões do diretório .git e todo o repositório
+  printf "${WHITE} >> Corrigindo permissões do repositório...\n"
+  chown -R deploy:deploy "$APP_DIR" 2>/dev/null || true
+  
+  # Garantir permissões específicas para .git e .git/objects
+  if [ -d "$APP_DIR/.git" ]; then
+    chmod -R 755 "$APP_DIR/.git" 2>/dev/null || true
+    chown -R deploy:deploy "$APP_DIR/.git" 2>/dev/null || true
+    
+    # Garantir permissões de escrita no diretório objects
+    if [ -d "$APP_DIR/.git/objects" ]; then
+      chmod -R 775 "$APP_DIR/.git/objects" 2>/dev/null || true
+      chown -R deploy:deploy "$APP_DIR/.git/objects" 2>/dev/null || true
+    fi
+  fi
+  
+  chmod -R 775 "$APP_DIR" 2>/dev/null || true
+  
+  printf "${GREEN} ✓ Diretório atual: $(pwd)\n${WHITE}"
+  printf "${GREEN} ✓ Permissões corrigidas\n${WHITE}"
+  echo
+  
+  # 2) Fazer checkout para branch oficial
+  printf "${WHITE} [2/9] Fazendo checkout para branch MULTI100-OFICIAL-u21...\n"
+  sudo su - deploy <<CHECKOUT
+cd "$APP_DIR"
+
+# Garantir permissões corretas
+chmod -R u+w .git 2>/dev/null || true
+chown -R deploy:deploy .git 2>/dev/null || true
+
+git fetch origin
+git checkout MULTI100-OFICIAL-u21
+git reset --hard origin/MULTI100-OFICIAL-u21
+CHECKOUT
+  if [ $? -ne 0 ]; then
+    trata_erro "git checkout"
+  fi
+  printf "${GREEN} ✓ Checkout para branch oficial concluído\n${WHITE}"
+  echo
+  
+  # 3) Atualizar código com git pull
+  printf "${WHITE} [3/9] Atualizando código com git pull...\n"
+  sudo su - deploy <<PULL
+cd "$APP_DIR"
+git pull
+PULL
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} >> Aviso: git pull pode ter tido problemas. Continuando...\n${WHITE}"
+  else
+    printf "${GREEN} ✓ Código atualizado\n${WHITE}"
+  fi
+  echo
+  
+  # 4) Parar aplicações PM2
+  printf "${WHITE} [4/9] Parando instâncias PM2...\n"
+  sudo su - deploy <<STOPPM2
+# Configura PATH para Node.js e PM2
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+pm2 stop all || true
+STOPPM2
+  printf "${GREEN} ✓ PM2 parado\n${WHITE}"
+  echo
+  
+  # 5) Reinstalar dependências do Backend
+  printf "${WHITE} [5/9] Reinstalando dependências do Backend...\n"
+  BACKEND_DIR="${APP_DIR}/backend"
+  if [ ! -d "$BACKEND_DIR" ]; then
+    printf "${YELLOW} >> Aviso: Diretório backend não encontrado. Pulando...\n${WHITE}"
+  else
+    sudo su - deploy <<BACKEND
+# Configura PATH para Node.js
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+
+BACKEND_DIR="$BACKEND_DIR"
+
+if [ ! -d "\$BACKEND_DIR" ]; then
+  echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+  exit 1
+fi
+
+cd "\$BACKEND_DIR"
+
+if [ ! -f "package.json" ]; then
+  echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+  exit 1
+fi
+
+npm prune --force > /dev/null 2>&1
+export PUPPETEER_SKIP_DOWNLOAD=true
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+rm -rf dist 2>/dev/null || true
+npm install --force
+npm install puppeteer-core --force
+npm i glob
+npm run build
+sleep 2
+BACKEND
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> ERRO ao instalar dependências do backend\n${WHITE}"
+      trata_erro "npm install backend"
+    fi
+    printf "${GREEN} ✓ Dependências do Backend instaladas e buildado\n${WHITE}"
+    
+    # Executar migração do banco de dados
+    printf "${WHITE} >> Executando migração do banco de dados...\n"
+    sudo su - deploy <<MIGRATE
+# Configura PATH para Node.js
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+
+cd "$BACKEND_DIR"
+npx sequelize db:migrate
+sleep 2
+MIGRATE
+    if [ $? -ne 0 ]; then
+      printf "${YELLOW} >> Aviso: Migração do banco pode ter falhado. Continuando...\n${WHITE}"
+    else
+      printf "${GREEN} ✓ Migração do banco concluída\n${WHITE}"
+    fi
+  fi
+  echo
+  
+  # 6) Reinstalar dependências e build do Frontend
+  printf "${WHITE} [6/9] Reinstalando dependências e build do Frontend...\n"
+  FRONTEND_DIR="${APP_DIR}/frontend"
+  
+  # Carregar porta do frontend do .env se existir
+  source "$FRONTEND_DIR/.env" 2>/dev/null || true
+  frontend_port=${SERVER_PORT:-3000}
+  
+  if [ ! -d "$FRONTEND_DIR" ]; then
+    printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
+  else
+    sudo su - deploy <<FRONTEND
+# Configura PATH para Node.js
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+
+FRONTEND_DIR="$FRONTEND_DIR"
+
+if [ ! -d "\$FRONTEND_DIR" ]; then
+  echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+  exit 1
+fi
+
+cd "\$FRONTEND_DIR"
+
+if [ ! -f "package.json" ]; then
+  echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
+  exit 1
+fi
+
+npm prune --force > /dev/null 2>&1
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+npm install --force
+
+if [ -f "server.js" ]; then
+  sed -i 's/3000/'"$frontend_port"'/g' server.js
+fi
+
+NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
+sleep 2
+FRONTEND
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> ERRO ao instalar dependências ou build do frontend\n${WHITE}"
+      trata_erro "npm install/build frontend"
+    fi
+    printf "${GREEN} ✓ Frontend instalado e buildado\n${WHITE}"
+  fi
+  echo
+  
+  # 7) Reiniciar PM2
+  printf "${WHITE} [7/9] Reiniciando aplicações no PM2...\n"
+  sudo su - deploy <<RESTARTPM2
+# Configura PATH para Node.js e PM2
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+pm2 flush
+pm2 reset all
+pm2 restart all
+pm2 save
+pm2 startup
+RESTARTPM2
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} >> Aviso: Algum problema ao reiniciar PM2. Verifique manualmente.\n${WHITE}"
+  else
+    printf "${GREEN} ✓ PM2 reiniciado e salvo\n${WHITE}"
+  fi
+  echo
+  
+  # 8) Reiniciar serviços (Nginx/Traefik)
+  printf "${WHITE} [8/9] Reiniciando serviços de proxy...\n"
+  sudo su - root <<EOF
+    if systemctl is-active --quiet nginx; then
+      sudo systemctl restart nginx
+      echo "Nginx reiniciado"
+    elif systemctl is-active --quiet traefik; then
+      sudo systemctl restart traefik.service
+      echo "Traefik reiniciado"
+    else
+      echo "Nenhum serviço de proxy (Nginx ou Traefik) está em execução."
+    fi
+EOF
+  printf "${GREEN} ✓ Serviços reiniciados\n${WHITE}"
+  echo
+  
+  # Resumo final
+  printf "\n${GREEN}═══════════════════════════════════════════════════════════\n"
+  printf "  ✓ RETORNO PARA VERSÃO PRINCIPAL CONCLUÍDO!\n"
+  printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+  printf "\n${WHITE} >> Resumo da operação:${WHITE}\n"
+  printf "   - Empresa: ${BLUE}${empresa}${WHITE}\n"
+  printf "   - Diretório: ${BLUE}${APP_DIR}${WHITE}\n"
+  printf "   - Branch: ${BLUE}MULTI100-OFICIAL-u21${WHITE}\n"
+  printf "\n${YELLOW} >> Para verificar o status do PM2, execute:${WHITE}\n"
+  printf "   ${BLUE}sudo su - deploy -c 'pm2 status'${WHITE}\n"
+  printf "\n${YELLOW} >> Para ver os logs do PM2, execute:${WHITE}\n"
+  printf "   ${BLUE}sudo su - deploy -c 'pm2 logs'${WHITE}\n"
+  printf "\n"
+}
+
+# Menu principal
+menu_principal() {
+  while true; do
+    banner
+    printf "${WHITE} Selecione a opção desejada: \n"
+    echo
+    printf "   [${BLUE}1${WHITE}] Fazer Rollback para Versão Específica\n"
+    printf "   [${BLUE}2${WHITE}] Retornar para Versão Principal (MULTI100-OFICIAL-u21)\n"
+    printf "   [${BLUE}0${WHITE}] Sair\n"
+    echo
+    read -p "> " opcao_menu
+    
+    case "${opcao_menu}" in
+    1)
+      rollback_versao
+      ;;
+    2)
+      retornar_versao_principal
+      ;;
+    0)
+      printf "${GREEN} >> Saindo...${WHITE}\n"
+      exit 0
+      ;;
+    *)
+      printf "${RED}Opção inválida. Tente novamente.${WHITE}\n"
+      sleep 2
+      ;;
+    esac
+    
+    # Após executar uma opção, perguntar se deseja continuar
+    echo
+    printf "${YELLOW} >> Deseja executar outra operação? (s/N):${WHITE}\n"
+    read -p "> " continuar
+    if [ "$continuar" != "s" ] && [ "$continuar" != "S" ]; then
+      printf "${GREEN} >> Saindo...${WHITE}\n"
+      exit 0
+    fi
+  done
+}
+
+# Executar menu principal
+menu_principal
 
