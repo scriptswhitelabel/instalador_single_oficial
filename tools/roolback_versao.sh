@@ -259,16 +259,41 @@ rollback_versao() {
   printf "${WHITE} >> Iniciando rollback de versão...\n"
   echo
   
-  # 1) Entrar na pasta do projeto
-  printf "${WHITE} [1/10] Entrando na pasta do projeto...\n"
+  # 1) Entrar na pasta do projeto e corrigir permissões
+  printf "${WHITE} [1/11] Entrando na pasta do projeto e corrigindo permissões...\n"
   cd "$APP_DIR" || trata_erro "cd para pasta do projeto"
+  
+  # Corrigir permissões do diretório .git e todo o repositório
+  printf "${WHITE} >> Corrigindo permissões do repositório...\n"
+  chown -R deploy:deploy "$APP_DIR" 2>/dev/null || true
+  
+  # Garantir permissões específicas para .git e .git/objects
+  if [ -d "$APP_DIR/.git" ]; then
+    chmod -R 755 "$APP_DIR/.git" 2>/dev/null || true
+    chown -R deploy:deploy "$APP_DIR/.git" 2>/dev/null || true
+    
+    # Garantir permissões de escrita no diretório objects
+    if [ -d "$APP_DIR/.git/objects" ]; then
+      chmod -R 775 "$APP_DIR/.git/objects" 2>/dev/null || true
+      chown -R deploy:deploy "$APP_DIR/.git/objects" 2>/dev/null || true
+    fi
+  fi
+  
+  chmod -R 775 "$APP_DIR" 2>/dev/null || true
+  
   printf "${GREEN} ✓ Diretório atual: $(pwd)\n${WHITE}"
+  printf "${GREEN} ✓ Permissões corrigidas\n${WHITE}"
   echo
   
   # 2) Configurar remote com token e fazer git fetch
-  printf "${WHITE} [2/10] Configurando remote e executando git fetch --all --prune...\n"
+  printf "${WHITE} [2/11] Configurando remote e executando git fetch --all --prune...\n"
   sudo su - deploy <<FETCH
 cd "$APP_DIR"
+
+# Garantir permissões corretas antes do fetch
+chmod -R u+w .git 2>/dev/null || true
+chown -R deploy:deploy .git 2>/dev/null || true
+
 # Verificar se o remote origin existe e atualizar com token
 if git remote get-url origin >/dev/null 2>&1; then
   # Extrair URL do repositório (remover token antigo se existir)
@@ -280,7 +305,18 @@ if git remote get-url origin >/dev/null 2>&1; then
     git remote set-url origin "\$NEW_URL"
   fi
 fi
-git fetch --all --prune
+
+# Executar git fetch com tratamento de erros
+if ! git fetch --all --prune; then
+  # Se falhar, tentar corrigir permissões novamente e tentar mais uma vez
+  echo "Tentando corrigir permissões e refazer fetch..."
+  chmod -R 755 .git
+  chown -R deploy:deploy .git
+  git fetch --all --prune || {
+    echo "ERRO: Falha ao executar git fetch mesmo após corrigir permissões"
+    exit 1
+  }
+fi
 FETCH
   if [ $? -ne 0 ]; then
     trata_erro "git fetch"
@@ -289,7 +325,7 @@ FETCH
   echo
   
   # 3) Verificar se o commit existe
-  printf "${WHITE} [3/10] Verificando se o commit existe...\n"
+  printf "${WHITE} [3/11] Verificando se o commit existe...\n"
   sudo su - deploy <<VERIFY
 cd "$APP_DIR"
 git cat-file -e "$COMMIT_ALVO^{commit}" 2>/dev/null
@@ -303,7 +339,7 @@ VERIFY
   echo
   
   # 4) Limpar alterações locais
-  printf "${WHITE} [4/10] Limpando alterações locais (git reset --hard)...\n"
+  printf "${WHITE} [4/11] Limpando alterações locais (git reset --hard)...\n"
   sudo su - deploy <<CLEAN
 cd "$APP_DIR"
 git reset --hard
@@ -315,7 +351,7 @@ CLEAN
   echo
   
   # 5) Limpar arquivos não rastreados
-  printf "${WHITE} [5/10] Limpando arquivos não rastreados (git clean -fd)...\n"
+  printf "${WHITE} [5/11] Limpando arquivos não rastreados (git clean -fd)...\n"
   sudo su - deploy <<CLEANFD
 cd "$APP_DIR"
 git clean -fd
@@ -327,7 +363,7 @@ CLEANFD
   echo
   
   # 6) Fazer checkout para o commit alvo (criando branch de rollback)
-  printf "${WHITE} [6/10] Fazendo checkout para o commit alvo (criando branch rollback)...\n"
+  printf "${WHITE} [6/11] Fazendo checkout para o commit alvo (criando branch rollback)...\n"
   BRANCH_ROLLBACK="rollback-$(date +%Y%m%d-%H%M%S)"
   sudo su - deploy <<CHECKOUT
 cd "$APP_DIR"
@@ -340,7 +376,7 @@ CHECKOUT
   echo
   
   # 7) Parar aplicações PM2
-  printf "${WHITE} [7/10] Parando instâncias PM2...\n"
+  printf "${WHITE} [7/11] Parando instâncias PM2...\n"
   sudo su - deploy <<STOPPM2
 # Configura PATH para Node.js e PM2
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -354,7 +390,7 @@ STOPPM2
   echo
   
   # 8) Reinstalar dependências do Backend
-  printf "${WHITE} [8/10] Reinstalando dependências do Backend...\n"
+  printf "${WHITE} [8/11] Reinstalando dependências do Backend...\n"
   BACKEND_DIR="${APP_DIR}/backend"
   if [ ! -d "$BACKEND_DIR" ]; then
     printf "${YELLOW} >> Aviso: Diretório backend não encontrado. Pulando...\n${WHITE}"
@@ -388,7 +424,7 @@ BACKEND
   echo
   
   # 9) Reinstalar dependências e build do Frontend
-  printf "${WHITE} [9/10] Reinstalando dependências e build do Frontend...\n"
+  printf "${WHITE} [9/11] Reinstalando dependências e build do Frontend...\n"
   FRONTEND_DIR="${APP_DIR}/frontend"
   if [ ! -d "$FRONTEND_DIR" ]; then
     printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
@@ -428,7 +464,7 @@ FRONTEND
   echo
   
   # 10) Reiniciar PM2
-  printf "${WHITE} [10/10] Reiniciando aplicações no PM2...\n"
+  printf "${WHITE} [10/11] Reiniciando aplicações no PM2...\n"
   sudo su - deploy <<RESTARTPM2
 # Configura PATH para Node.js e PM2
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
