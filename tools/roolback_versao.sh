@@ -402,30 +402,68 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-cd "$BACKEND_DIR"
-if [ -f "package.json" ]; then
-  npm install
-  if [ \$? -eq 0 ]; then
-    echo "Backend: npm install concluído"
-  else
-    echo "ERRO: npm install falhou no backend"
-    exit 1
-  fi
-else
-  echo "Aviso: package.json não encontrado no backend"
+
+BACKEND_DIR="$BACKEND_DIR"
+
+if [ ! -d "\$BACKEND_DIR" ]; then
+  echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+  exit 1
 fi
+
+cd "\$BACKEND_DIR"
+
+if [ ! -f "package.json" ]; then
+  echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+  exit 1
+fi
+
+npm prune --force > /dev/null 2>&1
+export PUPPETEER_SKIP_DOWNLOAD=true
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+rm -rf dist 2>/dev/null || true
+npm install --force
+npm install puppeteer-core --force
+npm i glob
+npm run build
+sleep 2
 BACKEND
     if [ $? -ne 0 ]; then
       printf "${RED} >> ERRO ao instalar dependências do backend\n${WHITE}"
       trata_erro "npm install backend"
     fi
-    printf "${GREEN} ✓ Dependências do Backend instaladas\n${WHITE}"
+    printf "${GREEN} ✓ Dependências do Backend instaladas e buildado\n${WHITE}"
+    
+    # Executar migração do banco de dados
+    printf "${WHITE} >> Executando migração do banco de dados...\n"
+    sudo su - deploy <<MIGRATE
+# Configura PATH para Node.js
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+
+cd "$BACKEND_DIR"
+npx sequelize db:migrate
+sleep 2
+MIGRATE
+    if [ $? -ne 0 ]; then
+      printf "${YELLOW} >> Aviso: Migração do banco pode ter falhado. Continuando...\n${WHITE}"
+    else
+      printf "${GREEN} ✓ Migração do banco concluída\n${WHITE}"
+    fi
   fi
   echo
   
   # 9) Reinstalar dependências e build do Frontend
   printf "${WHITE} [9/11] Reinstalando dependências e build do Frontend...\n"
   FRONTEND_DIR="${APP_DIR}/frontend"
+  
+  # Carregar porta do frontend do .env se existir
+  source "$FRONTEND_DIR/.env" 2>/dev/null || true
+  frontend_port=${SERVER_PORT:-3000}
+  
   if [ ! -d "$FRONTEND_DIR" ]; then
     printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
   else
@@ -436,24 +474,32 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-cd "$FRONTEND_DIR"
-if [ -f "package.json" ]; then
-  npm install
-  if [ \$? -eq 0 ]; then
-    npm run build
-    if [ \$? -eq 0 ]; then
-      echo "Frontend: npm install e build concluídos"
-    else
-      echo "ERRO: npm run build falhou no frontend"
-      exit 1
-    fi
-  else
-    echo "ERRO: npm install falhou no frontend"
-    exit 1
-  fi
-else
-  echo "Aviso: package.json não encontrado no frontend"
+
+FRONTEND_DIR="$FRONTEND_DIR"
+
+if [ ! -d "\$FRONTEND_DIR" ]; then
+  echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
+  exit 1
 fi
+
+cd "\$FRONTEND_DIR"
+
+if [ ! -f "package.json" ]; then
+  echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
+  exit 1
+fi
+
+npm prune --force > /dev/null 2>&1
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+npm install --force
+
+if [ -f "server.js" ]; then
+  sed -i 's/3000/'"$frontend_port"'/g' server.js
+fi
+
+NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
+sleep 2
 FRONTEND
     if [ $? -ne 0 ]; then
       printf "${RED} >> ERRO ao instalar dependências ou build do frontend\n${WHITE}"
@@ -472,8 +518,11 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
+pm2 flush
+pm2 reset all
 pm2 restart all
 pm2 save
+pm2 startup
 RESTARTPM2
   if [ $? -ne 0 ]; then
     printf "${YELLOW} >> Aviso: Algum problema ao reiniciar PM2. Verifique manualmente.\n${WHITE}"
