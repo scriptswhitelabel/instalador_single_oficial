@@ -267,15 +267,16 @@ configurar_env_wuzapi() {
 # .env
 # Server Configuration
 WUZAPI_PORT=${wuzapi_port}
+WUZAPI_ADDRESS=0.0.0.0
 
 # Token for WuzAPI Admin
 WUZAPI_ADMIN_TOKEN=${senha_deploy}
 
 # Encryption key for sensitive data (32 bytes for AES-256)
-WUZAPI_GLOBAL_ENCRYPTION_KEY=${WUZAPI_GLOBAL_ENCRYPTION_KEY}
+WUZAPI_GLOBAL_ENCRYPTION_KEY=${senha_deploy}
 
 # Global HMAC Key for webhook signing (minimum 32 characters)
-WUZAPI_GLOBAL_HMAC_KEY=${WUZAPI_GLOBAL_HMAC_KEY}
+WUZAPI_GLOBAL_HMAC_KEY=${senha_deploy}
 
 # Global webhook URL
 WUZAPI_GLOBAL_WEBHOOK=https://${subdominio_limpo}/webhook
@@ -315,7 +316,6 @@ configurar_docker_compose() {
     source $ARQUIVO_VARIAVEIS
     
     # Criar arquivo docker-compose.yml
-    # O docker-compose vai ler automaticamente o arquivo .env na mesma pasta
     cat > /home/deploy/${empresa}/wuzapi/docker-compose.yml <<DOCKERCOMPOSE
 services:
   wuzapi-server:
@@ -324,21 +324,20 @@ services:
       dockerfile: Dockerfile
     ports:
       - "\${WUZAPI_PORT:-${wuzapi_port:-${default_wuzapi_port}}}:8080"
-    env_file:
-      - .env
     environment:
       - WUZAPI_ADMIN_TOKEN=\${WUZAPI_ADMIN_TOKEN}
       - WUZAPI_GLOBAL_ENCRYPTION_KEY=\${WUZAPI_GLOBAL_ENCRYPTION_KEY}
-      - WUZAPI_GLOBAL_HMAC_KEY=\${WUZAPI_GLOBAL_HMAC_KEY}
-      - WUZAPI_GLOBAL_WEBHOOK=\${WUZAPI_GLOBAL_WEBHOOK}
-      - DB_USER=\${DB_USER}
-      - DB_PASSWORD=\${DB_PASSWORD}
-      - DB_NAME=\${DB_NAME}
+      - WUZAPI_GLOBAL_HMAC_KEY=\${WUZAPI_GLOBAL_HMAC_KEY:-}
+      - WUZAPI_GLOBAL_WEBHOOK=\${WUZAPI_GLOBAL_WEBHOOK:-}
+      - DB_USER=\${DB_USER:-wuzapi}
+      - DB_PASSWORD=\${DB_PASSWORD:-wuzapi}
+      - DB_NAME=\${DB_NAME:-wuzapi}
       - DB_HOST=db
-      - DB_PORT=\${DB_PORT}
-      - TZ=\${TZ}
-      - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT}
-      - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME}
+      - DB_PORT=\${DB_PORT:-5432}
+      - TZ=\${TZ:-America/Sao_Paulo}
+      - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT:-json}
+      - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME:-WuzAPI}
+      # RabbitMQ configuration Optional
       - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events
     depends_on:
@@ -348,22 +347,22 @@ services:
         condition: service_healthy
     networks:
       - wuzapi-network
-    restart: on-failure
+    restart: always
 
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: \${DB_USER}
-      POSTGRES_PASSWORD: \${DB_PASSWORD}
-      POSTGRES_DB: \${DB_NAME}
+      POSTGRES_USER: \${DB_USER:-wuzapi}
+      POSTGRES_PASSWORD: \${DB_PASSWORD:-wuzapi}
+      POSTGRES_DB: \${DB_NAME:-wuzapi}
     # ports:
-    #   - "\${DB_PORT}:5432" # Uncomment to access the database directly from your host machine.
+    #   - "\${DB_PORT:-5432}:5432" # Uncomment to access the database directly from your host machine.
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
       - wuzapi-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U \${DB_USER:-wuzapi}"]
       interval: 5s
       timeout: 5s
       retries: 5
