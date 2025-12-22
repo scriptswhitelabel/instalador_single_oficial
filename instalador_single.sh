@@ -1399,6 +1399,10 @@ mostrar_lista_versoes_instalacao() {
   printf "═══════════════════════════════════════════════════════════\n${WHITE}"
   echo
   
+  printf "${BLUE}  [0]${WHITE} Mais Recente${WHITE}\n"
+  printf "      Instala a versão mais recente disponível no repositório\n"
+  echo
+  
   local index=1
   for versao in $(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r); do
     printf "${BLUE}  [$index]${WHITE} Versão ${GREEN}${versao}${WHITE}\n"
@@ -1431,7 +1435,7 @@ selecionar_versao_instalacao() {
     exit 1
   fi
   
-  printf "${YELLOW} >> Selecione a versão desejada (1-${total_versoes}):${WHITE}\n"
+  printf "${YELLOW} >> Selecione a versão desejada (0-${total_versoes}):${WHITE}\n"
   read -p "> " ESCOLHA
   
   # Validar entrada
@@ -1440,20 +1444,30 @@ selecionar_versao_instalacao() {
     exit 1
   fi
   
-  if [ "$ESCOLHA" -lt 1 ] || [ "$ESCOLHA" -gt $total_versoes ]; then
-    printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 1 e ${total_versoes}.\n${WHITE}"
+  if [ "$ESCOLHA" -lt 0 ] || [ "$ESCOLHA" -gt $total_versoes ]; then
+    printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 0 e ${total_versoes}.\n${WHITE}"
     exit 1
   fi
   
-  # Obter versão e commit selecionados (variáveis globais)
-  local index=$((ESCOLHA - 1))
-  declare -g versao_instalacao="${versoes_array[$index]}"
-  declare -g commit_instalacao="${VERSOES_INSTALACAO[$versao_instalacao]}"
-  
-  printf "\n${GREEN} >> Versão selecionada: ${BLUE}${versao_instalacao}${WHITE}\n"
-  printf "${GREEN} >> Commit: ${BLUE}${commit_instalacao}${WHITE}\n"
-  echo
-  sleep 2
+  # Tratar opção 0 - Mais Recente
+  if [ "$ESCOLHA" -eq 0 ]; then
+    declare -g versao_instalacao="Mais Recente"
+    declare -g commit_instalacao=""
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE}\n"
+    printf "${GREEN} >> Será instalada a versão mais recente disponível no repositório${WHITE}\n"
+    echo
+    sleep 2
+  else
+    # Obter versão e commit selecionados (variáveis globais)
+    local index=$((ESCOLHA - 1))
+    declare -g versao_instalacao="${versoes_array[$index]}"
+    declare -g commit_instalacao="${VERSOES_INSTALACAO[$versao_instalacao]}"
+    
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}${versao_instalacao}${WHITE}\n"
+    printf "${GREEN} >> Commit: ${BLUE}${commit_instalacao}${WHITE}\n"
+    echo
+    sleep 2
+  fi
 }
 
 # Clona código de repo privado
@@ -1483,8 +1497,37 @@ baixa_codigo_base() {
       exit 1
     fi
 
+    # Verificar se foi selecionada a opção "Mais Recente"
+    if [ -z "${commit_instalacao}" ] || [ "${versao_instalacao}" = "Mais Recente" ]; then
+      banner
+      printf "${WHITE} >> Instalando versão mais recente disponível no repositório...\n"
+      echo
+      
+      cd ${dest_dir} || trata_erro "cd para diretório do projeto"
+      
+      # Fazer checkout para a branch principal (geralmente MULTI100-OFICIAL-u21 ou main/master)
+      sudo su - deploy <<CHECKOUTRECENT
+cd ${dest_dir}
+git fetch --all --prune 2>/dev/null || true
+
+# Tentar fazer checkout para a branch principal
+if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+  git checkout MULTI100-OFICIAL-u21 2>/dev/null || git checkout -b MULTI100-OFICIAL-u21 origin/MULTI100-OFICIAL-u21
+  git pull origin MULTI100-OFICIAL-u21 2>/dev/null || true
+elif git show-ref --verify --quiet refs/remotes/origin/main; then
+  git checkout main 2>/dev/null || git checkout -b main origin/main
+  git pull origin main 2>/dev/null || true
+elif git show-ref --verify --quiet refs/remotes/origin/master; then
+  git checkout master 2>/dev/null || git checkout -b master origin/master
+  git pull origin master 2>/dev/null || true
+fi
+CHECKOUTRECENT
+      
+      printf "${GREEN} >> Versão mais recente do repositório será instalada${WHITE}\n"
+      echo
+      sleep 2
     # Fazer checkout do commit específico se foi selecionado
-    if [ -n "${commit_instalacao}" ]; then
+    elif [ -n "${commit_instalacao}" ]; then
       banner
       printf "${WHITE} >> Fazendo checkout para o commit da versão ${versao_instalacao}...\n"
       echo
