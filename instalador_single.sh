@@ -63,6 +63,8 @@ salvar_variaveis() {
   echo "proxy=${proxy}" >>$ARQUIVO_VARIAVEIS
   echo "backend_port=${backend_port}" >>$ARQUIVO_VARIAVEIS
   echo "frontend_port=${frontend_port}" >>$ARQUIVO_VARIAVEIS
+  echo "versao_instalacao=${versao_instalacao}" >>$ARQUIVO_VARIAVEIS
+  echo "commit_instalacao=${commit_instalacao}" >>$ARQUIVO_VARIAVEIS
 }
 
 # Carregar variáveis
@@ -625,6 +627,29 @@ questoes_variaveis_base() {
   echo
   read -p "> " repo_url
   echo
+  
+  # Validar que o repositório é o correto
+  repo_url_limpo=$(echo "${repo_url}" | sed 's|https://||' | sed 's|http://||' | sed 's|\.git$||' | sed 's|/$||')
+  repo_esperado="github.com/scriptswhitelabel/multiflow-pro"
+  
+  if [ "${repo_url_limpo}" != "${repo_esperado}" ]; then
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED}❌ ERRO: Repositório inválido!${WHITE}\n"
+    echo
+    printf "${YELLOW}   O repositório deve ser exatamente:${WHITE}\n"
+    printf "${BLUE}   https://github.com/scriptswhitelabel/multiflow-pro${WHITE}\n"
+    printf "${BLUE}   ou${WHITE}\n"
+    printf "${BLUE}   https://github.com/scriptswhitelabel/multiflow-pro.git${WHITE}\n"
+    echo
+    printf "${RED}   Repositório informado: ${repo_url}${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    sleep 5
+    exit 1
+  fi
+  
+  # Selecionar versão
+  selecionar_versao_instalacao
 }
 
 # Define proxy usado
@@ -713,6 +738,10 @@ dados_instalacao_base() {
   printf "   ${WHITE}Proxy Usado: ----------->> ${YELLOW}${proxy}\n"
   printf "   ${WHITE}Porta Backend: --------->> ${YELLOW}${backend_port}\n"
   printf "   ${WHITE}Porta Frontend: -------->> ${YELLOW}${frontend_port}\n"
+  if [ -n "${versao_instalacao}" ]; then
+    printf "   ${WHITE}Versão Instalada: ------->> ${YELLOW}${versao_instalacao}${WHITE}\n"
+    printf "   ${WHITE}Commit Instalado: ------->> ${YELLOW}${commit_instalacao}${WHITE}\n"
+  fi
 }
 
 # Confirma os dados de instalação
@@ -1356,6 +1385,77 @@ codifica_clone_base() {
   done
 }
 
+# Definir versões disponíveis para instalação
+definir_versoes_instalacao() {
+  declare -gA VERSOES_INSTALACAO
+  VERSOES_INSTALACAO["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
+  VERSOES_INSTALACAO["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
+}
+
+# Mostrar lista de versões disponíveis para instalação
+mostrar_lista_versoes_instalacao() {
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  VERSÕES DISPONÍVEIS PARA INSTALAÇÃO\n"
+  printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+  
+  local index=1
+  for versao in $(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r); do
+    printf "${BLUE}  [$index]${WHITE} Versão ${GREEN}${versao}${WHITE}\n"
+    printf "      Commit: ${YELLOW}${VERSOES_INSTALACAO[$versao]}${WHITE}\n"
+    echo
+    ((index++))
+  done
+  
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+}
+
+# Selecionar versão para instalação
+selecionar_versao_instalacao() {
+  banner
+  printf "${WHITE} >> Selecionando versão para instalação...\n"
+  echo
+  
+  # Definir versões disponíveis
+  definir_versoes_instalacao
+  
+  # Mostrar lista de versões
+  mostrar_lista_versoes_instalacao
+  
+  local versoes_array=($(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r))
+  local total_versoes=${#versoes_array[@]}
+  
+  if [ $total_versoes -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma versão disponível na lista.\n${WHITE}"
+    exit 1
+  fi
+  
+  printf "${YELLOW} >> Selecione a versão desejada (1-${total_versoes}):${WHITE}\n"
+  read -p "> " ESCOLHA
+  
+  # Validar entrada
+  if ! [[ "$ESCOLHA" =~ ^[0-9]+$ ]]; then
+    printf "${RED} >> ERRO: Entrada inválida. Digite um número.\n${WHITE}"
+    exit 1
+  fi
+  
+  if [ "$ESCOLHA" -lt 1 ] || [ "$ESCOLHA" -gt $total_versoes ]; then
+    printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 1 e ${total_versoes}.\n${WHITE}"
+    exit 1
+  fi
+  
+  # Obter versão e commit selecionados (variáveis globais)
+  local index=$((ESCOLHA - 1))
+  declare -g versao_instalacao="${versoes_array[$index]}"
+  declare -g commit_instalacao="${VERSOES_INSTALACAO[$versao_instalacao]}"
+  
+  printf "\n${GREEN} >> Versão selecionada: ${BLUE}${versao_instalacao}${WHITE}\n"
+  printf "${GREEN} >> Commit: ${BLUE}${commit_instalacao}${WHITE}\n"
+  echo
+  sleep 2
+}
+
 # Clona código de repo privado
 baixa_codigo_base() {
   banner
@@ -1381,6 +1481,57 @@ baixa_codigo_base() {
       printf "${WHITE} >> Falha ao baixar o código! Verifique as informações fornecidas...\n"
       echo
       exit 1
+    fi
+
+    # Fazer checkout do commit específico se foi selecionado
+    if [ -n "${commit_instalacao}" ]; then
+      banner
+      printf "${WHITE} >> Fazendo checkout para o commit da versão ${versao_instalacao}...\n"
+      echo
+      
+      cd ${dest_dir} || trata_erro "cd para diretório do projeto"
+      
+      # Corrigir permissões antes do checkout
+      chown -R deploy:deploy ${dest_dir} 2>/dev/null || true
+      chmod -R 755 ${dest_dir}/.git 2>/dev/null || true
+      
+      # Fazer fetch para garantir que temos todos os commits
+      sudo su - deploy <<FETCHCOMMIT
+cd ${dest_dir}
+git fetch --all --prune 2>/dev/null || true
+FETCHCOMMIT
+      
+      # Verificar se o commit existe
+      sudo su - deploy <<VERIFYCOMMIT
+cd ${dest_dir}
+if git cat-file -e "${commit_instalacao}^{commit}" 2>/dev/null; then
+  exit 0
+else
+  exit 1
+fi
+VERIFYCOMMIT
+      
+      if [ $? -eq 0 ]; then
+        # Criar branch temporária para o commit
+        BRANCH_INSTALACAO="instalacao-${versao_instalacao}-$(date +%Y%m%d-%H%M%S)"
+        sudo su - deploy <<CHECKOUTCOMMIT
+cd ${dest_dir}
+git checkout -b "${BRANCH_INSTALACAO}" "${commit_instalacao}"
+CHECKOUTCOMMIT
+        
+        if [ $? -eq 0 ]; then
+          printf "${GREEN} >> Checkout para commit ${commit_instalacao} concluído com sucesso!${WHITE}\n"
+          printf "${GREEN} >> Branch criada: ${BRANCH_INSTALACAO}${WHITE}\n"
+          echo
+        else
+          printf "${RED} >> ERRO: Falha ao fazer checkout do commit ${commit_instalacao}${WHITE}\n"
+          exit 1
+        fi
+      else
+        printf "${RED} >> ERRO: Commit ${commit_instalacao} não encontrado no repositório.${WHITE}\n"
+        printf "${YELLOW} >> Verifique se o commit hash está correto.${WHITE}\n"
+        exit 1
+      fi
     fi
 
     mkdir -p /home/deploy/${empresa}/backend/public/
