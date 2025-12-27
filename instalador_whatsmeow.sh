@@ -74,7 +74,9 @@ verificar_instalacao_existente() {
     printf "${YELLOW}⚠️  AVISO: A pasta wuzapi já foi localizada dentro da instalação.${WHITE}\n"
     printf "${YELLOW}   Pasta encontrada: /home/deploy/${empresa}/wuzapi${WHITE}\n"
     echo
-    printf "${WHITE}   Deseja continuar mesmo assim? (s/n):${WHITE}\n"
+    printf "${WHITE}   Deseja reinstalar o WhatsMeow? (s/n):${WHITE}\n"
+    printf "${YELLOW}   ⚠️  ATENÇÃO: Isso irá remover a instalação atual e todos os dados!${WHITE}\n"
+    echo
     read -p "> " resposta
     
     if [ "$resposta" != "s" ] && [ "$resposta" != "S" ]; then
@@ -83,7 +85,26 @@ verificar_instalacao_existente() {
       exit 0
     fi
     
-    printf "${GREEN} >> Continuando com a instalação...${WHITE}\n"
+    printf "${WHITE} >> Iniciando reinstalação...${WHITE}\n"
+    echo
+    
+    # Parar e remover containers Docker se existirem
+    if [ -f "/home/deploy/${empresa}/wuzapi/docker-compose.yml" ]; then
+      printf "${WHITE} >> Parando containers Docker do WhatsMeow...${WHITE}\n"
+      cd /home/deploy/${empresa}/wuzapi
+      docker compose down -v 2>/dev/null || true
+      echo
+      sleep 2
+    fi
+    
+    # Remover a pasta wuzapi
+    printf "${WHITE} >> Removendo pasta wuzapi existente...${WHITE}\n"
+    rm -rf /home/deploy/${empresa}/wuzapi
+    printf "${GREEN} >> Pasta removida com sucesso!${WHITE}\n"
+    echo
+    sleep 2
+    
+    printf "${GREEN} >> Prosseguindo com a instalação...${WHITE}\n"
     echo
     sleep 2
   else
@@ -540,6 +561,38 @@ EOF
   } || trata_erro "reiniciar_servicos"
 }
 
+# Reiniciar PM2 do backend
+reiniciar_pm2_backend() {
+  banner
+  printf "${WHITE} >> Reiniciando PM2 do backend...\n"
+  echo
+  {
+    # Carregar variáveis necessárias
+    source $ARQUIVO_VARIAVEIS
+    
+    # Verificar se PM2 está instalado
+    if command -v pm2 >/dev/null 2>&1; then
+      # Reiniciar PM2 do backend como usuário deploy
+      sudo -u deploy bash <<EOF
+        cd /home/deploy/${empresa}/backend
+        if [ -f "ecosystem.config.js" ] || [ -f "ecosystem.config.cjs" ] || [ -f "package.json" ]; then
+          pm2 restart all 2>/dev/null || pm2 restart backend 2>/dev/null || pm2 restart ecosystem.config.js 2>/dev/null
+          printf "${GREEN} >> PM2 do backend reiniciado com sucesso!${WHITE}\n"
+        else
+          printf "${YELLOW}⚠️  Arquivo de configuração do PM2 não encontrado.${WHITE}\n"
+          printf "${WHITE}   Tentando reiniciar todos os processos PM2...${WHITE}\n"
+          pm2 restart all 2>/dev/null || true
+        fi
+EOF
+      sleep 2
+    else
+      printf "${YELLOW}⚠️  PM2 não está instalado ou não está no PATH.${WHITE}\n"
+      printf "${WHITE}   Pulando reinicialização do PM2.${WHITE}\n"
+      sleep 2
+    fi
+  } || trata_erro "reiniciar_pm2_backend"
+}
+
 # Função principal
 main() {
   aviso_versao_pro
@@ -556,6 +609,7 @@ main() {
   verificar_e_instalar_docker
   subir_containers_whatsmeow
   reiniciar_servicos
+  reiniciar_pm2_backend
   
   # Carregar variáveis finais
   source $ARQUIVO_VARIAVEIS
