@@ -259,6 +259,125 @@ clonar_repositorio_wuzapi() {
   } || trata_erro "clonar_repositorio_wuzapi"
 }
 
+# Corrigir Dockerfile do wuzapi
+corrigir_dockerfile_wuzapi() {
+  banner
+  printf "${WHITE} >> Verificando e corrigindo Dockerfile do wuzapi...\n"
+  echo
+  
+  {
+    local dockerfile_path="/home/deploy/${empresa}/wuzapi/Dockerfile"
+    
+    if [ ! -f "$dockerfile_path" ]; then
+      printf "${YELLOW}⚠️  Dockerfile não encontrado.${WHITE}\n"
+      printf "${RED}   Erro: Dockerfile não existe no repositório clonado.${WHITE}\n"
+      exit 1
+    fi
+    
+    # Criar backup
+    cp "$dockerfile_path" "${dockerfile_path}.backup" 2>/dev/null || true
+    
+    printf "${WHITE} >> Verificando Dockerfile existente...${WHITE}\n"
+    
+    # Verificar se há problemas com apt-get (Ubuntu/Debian)
+    if grep -q "apt-get install" "$dockerfile_path" 2>/dev/null; then
+      printf "${WHITE} >> Corrigindo lista de pacotes apt-get...${WHITE}\n"
+      
+      # Usar awk para processar o arquivo de forma mais confiável
+      awk '
+        BEGIN { in_section = 0; section_started = 0 }
+        
+        /# Install runtime dependencies/ || (/RUN apt-get update/ && /apt-get install/) {
+          if (!section_started) {
+            print "# Install runtime dependencies"
+            print "RUN apt-get update && apt-get install -y --no-install-recommends \\"
+            print "    ca-certificates \\"
+            print "    netcat-openbsd \\"
+            print "    postgresql-client \\"
+            print "    openssl \\"
+            print "    curl \\"
+            print "    ffmpeg \\"
+            print "    tzdata \\"
+            print "    && rm -rf /var/lib/apt/lists/*"
+            in_section = 1
+            section_started = 1
+            next
+          }
+        }
+        
+        in_section == 1 {
+          # Continuar pulando linhas até encontrar rm -rf ou próxima instrução
+          if (/rm -rf.*apt\/lists/ || /rm -rf.*var\/lib\/apt\/lists/) {
+            in_section = 0
+            next
+          }
+          # Se encontrar uma nova instrução (começa com letra maiúscula e não é continuação)
+          if (/^[A-Z]/ && !/^RUN/ && !/^#/ && !/^[[:space:]]*\\/) {
+            in_section = 0
+            print
+            next
+          }
+          # Se encontrar outra instrução RUN ou comentário
+          if (/^RUN/ || /^#/) {
+            in_section = 0
+            print
+            next
+          }
+          # Pular linhas de continuação (que terminam com \)
+          if (/[[:space:]]*\\[[:space:]]*$/) {
+            next
+          }
+          # Se chegou aqui e não é continuação, sair da seção
+          in_section = 0
+          print
+          next
+        }
+        
+        { print }
+      ' "$dockerfile_path" > "${dockerfile_path}.tmp" && mv "${dockerfile_path}.tmp" "$dockerfile_path"
+      
+      if [ $? -eq 0 ]; then
+        printf "${GREEN} >> Dockerfile corrigido com sucesso!${WHITE}\n"
+      else
+        printf "${RED} >> Erro ao corrigir Dockerfile.${WHITE}\n"
+        printf "${YELLOW} >> Tentando método alternativo...${WHITE}\n"
+        
+        # Método alternativo: usar perl para substituição
+        perl -i -pe '
+          if (/# Install runtime dependencies/ || (/RUN apt-get update/ && /apt-get install/)) {
+            $_ = "# Install runtime dependencies\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    ca-certificates \\\n    netcat-openbsd \\\n    postgresql-client \\\n    openssl \\\n    curl \\\n    ffmpeg \\\n    tzdata \\\n    && rm -rf /var/lib/apt/lists/*\n";
+            $skip = 1;
+          } elsif ($skip) {
+            if (/rm -rf.*apt\/lists/ || /^[A-Z]/) {
+              $skip = 0;
+              $_ = "" if /rm -rf.*apt\/lists/;
+            } else {
+              $_ = "";
+            }
+          }
+        ' "$dockerfile_path" 2>/dev/null
+        
+        if [ $? -eq 0 ]; then
+          printf "${GREEN} >> Dockerfile corrigido usando método alternativo!${WHITE}\n"
+        else
+          printf "${RED} >> Erro: Não foi possível corrigir o Dockerfile automaticamente.${WHITE}\n"
+          printf "${YELLOW} >> Você pode corrigir manualmente o arquivo: ${dockerfile_path}${WHITE}\n"
+        fi
+      fi
+      
+    elif grep -q "apk add" "$dockerfile_path" 2>/dev/null; then
+      printf "${WHITE} >> Dockerfile usa Alpine Linux (apk). Verificando formatação...${WHITE}\n"
+      # Corrigir quebras de linha se necessário
+      sed -i 's/\\[[:space:]]*$/ \\/g' "$dockerfile_path"
+      printf "${GREEN} >> Dockerfile verificado!${WHITE}\n"
+    else
+      printf "${YELLOW} >> Dockerfile não usa apt-get nem apk. Mantendo como está.${WHITE}\n"
+    fi
+    
+    sleep 2
+  } || trata_erro "corrigir_dockerfile_wuzapi"
+}
+
 # Gerar chaves de criptografia
 gerar_chaves_criptografia() {
   # Gerar chave de criptografia de 32 bytes (64 caracteres hex)
@@ -603,6 +722,7 @@ main() {
   verificar_dns_whatsmeow
   configurar_nginx_whatsmeow
   clonar_repositorio_wuzapi
+  corrigir_dockerfile_wuzapi
   configurar_env_wuzapi
   configurar_docker_compose
   atualizar_env_backend

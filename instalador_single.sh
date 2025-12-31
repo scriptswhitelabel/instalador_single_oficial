@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.5\n"
+  printf "                                INSTALADOR 6.6\n"
   printf "\n\n"
 }
 
@@ -43,6 +43,50 @@ trata_erro() {
   printf "${RED}Erro encontrado na etapa $1. Encerrando o script.${WHITE}\n"
   salvar_etapa "$1"
   exit 1
+}
+
+# Verificar conectividade de rede e DNS
+verificar_conectividade() {
+  printf "${WHITE} >> Verificando conectividade de rede...\n"
+  
+  # Verificar se consegue fazer ping no Google DNS
+  if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: Sem conectividade de rede (não consegue alcançar 8.8.8.8)${WHITE}\n"
+    printf "${YELLOW} >> Verifique sua conexão de internet.${WHITE}\n"
+    return 1
+  fi
+  
+  # Verificar resolução DNS
+  if ! ping -c 1 -W 2 google.com >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: Problema com resolução DNS${WHITE}\n"
+    printf "${YELLOW} >> Verifique a configuração do DNS em /etc/resolv.conf${WHITE}\n"
+    printf "${YELLOW} >> Você pode tentar:${WHITE}\n"
+    printf "${YELLOW} >>   echo 'nameserver 8.8.8.8' >> /etc/resolv.conf${WHITE}\n"
+    printf "${YELLOW} >>   echo 'nameserver 8.8.4.4' >> /etc/resolv.conf${WHITE}\n"
+    return 1
+  fi
+  
+  printf "${GREEN} >> Conectividade de rede OK!${WHITE}\n"
+  return 0
+}
+
+# Tentar corrigir problemas de DNS
+tentar_corrigir_dns() {
+  printf "${WHITE} >> Tentando corrigir problemas de DNS...\n"
+  
+  # Adicionar Google DNS se não estiver presente
+  if ! grep -q "8.8.8.8" /etc/resolv.conf 2>/dev/null; then
+    printf "${WHITE} >> Adicionando Google DNS (8.8.8.8)...\n"
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+  fi
+  
+  # Tentar usar systemd-resolve se disponível
+  if command -v systemd-resolve &> /dev/null; then
+    systemd-resolve --flush-caches >/dev/null 2>&1 || true
+  fi
+  
+  sleep 2
 }
 
 # Salvar variáveis
@@ -768,9 +812,37 @@ confirma_dados_instalacao_base() {
 
 # Atualiza sistema operacional
 atualiza_vps_base() {
+  banner
+  printf "${WHITE} >> Atualizando sistema operacional...\n"
+  echo
+  
+  # Verificar conectividade antes de atualizar
+  if ! verificar_conectividade; then
+    printf "${YELLOW} >> Tentando corrigir problemas de DNS...${WHITE}\n"
+    tentar_corrigir_dns
+    
+    # Verificar novamente
+    if ! verificar_conectividade; then
+      printf "${RED} >> ERRO: Problemas de conectividade não resolvidos.${WHITE}\n"
+      printf "${YELLOW} >> Por favor, resolva os problemas de rede antes de continuar.${WHITE}\n"
+      trata_erro "atualiza_vps_base"
+    fi
+  fi
+  
   UPDATE_FILE="$(pwd)/update.x"
   {
-    sudo DEBIAN_FRONTEND=noninteractive apt update -y && sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && sudo DEBIAN_FRONTEND=noninteractive apt-get install build-essential -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apparmor-utils
+    # Tentar atualizar, se falhar, corrigir DNS e tentar novamente
+    if ! sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
+      printf "${YELLOW} >> Erro ao atualizar. Tentando corrigir DNS e tentar novamente...${WHITE}\n"
+      tentar_corrigir_dns
+      if ! sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
+        printf "${RED} >> ERRO: Falha ao atualizar lista de pacotes após correções.${WHITE}\n"
+        printf "${YELLOW} >> Verifique sua conexão de internet e configuração de DNS.${WHITE}\n"
+        trata_erro "atualiza_vps_base"
+      fi
+    fi
+    
+    sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && sudo DEBIAN_FRONTEND=noninteractive apt-get install build-essential -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apparmor-utils
     touch "${UPDATE_FILE}"
     sleep 2
   } || trata_erro "atualiza_vps_base"
@@ -1162,41 +1234,101 @@ instala_nginx_base() {
   banner
   printf "${WHITE} >> Instalando Nginx...\n"
   echo
+  
+  # Verificar conectividade antes de continuar
+  if ! verificar_conectividade; then
+    printf "${YELLOW} >> Tentando corrigir problemas de DNS...${WHITE}\n"
+    tentar_corrigir_dns
+    
+    # Verificar novamente
+    if ! verificar_conectividade; then
+      printf "${RED} >> ERRO: Problemas de conectividade não resolvidos.${WHITE}\n"
+      printf "${YELLOW} >> Por favor, resolva os problemas de rede antes de continuar.${WHITE}\n"
+      printf "${YELLOW} >> Você pode tentar:${WHITE}\n"
+      printf "${YELLOW} >>   1. Verificar conexão de internet${WHITE}\n"
+      printf "${YELLOW} >>   2. Configurar DNS manualmente${WHITE}\n"
+      printf "${YELLOW} >>   3. Verificar firewall/proxy${WHITE}\n"
+      trata_erro "instala_nginx_base"
+    fi
+  fi
+  
   {
+    # Atualizar lista de pacotes primeiro
+    printf "${WHITE} >> Atualizando lista de pacotes...\n"
     sudo su - root <<EOF
-    apt install -y nginx
-    rm /etc/nginx/sites-enabled/default
+apt update -y || {
+  echo "Erro ao atualizar. Tentando corrigir DNS..."
+  echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+  echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+  apt update -y
+}
 EOF
 
     sleep 2
 
+    # Instalar Nginx
+    printf "${WHITE} >> Instalando pacote Nginx...\n"
     sudo su - root <<EOF
+if ! apt install -y nginx; then
+  echo "Erro ao instalar Nginx. Verificando logs..."
+  echo "Possíveis soluções:"
+  echo "1. Verificar conectividade de internet"
+  echo "2. Configurar DNS: echo 'nameserver 8.8.8.8' >> /etc/resolv.conf"
+  echo "3. Tentar: apt-get update --fix-missing"
+  exit 1
+fi
+rm /etc/nginx/sites-enabled/default 2>/dev/null || true
+EOF
+
+    sleep 2
+
+    # Configurar client_max_body_size
+    sudo su - root <<EOF
+mkdir -p /etc/nginx/conf.d
 echo 'client_max_body_size 100M;' > /etc/nginx/conf.d/${empresa}.conf
 EOF
 
     sleep 2
 
+    # Reiniciar Nginx
     sudo su - root <<EOF
-  service nginx restart
+if ! service nginx restart; then
+  systemctl start nginx || systemctl restart nginx
+fi
 EOF
 
     sleep 2
 
+    # Instalar snapd e certbot
+    printf "${WHITE} >> Instalando Certbot...\n"
     sudo su - root <<EOF
-  apt install -y snapd
+if ! command -v snap &> /dev/null; then
+  apt install -y snapd || {
+    echo "Erro ao instalar snapd"
+    exit 1
+  }
   snap install core
   snap refresh core
-EOF
+fi
 
-    sleep 2
+# Remover certbot antigo se existir
+apt-get remove certbot -y 2>/dev/null || true
 
-    sudo su - root <<EOF
-  apt-get remove certbot
-  snap install --classic certbot
+# Instalar certbot via snap
+if ! snap install --classic certbot; then
+  echo "Erro ao instalar Certbot via snap"
+  exit 1
+fi
+
+# Criar link simbólico se não existir
+if [ ! -f /usr/bin/certbot ]; then
   ln -s /snap/bin/certbot /usr/bin/certbot
+fi
 EOF
 
     sleep 2
+    
+    printf "${GREEN} >> Nginx e Certbot instalados com sucesso!${WHITE}\n"
   } || trata_erro "instala_nginx_base"
 }
 
