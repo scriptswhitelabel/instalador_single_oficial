@@ -62,6 +62,8 @@ trata_erro() {
 definir_versoes() {
   declare -gA VERSOES
   VERSOES["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
+  VERSOES["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
+  VERSOES["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
   # Adicione mais versões aqui conforme necessário
   # VERSOES["6.4.2"]="outro_commit_hash_aqui"
   # VERSOES["6.4.1"]="outro_commit_hash_aqui"

@@ -1520,6 +1520,8 @@ codifica_clone_base() {
 # Definir versões disponíveis para instalação
 definir_versoes_instalacao() {
   declare -gA VERSOES_INSTALACAO
+  VERSOES_INSTALACAO["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
+  VERSOES_INSTALACAO["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
   VERSOES_INSTALACAO["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
   VERSOES_INSTALACAO["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
 }
@@ -1829,6 +1831,11 @@ MAIL_USER="SEUGMAIL@gmail.com"
 MAIL_PASS="SENHA DE APP"
 MAIL_FROM="Recuperação de Senha <SEU GMAIL@gmail.com>"
 MAIL_PORT="465"
+
+# WAVOIP
+WAVOIP_URL=https://api.wavoip.com
+WAVOIP_USERNAME='seuemaildowavoip@email.com.br'
+WAVOIP_PASSWORD='SUASENHA'
 
 # WhatsApp Oficial
 USE_WHATSAPP_OFICIAL=true
