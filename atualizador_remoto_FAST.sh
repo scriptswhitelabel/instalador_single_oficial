@@ -82,18 +82,18 @@ done
   
 }
 
-otimiza_banco_atualizar() {
-  printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
-  {
-    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    sudo su - root <<EOF
-    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h localhost -d "${empresa}" --full --analyze
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "REINDEX DATABASE ${empresa};"
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "ANALYZE;"
-EOF
-    sleep 2
-  } || trata_erro "otimiza_banco_atualizar"
-}
+# otimiza_banco_atualizar() {
+#   printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
+#   {
+#     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+#     sudo su - root <<EOF
+#     PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h localhost -d "${empresa}" --full --analyze
+#     PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "REINDEX DATABASE ${empresa};"
+#     PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "ANALYZE;"
+# EOF
+#     sleep 2
+#   } || trata_erro "otimiza_banco_atualizar"
+# }
 
 baixa_codigo_atualizar() {
   printf "${WHITE} >> Recuperando Permissões da empresa ${empresa}... \n"
@@ -111,7 +111,7 @@ baixa_codigo_atualizar() {
 
   # sleep 2
 
-  otimiza_banco_atualizar
+  # otimiza_banco_atualizar
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
