@@ -48,11 +48,11 @@ backup_app_atualizar() {
   source /home/deploy/${empresa}/backend/.env
   {
     printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    # db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    # [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
-    # backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
-    # PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
-    # printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
+    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
+    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
+    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
+    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
     sleep 2
   } || trata_erro "backup_app_atualizar"
 
@@ -103,13 +103,13 @@ baixa_codigo_atualizar() {
 
   sleep 2
 
-  printf "${WHITE} >> Parando Instancias... \n"
-  sleep 2
-  sudo su - deploy <<EOF
-  # pm2 stop all
-EOF
+  # printf "${WHITE} >> Parando Instancias... \n"
+  # sleep 2
+  # sudo su - deploy <<EOF
+  # # pm2 stop all
+  # EOF
 
-  sleep 2
+  # sleep 2
 
   otimiza_banco_atualizar
 
@@ -155,9 +155,11 @@ cd /home/deploy/${empresa}/frontend
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
+printf "${WHITE} >> Reiniciando Instancias e Aplicando a Atualização... \n"
+sleep 2
 pm2 flush
 pm2 reset all
-pm2 start all
+pm2 restart all
 pm2 save
 pm2 startup
 EOF
