@@ -155,8 +155,8 @@ cd /home/deploy/${empresa}/frontend
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 sleep 2
-printf "${WHITE} >> Reiniciando Instancias e Aplicando a Atualização... \n"
-sleep 2
+printf "${WHITE} >> Atualização Concluida, Reiniciando Instancias e Aplicando a Atualização... \n"
+sleep 7
 pm2 flush
 pm2 reset all
 pm2 restart all
