@@ -61,10 +61,12 @@ trata_erro() {
 # Formato: "versao:commit_hash"
 definir_versoes() {
   declare -gA VERSOES
+  VERSOES["6.4.5"]="251c6f693b67c76468311b0ca9c41f89f8a3aca0"
+  VERSOES["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
   VERSOES["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
-  VERSOES["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
   VERSOES["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
-  # Adicione mais versões aqui conforme necessário
+  VERSOES["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
+   # Adicione mais versões aqui conforme necessário
   # VERSOES["6.4.2"]="outro_commit_hash_aqui"
   # VERSOES["6.4.1"]="outro_commit_hash_aqui"
 }
@@ -421,12 +423,12 @@ fi
 
 npm prune --force > /dev/null 2>&1
 export PUPPETEER_SKIP_DOWNLOAD=true
-rm -rf node_modules 2>/dev/null || true
-rm -f package-lock.json 2>/dev/null || true
-rm -rf dist 2>/dev/null || true
-npm install --force
-npm install puppeteer-core --force
-npm i glob
+# rm -rf node_modules 2>/dev/null || true
+# rm -f package-lock.json 2>/dev/null || true
+# rm -rf dist 2>/dev/null || true
+# npm install --force
+# npm install puppeteer-core --force
+# npm i glob
 npm run build
 sleep 2
 BACKEND
@@ -492,9 +494,9 @@ if [ ! -f "package.json" ]; then
 fi
 
 npm prune --force > /dev/null 2>&1
-rm -rf node_modules 2>/dev/null || true
-rm -f package-lock.json 2>/dev/null || true
-npm install --force
+# rm -rf node_modules 2>/dev/null || true
+# rm -f package-lock.json 2>/dev/null || true
+# npm install --force
 
 if [ -f "server.js" ]; then
   sed -i 's/3000/'"$frontend_port"'/g' server.js
