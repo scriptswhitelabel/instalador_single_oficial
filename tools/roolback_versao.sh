@@ -423,12 +423,12 @@ fi
 
 npm prune --force > /dev/null 2>&1
 export PUPPETEER_SKIP_DOWNLOAD=true
-# rm -rf node_modules 2>/dev/null || true
-# rm -f package-lock.json 2>/dev/null || true
-# rm -rf dist 2>/dev/null || true
-# npm install --force
-# npm install puppeteer-core --force
-# npm i glob
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+rm -rf dist 2>/dev/null || true
+npm install --force
+npm install puppeteer-core --force
+npm i glob
 npm run build
 sleep 2
 BACKEND
@@ -494,9 +494,9 @@ if [ ! -f "package.json" ]; then
 fi
 
 npm prune --force > /dev/null 2>&1
-# rm -rf node_modules 2>/dev/null || true
-# rm -f package-lock.json 2>/dev/null || true
-# npm install --force
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+npm install --force
 
 if [ -f "server.js" ]; then
   sed -i 's/3000/'"$frontend_port"'/g' server.js
