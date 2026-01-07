@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.6\n"
+  printf "                                INSTALADOR 6.7\n"
   printf "\n\n"
 }
 
@@ -1845,6 +1845,9 @@ OFFICIAL_CAMPAIGN_CONCURRENCY=10  # Processa até 10 campanhas ao mesmo tempo
 
 # API de Transcrição de Audio
 TRANSCRIBE_URL=http://localhost:4002
+
+# Buffer Size Configuration
+MAX_BUFFER_SIZE_MB=200
 [-]EOF
 EOF
 
@@ -2456,6 +2459,8 @@ STOPPM2
 
   otimiza_banco_atualizar
 
+  verificar_e_adicionar_max_buffer
+
   banner
   printf "${WHITE} >> Atualizando a Aplicação... \n"
   echo
@@ -2577,6 +2582,28 @@ EOF
 
     sleep 2
   } || trata_erro "otimiza_banco_atualizar"
+}
+
+# Verificar e adicionar MAX_BUFFER_SIZE_MB no .env do backend
+verificar_e_adicionar_max_buffer() {
+  carregar_variaveis
+  
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+  
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de MAX_BUFFER_SIZE_MB.\n${WHITE}"
+    return 0
+  fi
+  
+  if ! grep -q "^MAX_BUFFER_SIZE_MB=" "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando MAX_BUFFER_SIZE_MB=200 no .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Buffer Size Configuration" >> "$ENV_FILE"
+    echo "MAX_BUFFER_SIZE_MB=200" >> "$ENV_FILE"
+    printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB adicionada com sucesso!${WHITE}\n"
+  else
+    printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB já existe no .env do backend.${WHITE}\n"
+  fi
 }
 
 # Adicionar função para instalar transcrição de áudio nativa

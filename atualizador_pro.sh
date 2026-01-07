@@ -482,6 +482,34 @@ EOF
   } || trata_erro "otimiza_banco_atualizar"
 }
 
+# Verificar e adicionar MAX_BUFFER_SIZE_MB no .env do backend
+verificar_e_adicionar_max_buffer() {
+  dummy_carregar_variaveis
+  
+  # Verifica se a variável empresa está definida
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+  
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+  
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de MAX_BUFFER_SIZE_MB.\n${WHITE}"
+    return 0
+  fi
+  
+  if ! grep -q "^MAX_BUFFER_SIZE_MB=" "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando MAX_BUFFER_SIZE_MB=200 no .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Buffer Size Configuration" >> "$ENV_FILE"
+    echo "MAX_BUFFER_SIZE_MB=200" >> "$ENV_FILE"
+    printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB adicionada com sucesso!${WHITE}\n"
+  else
+    printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB já existe no .env do backend.${WHITE}\n"
+  fi
+}
+
 baixa_codigo_atualizar() {
   # Verifica se a variável empresa está definida
   if [ -z "${empresa}" ]; then
@@ -521,6 +549,8 @@ STOPPM2
   sleep 2
 
   otimiza_banco_atualizar
+
+  verificar_e_adicionar_max_buffer
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
