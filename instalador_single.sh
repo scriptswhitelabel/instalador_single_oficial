@@ -34,7 +34,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.7\n"
+  printf "                                INSTALADOR 6.8\n"
   printf "\n\n"
 }
 
@@ -294,6 +294,7 @@ menu_ferramentas() {
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
+    printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -343,6 +344,21 @@ menu_ferramentas() {
         read -r
       else
         printf "${RED} >> Erro: Arquivo ${ROLLBACK_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    5)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      INSTANCIAS_SCRIPT="${SCRIPT_DIR}/tools/instalador_instancias.sh"
+      if [ -f "$INSTANCIAS_SCRIPT" ]; then
+        printf "${GREEN} >> Executando Instalador de Novas Instâncias...${WHITE}\n"
+        echo
+        bash "$INSTANCIAS_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${INSTANCIAS_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
       ;;
