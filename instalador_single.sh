@@ -2885,6 +2885,34 @@ instalar_transcricao_audio_nativa() {
   echo
   sleep 2
   
+  # IMPORTANTE: Reiniciar o PM2 do backend para aplicar a nova variável TRANSCRIBE_URL
+  banner
+  printf "${WHITE} >> Reiniciando backend para aplicar a nova configuração TRANSCRIBE_URL...\n"
+  echo
+  
+  sudo su - deploy <<RESTARTBACKEND
+  # Configura PATH para Node.js e PM2
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  else
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
+  fi
+  
+  # Reiniciar apenas o backend desta instância para carregar a nova variável TRANSCRIBE_URL
+  if pm2 list | grep -qE "${empresa}-backend[[:space:]]"; then
+    printf "Reiniciando backend ${empresa}-backend...\n"
+    pm2 restart ${empresa}-backend
+    pm2 save
+    printf "${GREEN} >> Backend reiniciado com sucesso! Nova porta TRANSCRIBE_URL aplicada.${WHITE}\n"
+  else
+    printf "${YELLOW} >> AVISO: Backend ${empresa}-backend não encontrado no PM2${WHITE}\n"
+    printf "${YELLOW} >> A configuração foi salva, mas será aplicada quando o backend for iniciado${WHITE}\n"
+  fi
+RESTARTBACKEND
+  
+  echo
+  sleep 2
+  
   # Verificar se há processos PM2 existentes desta instância (apenas se já estiver instalado)
   # Na primeira instalação, não haverá processos para parar
   banner
@@ -3020,9 +3048,36 @@ PYTHON_SCRIPT
   echo
   sleep 2
   
+  # Limpar processos PM2 que possam estar rodando como root ANTES de executar o script
+  # Isso evita que o script inicie processos como root e cause conflitos
+  banner
+  printf "${WHITE} >> Limpando processos PM2 conflitantes (root) antes da instalação...\n"
+  echo
+  
+  sudo su - root <<CLEANBEFORESCRIPT
+  # Configura PATH para Node.js e PM2
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  else
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
+  fi
+  
+  # Parar e deletar processos desta instância que possam estar rodando como root
+  # Isso garante que não haverá conflito quando iniciarmos como deploy depois
+  pm2 stop transc-${empresa} 2>/dev/null || true
+  pm2 delete transc-${empresa} 2>/dev/null || true
+  pm2 stop ${empresa}-transcricao 2>/dev/null || true
+  pm2 delete ${empresa}-transcricao 2>/dev/null || true
+  pm2 save 2>/dev/null || true
+CLEANBEFORESCRIPT
+  
+  echo
+  sleep 2
+  
   # Executar script de instalação
   banner
   printf "${WHITE} >> Executando script de instalação da transcrição...\n"
+  printf "${YELLOW} >> NOTA: Se o script tentar iniciar PM2 como root, vamos limpar depois${WHITE}\n"
   echo
   
   local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
@@ -3048,9 +3103,28 @@ PYTHON_SCRIPT
     fi
     
     # Verificar se o script iniciou algum processo PM2 desta instância ESPECÍFICA
-    # IMPORTANTE: Só para processos com o nome exato desta instância
+    # IMPORTANTE: Limpar processos iniciados como ROOT e garantir que rodem como DEPLOY
     # NÃO afeta processos genéricos como "transcricao" ou processos de outras instâncias (incluindo instalação principal)
-    # Se sim, parar para aplicar a porta correta. Se não, continuar normalmente.
+    # Se sim, parar para aplicar a porta correta e garantir que rode como deploy. Se não, continuar normalmente.
+    
+    # Primeiro, limpar processos que possam ter sido iniciados como ROOT
+    printf "Limpando processos PM2 iniciados como ROOT (se houver)...\n"
+    sudo su - root <<CLEANROOTAFTER
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    
+    # Parar processos desta instância que possam estar rodando como root
+    pm2 stop transc-${empresa} 2>/dev/null || true
+    pm2 delete transc-${empresa} 2>/dev/null || true
+    pm2 stop ${empresa}-transcricao 2>/dev/null || true
+    pm2 delete ${empresa}-transcricao 2>/dev/null || true
+    pm2 save 2>/dev/null || true
+CLEANROOTAFTER
+    
+    # Agora verificar processos como deploy
     if pm2 list | grep -qE "transc-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
       printf "Processos PM2 encontrados para a instância ${empresa}. Parando para aplicar porta correta...\n"
       # Parar APENAS processos com o nome exato desta instância
@@ -3142,10 +3216,36 @@ PYTHON_FIX
       grep "app.run" "$main_py" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
       
       echo
-      printf "${WHITE} >> Agora iniciando o PM2 com a porta correta (${porta_transcricao})...${WHITE}\n"
+      printf "${WHITE} >> Limpando processos PM2 conflitantes antes de iniciar...${WHITE}\n"
       echo
       
-      # Iniciar o PM2 manualmente com a porta correta
+      # IMPORTANTE: Parar qualquer processo PM2 desta instância que possa ter sido iniciado como root
+      # Isso evita conflitos entre processos rodando como root e deploy
+      sudo su - root <<CLEANROOTPM2
+      # Configura PATH para Node.js e PM2
+      if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+        export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+      else
+        export PATH=/usr/bin:/usr/local/bin:\$PATH
+      fi
+      
+      # Parar e deletar processos desta instância que possam estar rodando como root
+      # Isso evita conflitos com processos que devem rodar como deploy
+      pm2 stop transc-${empresa} 2>/dev/null || true
+      pm2 delete transc-${empresa} 2>/dev/null || true
+      pm2 stop ${empresa}-transcricao 2>/dev/null || true
+      pm2 delete ${empresa}-transcricao 2>/dev/null || true
+      pm2 save 2>/dev/null || true
+CLEANROOTPM2
+      
+      echo
+      sleep 2
+      
+      printf "${WHITE} >> Agora iniciando o PM2 como usuário DEPLOY com a porta correta (${porta_transcricao})...${WHITE}\n"
+      echo
+      
+      # Iniciar o PM2 manualmente como usuário DEPLOY (não root)
+      # Isso garante que todos os processos rodem com as mesmas permissões
       sudo su - deploy <<STARTPM2CORRECT
       # Configura PATH para Node.js e PM2
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -3154,12 +3254,32 @@ PYTHON_FIX
         export PATH=/usr/bin:/usr/local/bin:\$PATH
       fi
       
+      # Verificar se já existe processo desta instância rodando como deploy
+      # Se existir, parar antes de iniciar novamente
+      if pm2 list | grep -qE "transc-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
+        printf "Processo existente encontrado. Parando antes de reiniciar...\n"
+        pm2 stop transc-${empresa} 2>/dev/null || true
+        pm2 delete transc-${empresa} 2>/dev/null || true
+        pm2 stop ${empresa}-transcricao 2>/dev/null || true
+        pm2 delete ${empresa}-transcricao 2>/dev/null || true
+        sleep 1
+      fi
+      
       TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
       if [ -f "\$TRANSC_DIR/main.py" ]; then
         cd "\$TRANSC_DIR"
+        # Iniciar PM2 como usuário deploy (não root)
         pm2 start main.py --name transc-${empresa} --interpreter python3
         pm2 save
-        printf "${GREEN} >> PM2 iniciado com sucesso na porta ${porta_transcricao}${WHITE}\n"
+        printf "${GREEN} >> PM2 iniciado com sucesso como usuário DEPLOY na porta ${porta_transcricao}${WHITE}\n"
+        
+        # Verificar se o processo está rodando corretamente
+        sleep 2
+        if pm2 list | grep -q "transc-${empresa}.*online"; then
+          printf "${GREEN} >> ✓ Processo transc-${empresa} está ONLINE${WHITE}\n"
+        else
+          printf "${YELLOW} >> ⚠ Verifique o status do processo: pm2 list${WHITE}\n"
+        fi
       else
         printf "${RED} >> ERRO: Arquivo main.py não encontrado${WHITE}\n"
       fi
