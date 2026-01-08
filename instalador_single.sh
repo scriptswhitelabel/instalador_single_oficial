@@ -107,9 +107,13 @@ salvar_variaveis() {
   echo "proxy=${proxy}" >>$ARQUIVO_VARIAVEIS
   echo "backend_port=${backend_port}" >>$ARQUIVO_VARIAVEIS
   echo "frontend_port=${frontend_port}" >>$ARQUIVO_VARIAVEIS
-  # Salvar versão com aspas para evitar problemas com espaços
-  echo "versao_instalacao=\"${versao_instalacao}\"" >>$ARQUIVO_VARIAVEIS
-  echo "commit_instalacao=\"${commit_instalacao}\"" >>$ARQUIVO_VARIAVEIS
+  # Salvar versão (usar underscore se for "Mais Recente" para evitar problemas com espaços)
+  local versao_para_salvar="${versao_instalacao}"
+  if [ "${versao_instalacao}" = "Mais Recente" ] || [ "${versao_instalacao}" = "Mais_Recente" ]; then
+    versao_para_salvar="Mais_Recente"
+  fi
+  echo "versao_instalacao=${versao_para_salvar}" >>$ARQUIVO_VARIAVEIS
+  echo "commit_instalacao=${commit_instalacao}" >>$ARQUIVO_VARIAVEIS
 }
 
 # Carregar variáveis
@@ -3128,12 +3132,20 @@ CLEANBEFORESCRIPT
   local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
-    # Passar o nome do app como variável de ambiente para evitar que o script peça
-    # Usar o padrão: transc-${empresa}
+    
+    # Passar o nome do app como variável de ambiente (padrão: transc-${empresa})
+    # O nome é obtido do arquivo de variáveis da instância
     export PM2_APP_NAME="transc-${empresa}"
-    bash "$script_path"
+    export APP_NAME="transc-${empresa}"
+    export PM2_NAME="transc-${empresa}"
+    
+    # Executar o script passando o nome automaticamente quando ele pedir
+    # Usar echo para responder automaticamente ao prompt
+    printf "${WHITE} >> Executando script com nome automático: ${BLUE}transc-${empresa}${WHITE}\n"
+    echo "transc-${empresa}" | bash "$script_path"
+    
     printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
-    printf "${GREEN} >> Nome do app PM2 usado: ${BLUE}transc-${empresa}${WHITE}\n"
+    printf "${GREEN} >> Nome do app PM2 usado automaticamente: ${BLUE}transc-${empresa}${WHITE}\n"
     echo
     
     # Verificar se o script iniciou algum processo PM2 e parar apenas se existir
