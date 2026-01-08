@@ -625,7 +625,16 @@ instalar_redis_docker() {
   printf "${WHITE} >> Instalando Redis em Docker para a instância ${nova_empresa}...\n"
   echo
   
+  # Verificar se a senha do deploy está definida
+  if [ -z "${senha_deploy}" ]; then
+    printf "${RED} >> ERRO: Senha do deploy não está definida!${WHITE}\n"
+    printf "${YELLOW} >> A senha do deploy é necessária para configurar o Redis.${WHITE}\n"
+    exit 1
+  fi
+  
   {
+    printf "${WHITE} >> Configurando Redis com senha do deploy...${WHITE}\n"
+    
     # Criar diretório para dados do Redis
     mkdir -p /home/deploy/redis_${nova_empresa}
     chown -R deploy:deploy /home/deploy/redis_${nova_empresa}
@@ -665,6 +674,7 @@ EOF
     # Verificar se está rodando
     if docker ps | grep -q "redis_${nova_empresa}"; then
       printf "${GREEN}✅ Redis instalado e rodando em Docker na porta ${nova_redis_port}!${WHITE}\n"
+      printf "${GREEN}✅ Redis configurado com senha do deploy (requirepass ativado)${WHITE}\n"
       echo
       sleep 2
     else
