@@ -528,8 +528,170 @@ instalacao_base() {
   fi
 }
 
+# Função para detectar e listar todas as instâncias instaladas
+detectar_instancias_instaladas() {
+  local instancias=()
+  local nomes_empresas=()
+  local temp_empresa=""
+  local temp_subdominio_backend=""
+  local temp_subdominio_frontend=""
+  
+  # Verificar instalação base (arquivo VARIAVEIS_INSTALACAO)
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ]; then
+    # Salvar variáveis atuais
+    local empresa_original="${empresa:-}"
+    local subdominio_backend_original="${subdominio_backend:-}"
+    local subdominio_frontend_original="${subdominio_frontend:-}"
+    
+    # Carregar variáveis do arquivo
+    source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    
+    # Restaurar variáveis originais
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+  fi
+  
+  # Verificar instâncias adicionais (arquivos VARIAVEIS_INSTALACAO_INSTANCIA_*)
+  if [ -d "${INSTALADOR_DIR}" ]; then
+    for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+      if [ -f "$arquivo_instancia" ]; then
+        # Salvar variáveis atuais
+        local empresa_original="${empresa:-}"
+        local subdominio_backend_original="${subdominio_backend:-}"
+        local subdominio_frontend_original="${subdominio_frontend:-}"
+        
+        # Carregar variáveis do arquivo
+        source "$arquivo_instancia" 2>/dev/null
+        temp_empresa="${empresa:-}"
+        
+        if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+          instancias+=("$arquivo_instancia")
+          nomes_empresas+=("${temp_empresa}")
+        fi
+        
+        # Restaurar variáveis originais
+        empresa="${empresa_original}"
+        subdominio_backend="${subdominio_backend_original}"
+        subdominio_frontend="${subdominio_frontend_original}"
+      fi
+    done
+  fi
+  
+  # Retornar arrays (usando variáveis globais)
+  declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
+  declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
+}
+
+# Função para selecionar qual instância atualizar
+selecionar_instancia_atualizar() {
+  banner
+  printf "${WHITE} >> Detectando instâncias instaladas...\n"
+  echo
+  
+  detectar_instancias_instaladas
+  
+  local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+  
+  if [ $total_instancias -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma instância instalada detectada!${WHITE}\n"
+    printf "${YELLOW} >> Não é possível atualizar. Verifique se há instâncias instaladas.${WHITE}\n"
+    sleep 3
+    return 1
+  elif [ $total_instancias -eq 1 ]; then
+    # Apenas uma instância, usar diretamente
+    printf "${GREEN} >> Uma instância detectada: ${BLUE}${NOMES_EMPRESAS_DETECTADAS[0]}${WHITE}\n"
+    echo
+    sleep 2
+    
+    # Carregar variáveis da instância única
+    source "${INSTANCIAS_DETECTADAS[0]}"
+    return 0
+  else
+    # Múltiplas instâncias, perguntar qual atualizar
+    printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+    printf "  INSTÂNCIAS INSTALADAS DETECTADAS\n"
+    printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+    echo
+    
+    local index=1
+    for i in "${!NOMES_EMPRESAS_DETECTADAS[@]}"; do
+      local empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+      local arquivo_instancia="${INSTANCIAS_DETECTADAS[$i]}"
+      
+      # Salvar variáveis atuais antes de carregar
+      local empresa_original="${empresa:-}"
+      local subdominio_backend_original="${subdominio_backend:-}"
+      local subdominio_frontend_original="${subdominio_frontend:-}"
+      
+      # Tentar carregar informações adicionais da instância
+      source "$arquivo_instancia" 2>/dev/null
+      
+      local temp_subdominio_backend="${subdominio_backend:-}"
+      local temp_subdominio_frontend="${subdominio_frontend:-}"
+      
+      # Restaurar variáveis originais
+      empresa="${empresa_original}"
+      subdominio_backend="${subdominio_backend_original}"
+      subdominio_frontend="${subdominio_frontend_original}"
+      
+      printf "${BLUE}  [$index]${WHITE} Empresa: ${GREEN}${empresa_nome}${WHITE}\n"
+      if [ -n "${temp_subdominio_backend}" ]; then
+        printf "      Backend: ${YELLOW}${temp_subdominio_backend}${WHITE}\n"
+      fi
+      if [ -n "${temp_subdominio_frontend}" ]; then
+        printf "      Frontend: ${YELLOW}${temp_subdominio_frontend}${WHITE}\n"
+      fi
+      echo
+      ((index++))
+    done
+    
+    printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
+    echo
+    printf "${YELLOW} >> Qual instância deseja atualizar? (1-${total_instancias}):${WHITE}\n"
+    read -p "> " escolha_instancia
+    
+    # Validar entrada
+    if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]]; then
+      printf "${RED} >> ERRO: Entrada inválida. Digite um número.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    
+    if [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt $total_instancias ]; then
+      printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 1 e ${total_instancias}.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    
+    # Carregar variáveis da instância selecionada
+    local indice_selecionado=$((escolha_instancia - 1))
+    source "${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+    
+    printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n"
+    echo
+    sleep 2
+    return 0
+  fi
+}
+
 # Etapa de instalação
 atualizar_base() {
+  # Verificar e selecionar instância para atualizar
+  if ! selecionar_instancia_atualizar; then
+    printf "${RED} >> Erro ao selecionar instância. Voltando ao menu principal...${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+  
   backup_app_atualizar || trata_erro "backup_app_atualizar"
   instala_ffmpeg_base || trata_erro "instala_ffmpeg_base"
   config_cron_base || trata_erro "config_cron_base"
@@ -2627,16 +2789,195 @@ instalar_transcricao_audio_nativa() {
   banner
   printf "${WHITE} >> Instalando Transcrição de Áudio Nativa...\n"
   echo
+  
+  # Verificar e selecionar instância para instalar a transcrição
+  if ! selecionar_instancia_atualizar; then
+    printf "${RED} >> Erro ao selecionar instância. Voltando ao menu principal...${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+  
+  # Verificar se a instância existe
+  if [ ! -d "/home/deploy/${empresa}" ]; then
+    printf "${RED} >> ERRO: Diretório /home/deploy/${empresa} não existe!${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+  
+  # Verificar se a pasta api_transcricao existe
+  if [ ! -d "/home/deploy/${empresa}/api_transcricao" ]; then
+    printf "${RED} >> ERRO: Pasta api_transcricao não encontrada em /home/deploy/${empresa}/api_transcricao${WHITE}\n"
+    printf "${YELLOW} >> A pasta api_transcricao deve existir no repositório da instância.${WHITE}\n"
+    sleep 3
+    menu
+    return
+  fi
+  
+  # Solicitar porta da transcrição
+  banner
+  printf "${WHITE} >> Configuração da Porta de Transcrição${WHITE}\n"
+  echo
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  echo
+  printf "${WHITE} >> Digite a porta para o serviço de transcrição (padrão: 4002):${WHITE}\n"
+  read -p "> " porta_transcricao
+  
+  # Validar porta
+  if [ -z "$porta_transcricao" ]; then
+    porta_transcricao="4002"
+    printf "${YELLOW} >> Usando porta padrão: 4002${WHITE}\n"
+  fi
+  
+  # Validar se é um número válido
+  if ! [[ "$porta_transcricao" =~ ^[0-9]+$ ]]; then
+    printf "${RED} >> ERRO: Porta inválida! Deve ser um número.${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+  
+  # Verificar se a porta está em uso
+  if lsof -i:${porta_transcricao} &>/dev/null; then
+    printf "${YELLOW} >> ATENÇÃO: A porta ${porta_transcricao} já está em uso.${WHITE}\n"
+    printf "${WHITE} >> Deseja continuar mesmo assim? (S/N):${WHITE}\n"
+    read -p "> " continuar_porta
+    continuar_porta=$(echo "${continuar_porta}" | tr '[:lower:]' '[:upper:]')
+    if [ "${continuar_porta}" != "S" ]; then
+      printf "${GREEN} >> Operação cancelada. Voltando ao menu...${WHITE}\n"
+      sleep 2
+      menu
+      return
+    fi
+  fi
+  
+  printf "${GREEN} >> Porta selecionada: ${BLUE}${porta_transcricao}${WHITE}\n"
+  echo
+  sleep 2
+  
+  # Atualizar .env do backend com a nova porta
+  banner
+  printf "${WHITE} >> Atualizando configuração do backend...\n"
+  echo
+  
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  if [ -f "$env_file" ]; then
+    # Verificar se TRANSCRIBE_URL já existe
+    if grep -q "^TRANSCRIBE_URL=" "$env_file"; then
+      # Atualizar porta existente
+      sed -i "s|^TRANSCRIBE_URL=.*|TRANSCRIBE_URL=http://localhost:${porta_transcricao}|" "$env_file"
+      printf "${GREEN} >> TRANSCRIBE_URL atualizado para http://localhost:${porta_transcricao}${WHITE}\n"
+    else
+      # Adicionar TRANSCRIBE_URL se não existir
+      echo "" >> "$env_file"
+      echo "# API de Transcrição de Audio" >> "$env_file"
+      echo "TRANSCRIBE_URL=http://localhost:${porta_transcricao}" >> "$env_file"
+      printf "${GREEN} >> TRANSCRIBE_URL adicionado: http://localhost:${porta_transcricao}${WHITE}\n"
+    fi
+  else
+    printf "${RED} >> ERRO: Arquivo .env não encontrado em $env_file${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+  
+  echo
+  sleep 2
+  
+  # Atualizar main.py com a nova porta
+  banner
+  printf "${WHITE} >> Atualizando configuração do main.py...\n"
+  echo
+  
+  local main_py="/home/deploy/${empresa}/api_transcricao/main.py"
+  if [ -f "$main_py" ]; then
+    # Fazer backup do arquivo original
+    cp "$main_py" "${main_py}.bak" 2>/dev/null || true
+    
+    # Atualizar porta no app.run com diferentes padrões usando Python para maior precisão
+    python3 <<PYTHON_SCRIPT
+import re
+import sys
+
+file_path = "$main_py"
+new_port = "$porta_transcricao"
+
+try:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    original_content = content
+    
+    # Padrão 1: app.run(host='0.0.0.0', port=4002, debug=True)
+    # Padrão 2: app.run(host="0.0.0.0", port=4002, debug=True)
+    # Padrão 3: app.run(host='0.0.0.0', port = 4002, debug=True)
+    # Substituir port=XXXX ou port = XXXX
+    content = re.sub(r"port\s*=\s*\d+", f"port={new_port}", content)
+    
+    # Atualizar mensagens de log (português)
+    content = re.sub(r"porta\s+4002", f"porta {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"porta\s+\d+", f"porta {new_port}", content, flags=re.IGNORECASE)
+    
+    # Atualizar mensagens de log (inglês)
+    content = re.sub(r"port\s+4002", f"port {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"Servidor iniciado na porta \d+", f"Servidor iniciado na porta {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"Server started on port \d+", f"Server started on port {new_port}", content, flags=re.IGNORECASE)
+    
+    if content != original_content:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"SUCCESS: Porta atualizada para {new_port}")
+        sys.exit(0)
+    else:
+        print(f"WARNING: Nenhuma alteração detectada. Verifique se a porta já está correta ou se o padrão é diferente.")
+        sys.exit(1)
+except Exception as e:
+    print(f"ERROR: {str(e)}")
+    sys.exit(1)
+PYTHON_SCRIPT
+    
+    if [ $? -eq 0 ]; then
+      printf "${GREEN} >> Porta atualizada no main.py para ${porta_transcricao}${WHITE}\n"
+    else
+      # Fallback para sed se Python falhar
+      printf "${YELLOW} >> Tentando método alternativo (sed)...${WHITE}\n"
+      sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+      sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+      sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+      printf "${GREEN} >> Tentativa de atualização concluída${WHITE}\n"
+    fi
+  else
+    printf "${YELLOW} >> AVISO: Arquivo main.py não encontrado em $main_py${WHITE}\n"
+    printf "${YELLOW} >> A porta será configurada apenas no .env do backend${WHITE}\n"
+  fi
+  
+  echo
+  sleep 2
+  
+  # Executar script de instalação
+  banner
+  printf "${WHITE} >> Executando script de instalação da transcrição...\n"
+  echo
+  
   local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
     bash "$script_path"
+    printf "${GREEN} >> Script de instalação executado com sucesso!${WHITE}\n"
   else
     printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
+    printf "${YELLOW} >> A configuração da porta foi atualizada, mas o script de instalação não foi encontrado.${WHITE}\n"
     sleep 2
   fi
-  printf "${GREEN} >> Processo de instalação da transcrição finalizado. Voltando ao menu...${WHITE}\n"
-  sleep 2
+  
+  echo
+  printf "${GREEN} >> Processo de instalação da transcrição finalizado!${WHITE}\n"
+  printf "${GREEN} >> Porta configurada: ${BLUE}${porta_transcricao}${WHITE}\n"
+  printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE}\n"
+  echo
+  printf "${WHITE} >> Pressione Enter para voltar ao menu...${WHITE}\n"
+  read -r
 }
 
 # Adicionar função para instalar API Oficial
