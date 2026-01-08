@@ -3324,11 +3324,11 @@ PYTHON_FIX
       # Agora sim, iniciar o PM2 DEPOIS de tudo estar instalado e o main.py estar correto
       banner
       printf "${WHITE} >> Iniciando PM2 com a porta correta (${porta_transcricao})...${WHITE}\n"
-      printf "${YELLOW} >> NOTA: A transcrição roda como ROOT junto com os outros processos${WHITE}\n"
+      printf "${GREEN} >> NOTA: A transcrição roda como DEPLOY (mesmo que backend e frontend)${WHITE}\n"
       echo
       
-      # Iniciar o PM2 como usuário ROOT (a transcrição roda como root)
-      sudo su - root <<STARTPM2CORRECT
+      # Iniciar o PM2 como usuário DEPLOY (consistente com backend e frontend)
+      sudo su - deploy <<STARTPM2CORRECT
       # Configura PATH para Node.js e PM2
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
         export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
