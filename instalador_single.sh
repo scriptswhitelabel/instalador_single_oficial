@@ -3455,7 +3455,7 @@ STARTPM2CORRECT
     
     printf "${GREEN} >> Arquivo: ${BLUE}$ARQUIVO_VARIAVEIS_INSTANCIA${WHITE}\n"
     echo
-    sleep 2
+  sleep 2
   else
     printf "${YELLOW} >> AVISO: Não foi possível identificar o arquivo de variáveis para salvar a porta${WHITE}\n"
     printf "${YELLOW} >> A porta ${porta_transcricao} foi configurada, mas não foi salva no arquivo de variáveis${WHITE}\n"
