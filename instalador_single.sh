@@ -3177,60 +3177,46 @@ CLEANBEFORESCRIPT
       echo
     fi
     
-    # Verificar se o script iniciou algum processo PM2 e parar apenas se existir
-    # (na primeira instalação, pode não haver processo ainda)
+    # Parar qualquer PM2 que o script possa ter iniciado
+    # IMPORTANTE: Não vamos iniciar o PM2 agora, apenas depois de atualizar o main.py
     sleep 2
     banner
-    printf "${WHITE} >> Verificando processos PM2 iniciados pelo script...\n"
+    printf "${WHITE} >> Parando qualquer PM2 iniciado pelo script de instalação...\n"
     echo
     
-    sudo su - deploy <<CHECKPM2AFTER
-    # Configura PATH para Node.js e PM2
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
-    fi
-    
-    # Verificar se o script iniciou algum processo PM2 desta instância ESPECÍFICA
-    # IMPORTANTE: Limpar processos iniciados como ROOT e garantir que rodem como DEPLOY
-    # NÃO afeta processos genéricos como "transcricao" ou processos de outras instâncias (incluindo instalação principal)
-    # Se sim, parar para aplicar a porta correta e garantir que rode como deploy. Se não, continuar normalmente.
-    
-    # Primeiro, limpar processos que possam ter sido iniciados como ROOT
-    printf "Limpando processos PM2 iniciados como ROOT (se houver)...\n"
+    # Limpar processos PM2 iniciados como ROOT
     sudo su - root <<CLEANROOTAFTER
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
       export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
       export PATH=/usr/bin:/usr/local/bin:\$PATH
     fi
-    
-    # Parar processos desta instância que possam estar rodando como root
     pm2 stop transcricao-${empresa} 2>/dev/null || true
     pm2 delete transcricao-${empresa} 2>/dev/null || true
     pm2 stop ${empresa}-transcricao 2>/dev/null || true
     pm2 delete ${empresa}-transcricao 2>/dev/null || true
-    pm2 save 2>/dev/null || true
+    pm2 stop transc-${empresa} 2>/dev/null || true
+    pm2 delete transc-${empresa} 2>/dev/null || true
+    pm2 save --force 2>/dev/null || true
 CLEANROOTAFTER
     
-    # Agora verificar processos como deploy
-    if pm2 list | grep -qE "transcricao-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
-      printf "Processos PM2 encontrados para a instância ${empresa}. Parando para aplicar porta correta...\n"
-      # Parar APENAS processos com o nome exato desta instância
-      # Não para processos genéricos ou de outras instâncias
-      pm2 stop transcricao-${empresa} 2>/dev/null || true
-      pm2 delete transcricao-${empresa} 2>/dev/null || true
-      pm2 stop ${empresa}-transcricao 2>/dev/null || true
-      pm2 delete ${empresa}-transcricao 2>/dev/null || true
-      pm2 save 2>/dev/null || true
-      printf "Processos da instância ${empresa} parados. Processos de outras instâncias permanecem intactos.\n"
+    # Limpar processos PM2 iniciados como DEPLOY
+    sudo su - deploy <<CLEANDEPLOYAFTER
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
-      printf "Nenhum processo PM2 encontrado para esta instância. Continuando...\n"
-      printf "Processos de outras instâncias (incluindo instalação principal) não serão afetados.\n"
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
     fi
-CHECKPM2AFTER
+    pm2 stop transcricao-${empresa} 2>/dev/null || true
+    pm2 delete transcricao-${empresa} 2>/dev/null || true
+    pm2 stop ${empresa}-transcricao 2>/dev/null || true
+    pm2 delete ${empresa}-transcricao 2>/dev/null || true
+    pm2 stop transc-${empresa} 2>/dev/null || true
+    pm2 delete transc-${empresa} 2>/dev/null || true
+    pm2 save --force 2>/dev/null || true
+CLEANDEPLOYAFTER
     
+    printf "${GREEN} >> Processos PM2 parados. Agora vamos atualizar o main.py e iniciar o PM2 corretamente.${WHITE}\n"
     echo
     sleep 2
     
@@ -3331,41 +3317,16 @@ PYTHON_FIX
       fi
       
       echo
-      printf "${WHITE} >> Limpando processos PM2 conflitantes antes de iniciar...${WHITE}\n"
-      echo
-      
-      # IMPORTANTE: Parar qualquer processo PM2 desta instância que possa ter sido iniciado como root
-      # Isso evita conflitos entre processos rodando como root e deploy
-      printf "${WHITE} >> Limpando processos PM2 rodando como ROOT para esta instância...${WHITE}\n"
-      sudo su - root <<CLEANROOTPM2
-      # Configura PATH para Node.js e PM2
-      if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-        export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-      else
-        export PATH=/usr/bin:/usr/local/bin:\$PATH
-      fi
-      
-      # Parar e deletar TODOS os processos desta instância que possam estar rodando como root
-      # Incluir todas as variações de nome possíveis
-      pm2 stop transcricao-${empresa} 2>/dev/null || true
-      pm2 delete transcricao-${empresa} 2>/dev/null || true
-      pm2 stop ${empresa}-transcricao 2>/dev/null || true
-      pm2 delete ${empresa}-transcricao 2>/dev/null || true
-      pm2 stop transc-${empresa} 2>/dev/null || true
-      pm2 delete transc-${empresa} 2>/dev/null || true
-      # Salvar para remover do pm2 save do root
-      pm2 save --force 2>/dev/null || true
-      printf "Processos PM2 do root removidos para instância ${empresa}\n"
-CLEANROOTPM2
-      
+      printf "${GREEN} >> ✓ main.py atualizado com sucesso para porta ${porta_transcricao}${WHITE}\n"
       echo
       sleep 2
       
-      printf "${WHITE} >> Agora iniciando o PM2 como usuário DEPLOY com a porta correta (${porta_transcricao})...${WHITE}\n"
+      # Agora sim, iniciar o PM2 DEPOIS de tudo estar instalado e o main.py estar correto
+      banner
+      printf "${WHITE} >> Iniciando PM2 com a porta correta (${porta_transcricao})...${WHITE}\n"
       echo
       
-      # Iniciar o PM2 manualmente como usuário DEPLOY (não root)
-      # Isso garante que todos os processos rodem com as mesmas permissões
+      # Iniciar o PM2 como usuário DEPLOY
       sudo su - deploy <<STARTPM2CORRECT
       # Configura PATH para Node.js e PM2
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -3373,21 +3334,6 @@ CLEANROOTPM2
       else
         export PATH=/usr/bin:/usr/local/bin:\$PATH
       fi
-      
-      # LIMPEZA COMPLETA: Deletar TODOS os processos desta instância antes de iniciar
-      # Isso garante que não há processos em cache ou antigos interferindo
-      printf "${WHITE} >> Limpando TODOS os processos PM2 desta instância (incluindo cache)...${WHITE}\n"
-      pm2 stop transcricao-${empresa} 2>/dev/null || true
-      pm2 delete transcricao-${empresa} 2>/dev/null || true
-      pm2 stop ${empresa}-transcricao 2>/dev/null || true
-      pm2 delete ${empresa}-transcricao 2>/dev/null || true
-      pm2 stop transc-${empresa} 2>/dev/null || true
-      pm2 delete transc-${empresa} 2>/dev/null || true
-      # Salvar após deletar para remover do pm2 save
-      pm2 save --force 2>/dev/null || true
-      sleep 2
-      printf "${GREEN} >> Processos antigos removidos completamente${WHITE}\n"
-      echo
       
       TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
       MAIN_PY_PATH="\$TRANSC_DIR/main.py"
@@ -3403,107 +3349,44 @@ CLEANROOTPM2
         exit 1
       }
       
-      # VERIFICAÇÃO CRÍTICA OBRIGATÓRIA: Confirmar que a porta está correta ANTES de iniciar
-      printf "${WHITE} >> Verificação final OBRIGATÓRIA da porta no main.py antes de iniciar PM2...${WHITE}\n"
-      printf "${YELLOW} >> Esta verificação é CRÍTICA - o PM2 NÃO será iniciado se a porta estiver incorreta${WHITE}\n"
-      echo
+      # Limpar cache do Python antes de iniciar
+      printf "${WHITE} >> Limpando cache do Python...${WHITE}\n"
+      find "\$TRANSC_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+      find "\$TRANSC_DIR" -name "*.pyc" -delete 2>/dev/null || true
+      find "\$TRANSC_DIR" -name "*.pyo" -delete 2>/dev/null || true
       
-      # Extrair porta atual do arquivo
-      current_port=\$(grep -oP "port\s*=\s*\K\d+" "\$MAIN_PY_PATH" | head -1 || echo "")
-      if [ -n "\$current_port" ]; then
-        printf "${WHITE} >> Porta encontrada no main.py: ${YELLOW}\$current_port${WHITE}\n"
-        printf "${WHITE} >> Porta esperada: ${GREEN}${porta_transcricao}${WHITE}\n"
-      else
-        printf "${RED} >> ERRO: Não foi possível extrair a porta do main.py!${WHITE}\n"
-      fi
-      echo
-      
-      # FORÇAR atualização da porta SEMPRE antes de iniciar o PM2
-      # Isso garante que mesmo que o script tenha sobrescrito, a porta estará correta
-      printf "${WHITE} >> Forçando atualização da porta para ${GREEN}${porta_transcricao}${WHITE}...${WHITE}\n"
-      
-      # Método forçado: substituir QUALQUER porta (qualquer número de dígitos)
-      sed -i "s|port=[0-9]\+|port=${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
-      sed -i "s|port = [0-9]\+|port = ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
-      sed -i "s|porta [0-9]\+|porta ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
-      
-      # Também atualizar mensagens de log
-      sed -i "s|Servidor iniciado na porta [0-9]\+|Servidor iniciado na porta ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
-      sed -i "s|Server started on port [0-9]\+|Server started on port ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
-      
-      sleep 1
-      
-      # Verificar se a porta foi atualizada corretamente
-      if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "\$MAIN_PY_PATH"; then
-        printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
-      else
-        printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível atualizar a porta!${WHITE}\n"
-        printf "${RED} >> Porta encontrada: \$current_port${WHITE}\n"
-        printf "${RED} >> Porta esperada: ${porta_transcricao}${WHITE}\n"
-        printf "${RED} >> Não será possível iniciar o PM2 com a porta correta.${WHITE}\n"
-        printf "${YELLOW} >> Por favor, edite manualmente o arquivo main.py${WHITE}\n"
-        printf "${YELLOW} >> Arquivo: \$MAIN_PY_PATH${WHITE}\n"
-        printf "${YELLOW} >> Procure por 'app.run' e altere para: port=${porta_transcricao}${WHITE}\n"
+      # Verificar que a porta está correta no main.py
+      final_port=\$(grep -oP "port\s*=\s*\K\d+" "\$MAIN_PY_PATH" | head -1 || echo "")
+      if [ "\$final_port" != "${porta_transcricao}" ]; then
+        printf "${RED} >> ERRO: Porta no arquivo (\$final_port) não corresponde à porta esperada (${porta_transcricao})!${WHITE}\n"
         exit 1
       fi
-      
-      # Mostrar a linha do app.run para confirmação final
-      printf "${WHITE} >> Linha app.run confirmada:${WHITE}\n"
-      grep "app.run" "\$MAIN_PY_PATH" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+      printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
       echo
       
-      # VERIFICAÇÃO FINAL: Não iniciar se a porta ainda não estiver correta
-      if ! grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "\$MAIN_PY_PATH"; then
-        printf "${RED} >> ERRO FATAL: Porta ainda incorreta após correção!${WHITE}\n"
-        printf "${RED} >> Abortando para evitar conflitos de porta.${WHITE}\n"
-        exit 1
-      fi
+      # Parar qualquer processo PM2 desta instância que possa existir
+      pm2 stop transcricao-${empresa} 2>/dev/null || true
+      pm2 delete transcricao-${empresa} 2>/dev/null || true
+      pm2 stop ${empresa}-transcricao 2>/dev/null || true
+      pm2 delete ${empresa}-transcricao 2>/dev/null || true
+      pm2 stop transc-${empresa} 2>/dev/null || true
+      pm2 delete transc-${empresa} 2>/dev/null || true
       
-      # Mostrar o caminho completo que será usado
-      printf "${WHITE} >> Caminho completo do arquivo: ${BLUE}\$MAIN_PY_PATH${WHITE}\n"
-      printf "${WHITE} >> Diretório de trabalho: ${BLUE}\$(pwd)${WHITE}\n"
-      echo
-      
-      # Agora sim, iniciar PM2 como usuário deploy (não root)
-      # Usar caminho absoluto completo para garantir que o PM2 use o arquivo correto
-      printf "${GREEN} >> Iniciando PM2 com porta ${porta_transcricao}...${WHITE}\n"
-      printf "${WHITE} >> Comando: pm2 start \$MAIN_PY_PATH --name transcricao-${empresa} --interpreter python3${WHITE}\n"
+      # Iniciar PM2 com o arquivo correto
+      printf "${GREEN} >> Iniciando PM2...${WHITE}\n"
       pm2 start "\$MAIN_PY_PATH" --name transcricao-${empresa} --interpreter python3 --cwd "\$TRANSC_DIR"
       pm2 save --force
-      printf "${GREEN} >> PM2 iniciado com sucesso como usuário DEPLOY na porta ${porta_transcricao}${WHITE}\n"
-        
-        # Verificar se o processo está rodando corretamente
-        sleep 3
-        
-        # Verificar qual arquivo o PM2 está realmente usando
-        printf "${WHITE} >> Verificando qual arquivo o PM2 está usando...${WHITE}\n"
-        pm2 describe transcricao-${empresa} 2>/dev/null | grep -i "script path\|exec cwd" || true
-        echo
-        
-        if pm2 list | grep -q "transcricao-${empresa}.*online"; then
-          printf "${GREEN} >> ✓ Processo transcricao-${empresa} está ONLINE${WHITE}\n"
-          
-          # Verificar logs para confirmar a porta
-          sleep 2
-          printf "${WHITE} >> Verificando logs para confirmar porta...${WHITE}\n"
-          pm2 logs transcricao-${empresa} --lines 15 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado\|Server started" | head -5 || true
-          
-          # Verificar se a porta nos logs está correta
-          if pm2 logs transcricao-${empresa} --lines 20 --nostream 2>/dev/null | grep -qi "porta ${porta_transcricao}\|port ${porta_transcricao}"; then
-            printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada nos logs!${WHITE}\n"
-          else
-            printf "${YELLOW} >> ⚠ AVISO: Porta não encontrada nos logs. Verifique manualmente.${WHITE}\n"
-            printf "${YELLOW} >> Comando: pm2 logs transcricao-${empresa}${WHITE}\n"
-          fi
-        else
-          printf "${RED} >> ✗ Processo transcricao-${empresa} NÃO está ONLINE${WHITE}\n"
-          printf "${YELLOW} >> Verifique o status: pm2 list${WHITE}\n"
-          printf "${YELLOW} >> Verifique os logs: pm2 logs transcricao-${empresa}${WHITE}\n"
-          printf "${YELLOW} >> Verifique os erros: pm2 logs transcricao-${empresa} --err${WHITE}\n"
-        fi
+      
+      # Verificar se iniciou corretamente
+      sleep 3
+      if pm2 list | grep -q "transcricao-${empresa}.*online"; then
+        printf "${GREEN} >> ✓ Processo transcricao-${empresa} está ONLINE${WHITE}\n"
+        # Verificar logs para confirmar porta
+        sleep 2
+        pm2 logs transcricao-${empresa} --lines 10 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado" | head -3 || true
       else
-        printf "${RED} >> ERRO: Arquivo main.py não encontrado${WHITE}\n"
-        exit 1
+        printf "${YELLOW} >> ⚠ Verifique o status: pm2 list${WHITE}\n"
+        printf "${YELLOW} >> Verifique os logs: pm2 logs transcricao-${empresa}${WHITE}\n"
       fi
 STARTPM2CORRECT
       
