@@ -827,15 +827,125 @@ cria_banco_instancia() {
   banner
   printf "${WHITE} >> Criando Banco Postgres para ${nova_empresa}...\n"
   echo
+  
+  # Carregar credenciais do .env do backend da instalação principal
+  carregar_variaveis_base
+  
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Não foi possível determinar a empresa da instalação principal.${WHITE}\n"
+    printf "${YELLOW} >> Verifique se o arquivo VARIAVEIS_INSTALACAO existe.${WHITE}\n"
+    exit 1
+  fi
+  
+  ENV_BACKEND_PRINCIPAL="/home/deploy/${empresa}/backend/.env"
+  
+  if [ ! -f "${ENV_BACKEND_PRINCIPAL}" ]; then
+    printf "${RED} >> ERRO: Arquivo .env do backend principal não encontrado: ${ENV_BACKEND_PRINCIPAL}${WHITE}\n"
+    printf "${YELLOW} >> Verifique se a instalação principal está configurada corretamente.${WHITE}\n"
+    exit 1
+  fi
+  
+  # Extrair credenciais do arquivo .env
+  printf "${WHITE} >> Carregando credenciais do banco de dados da instalação principal...${WHITE}\n"
+  DB_HOST_POSTGRES=$(grep "^DB_HOST=" "${ENV_BACKEND_PRINCIPAL}" | cut -d '=' -f2 | tr -d ' ' | tr -d '"')
+  DB_PORT_POSTGRES=$(grep "^DB_PORT=" "${ENV_BACKEND_PRINCIPAL}" | cut -d '=' -f2 | tr -d ' ' | tr -d '"')
+  DB_USER_POSTGRES=$(grep "^DB_USER=" "${ENV_BACKEND_PRINCIPAL}" | cut -d '=' -f2 | tr -d ' ' | tr -d '"')
+  DB_PASS_POSTGRES=$(grep "^DB_PASS=" "${ENV_BACKEND_PRINCIPAL}" | cut -d '=' -f2 | tr -d ' ' | tr -d '"')
+  
+  # Valores padrão se não encontrar no .env
+  DB_HOST_POSTGRES=${DB_HOST_POSTGRES:-localhost}
+  DB_PORT_POSTGRES=${DB_PORT_POSTGRES:-5432}
+  
+  if [ -z "${DB_USER_POSTGRES}" ] || [ -z "${DB_PASS_POSTGRES}" ]; then
+    printf "${RED} >> ERRO: Não foi possível obter credenciais do banco de dados do arquivo .env.${WHITE}\n"
+    printf "${YELLOW} >> Verifique se DB_USER e DB_PASS estão definidos em ${ENV_BACKEND_PRINCIPAL}${WHITE}\n"
+    exit 1
+  fi
+  
+  printf "${GREEN} >> Credenciais carregadas:${WHITE}\n"
+  printf "${WHITE} >>   Host: ${DB_HOST_POSTGRES}${WHITE}\n"
+  printf "${WHITE} >>   Port: ${DB_PORT_POSTGRES}${WHITE}\n"
+  printf "${WHITE} >>   User: ${DB_USER_POSTGRES}${WHITE}\n"
+  echo
+  
+  # Verificar se PostgreSQL está rodando
+  if ! systemctl is-active --quiet postgresql; then
+    printf "${YELLOW} >> PostgreSQL não está rodando. Tentando iniciar...${WHITE}\n"
+    systemctl start postgresql || {
+      printf "${RED} >> ERRO: Não foi possível iniciar o PostgreSQL.${WHITE}\n"
+      printf "${YELLOW} >> Por favor, verifique se o PostgreSQL está instalado e configurado.${WHITE}\n"
+      exit 1
+    }
+    sleep 2
+  fi
+  
   {
-    sudo su - postgres <<EOF
-    createdb ${nova_empresa};
-    psql
-    CREATE USER ${nova_empresa} SUPERUSER INHERIT CREATEDB CREATEROLE;
-    ALTER USER ${nova_empresa} PASSWORD '${senha_deploy}';
-    \q
-    exit
-EOF
+    # Verificar conexão com PostgreSQL usando as credenciais fornecidas
+    printf "${WHITE} >> Verificando conexão com PostgreSQL...${WHITE}\n"
+    export PGPASSWORD="${DB_PASS_POSTGRES}"
+    if ! psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+      printf "${RED} >> ERRO: Não foi possível conectar ao PostgreSQL com as credenciais fornecidas.${WHITE}\n"
+      printf "${YELLOW} >> Verifique se as credenciais estão corretas:${WHITE}\n"
+      printf "${YELLOW} >>   Host: ${DB_HOST_POSTGRES}${WHITE}\n"
+      printf "${YELLOW} >>   Port: ${DB_PORT_POSTGRES}${WHITE}\n"
+      printf "${YELLOW} >>   User: ${DB_USER_POSTGRES}${WHITE}\n"
+      exit 1
+    fi
+    printf "${GREEN} >> Conexão com PostgreSQL estabelecida!${WHITE}\n"
+    echo
+    
+    # Verificar se o banco já existe
+    if psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -lqt | cut -d \| -f 1 | grep -qw ${nova_empresa}; then
+      printf "${YELLOW} >> Banco de dados ${nova_empresa} já existe.${WHITE}\n"
+      printf "${WHITE} >> Deseja recriar o banco? (S/N):${WHITE}\n"
+      read -p "> " recriar_banco
+      recriar_banco=$(echo "${recriar_banco}" | tr '[:upper:]' '[:lower:]')
+      if [ "${recriar_banco}" = "s" ]; then
+        printf "${WHITE} >> Removendo banco existente...${WHITE}\n"
+        psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "DROP DATABASE IF EXISTS ${nova_empresa};" 2>/dev/null
+        psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "DROP USER IF EXISTS ${nova_empresa};" 2>/dev/null
+        sleep 1
+      else
+        printf "${GREEN} >> Usando banco de dados existente.${WHITE}\n"
+        sleep 2
+        unset PGPASSWORD
+        return 0
+      fi
+    fi
+    
+    # Criar banco de dados
+    printf "${WHITE} >> Criando banco de dados ${nova_empresa}...${WHITE}\n"
+    createdb -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} ${nova_empresa} 2>/dev/null || {
+      printf "${RED} >> ERRO: Falha ao criar banco de dados ${nova_empresa}${WHITE}\n"
+      unset PGPASSWORD
+      exit 1
+    }
+    
+    # Criar usuário e definir senha
+    printf "${WHITE} >> Criando usuário ${nova_empresa}...${WHITE}\n"
+    psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "CREATE USER ${nova_empresa} WITH SUPERUSER INHERIT CREATEDB CREATEROLE;" 2>/dev/null || \
+    psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "ALTER USER ${nova_empresa} WITH SUPERUSER INHERIT CREATEDB CREATEROLE;" 2>/dev/null || {
+      printf "${YELLOW} >> Usuário ${nova_empresa} já existe. Atualizando permissões...${WHITE}\n"
+    }
+    
+    printf "${WHITE} >> Definindo senha para o usuário ${nova_empresa}...${WHITE}\n"
+    psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -c "ALTER USER ${nova_empresa} PASSWORD '${senha_deploy}';" || {
+      printf "${RED} >> ERRO: Falha ao definir senha do usuário${WHITE}\n"
+      unset PGPASSWORD
+      exit 1
+    }
+    
+    # Verificar se o banco foi criado
+    if psql -h ${DB_HOST_POSTGRES} -p ${DB_PORT_POSTGRES} -U ${DB_USER_POSTGRES} -d postgres -lqt | cut -d \| -f 1 | grep -qw ${nova_empresa}; then
+      printf "${GREEN} >> Banco de dados ${nova_empresa} criado com sucesso!${WHITE}\n"
+      printf "${GREEN} >> Usuário ${nova_empresa} configurado com sucesso!${WHITE}\n"
+    else
+      printf "${RED} >> ERRO: Falha ao criar banco de dados ${nova_empresa}${WHITE}\n"
+      unset PGPASSWORD
+      exit 1
+    fi
+    
+    unset PGPASSWORD
     sleep 2
   } || trata_erro "cria_banco_instancia"
 }
