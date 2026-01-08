@@ -279,6 +279,38 @@ corrigir_dockerfile_wuzapi() {
     
     printf "${WHITE} >> Verificando Dockerfile existente...${WHITE}\n"
     
+    # Adicionar configuração de DNS no início do Dockerfile se não existir
+    if ! grep -q "nameserver 8.8.8.8" "$dockerfile_path" 2>/dev/null; then
+      printf "${WHITE} >> Adicionando configuração de DNS ao Dockerfile...${WHITE}\n"
+      # Método mais seguro: usar um arquivo temporário
+      {
+        # Ler primeira linha (FROM)
+        first_line=$(head -n 1 "$dockerfile_path")
+        # Resto do arquivo
+        rest_of_file=$(tail -n +2 "$dockerfile_path")
+        
+        # Criar novo arquivo
+        {
+          echo "$first_line"
+          echo ""
+          echo "# Configure DNS for apt-get"
+          echo "RUN echo \"nameserver 8.8.8.8\" > /etc/resolv.conf && \\"
+          echo "    echo \"nameserver 8.8.4.4\" >> /etc/resolv.conf && \\"
+          echo "    echo \"nameserver 1.1.1.1\" >> /etc/resolv.conf"
+          echo ""
+          echo "$rest_of_file"
+        } > "${dockerfile_path}.tmp"
+        
+        mv "${dockerfile_path}.tmp" "$dockerfile_path"
+        printf "${GREEN} >> DNS adicionado ao Dockerfile!${WHITE}\n"
+      } || {
+        printf "${YELLOW}⚠️  Não foi possível adicionar DNS ao Dockerfile automaticamente.${WHITE}\n"
+        printf "${WHITE}   O build tentará usar o DNS configurado no docker-compose.yml${WHITE}\n"
+      }
+    else
+      printf "${GREEN} >> DNS já configurado no Dockerfile!${WHITE}\n"
+    fi
+    
     # Verificar se há problemas com apt-get (Ubuntu/Debian)
     if grep -q "apt-get install" "$dockerfile_path" 2>/dev/null; then
       printf "${WHITE} >> Corrigindo lista de pacotes apt-get...${WHITE}\n"
@@ -446,6 +478,69 @@ EOF
   } || trata_erro "configurar_env_wuzapi"
 }
 
+# Verificar e corrigir DNS antes do build
+verificar_e_corrigir_dns() {
+  banner
+  printf "${WHITE} >> Verificando e corrigindo configurações de DNS...\n"
+  echo
+  
+  {
+    # Verificar DNS do sistema
+    if ! grep -q "8.8.8.8" /etc/resolv.conf 2>/dev/null; then
+      printf "${WHITE} >> Adicionando Google DNS ao sistema...\n"
+      echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+      echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+      printf "${GREEN} >> DNS do sistema configurado!${WHITE}\n"
+    fi
+    
+    # Configurar DNS do Docker daemon
+    if [ ! -f /etc/docker/daemon.json ]; then
+      printf "${WHITE} >> Criando configuração do Docker daemon...\n"
+      mkdir -p /etc/docker
+      cat > /etc/docker/daemon.json <<EOF
+{
+  "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
+}
+EOF
+      printf "${GREEN} >> Configuração do Docker daemon criada!${WHITE}\n"
+      printf "${WHITE} >> Reiniciando Docker...\n"
+      systemctl restart docker
+      sleep 3
+    else
+      # Verificar se DNS já está configurado
+      if ! grep -q "8.8.8.8" /etc/docker/daemon.json 2>/dev/null; then
+        printf "${WHITE} >> Adicionando DNS à configuração do Docker daemon...\n"
+        # Usar jq se disponível, senão usar sed
+        if command -v jq >/dev/null 2>&1; then
+          jq '.dns = ["8.8.8.8", "8.8.4.4", "1.1.1.1"]' /etc/docker/daemon.json > /etc/docker/daemon.json.tmp && mv /etc/docker/daemon.json.tmp /etc/docker/daemon.json
+        else
+          # Método alternativo com sed
+          cp /etc/docker/daemon.json /etc/docker/daemon.json.backup
+          sed -i 's/}$/,\n  "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]\n}/' /etc/docker/daemon.json 2>/dev/null || {
+            # Se falhar, criar novo arquivo
+            cat > /etc/docker/daemon.json <<EOF
+{
+  "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
+}
+EOF
+          }
+        fi
+        printf "${GREEN} >> DNS adicionado à configuração do Docker!${WHITE}\n"
+        printf "${WHITE} >> Reiniciando Docker...\n"
+        systemctl restart docker
+        sleep 3
+      fi
+    fi
+    
+    printf "${GREEN} >> Verificação de DNS concluída!${WHITE}\n"
+    sleep 2
+  } || {
+    printf "${YELLOW}⚠️  Aviso: Não foi possível configurar DNS automaticamente.${WHITE}\n"
+    printf "${WHITE}   O build pode falhar se houver problemas de conectividade.${WHITE}\n"
+    sleep 2
+  }
+}
+
 # Configurar docker-compose.yml
 configurar_docker_compose() {
   banner
@@ -462,6 +557,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      extra_hosts:
+        - "deb.debian.org:151.101.0.204"
+        - "security.debian.org:151.101.0.204"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
     ports:
       - "\${WUZAPI_PORT:-${wuzapi_port:-${default_wuzapi_port}}}:8080"
     environment:
@@ -623,38 +725,99 @@ subir_containers_whatsmeow() {
   {
     cd /home/deploy/${empresa}/wuzapi
     
-    printf "${WHITE} >> Executando docker compose up -d...\n"
+    # Limpar builds anteriores que podem ter falhado
+    printf "${WHITE} >> Limpando builds anteriores...\n"
+    docker compose down -v 2>/dev/null || true
+    docker builder prune -f >/dev/null 2>&1 || true
     echo
     
-    # Executar docker compose e capturar saída
-    docker_output=$(docker compose up -d 2>&1)
-    docker_exit_code=$?
-    
-    echo "$docker_output"
+    printf "${WHITE} >> Executando docker compose build (isso pode levar alguns minutos)...\n"
     echo
     
-    if [ $docker_exit_code -eq 0 ]; then
-      # Verificar se os containers estão rodando
-      printf "${WHITE} >> Aguardando containers iniciarem...\n"
-      sleep 10
-      
-      # Verificar status dos containers
-      if docker compose ps | grep -qE "(Healthy|Running|Up)"; then
-        printf "${GREEN}✅ Containers do WhatsMeow iniciados com sucesso!${WHITE}\n"
-        echo
-        docker compose ps
-        echo
-        sleep 2
-      else
-        printf "${YELLOW}⚠️  Containers iniciados, mas alguns podem estar iniciando ainda...${WHITE}\n"
-        printf "${WHITE}   Verifique o status com: cd /home/deploy/${empresa}/wuzapi && docker compose ps${WHITE}\n"
-        echo
-        sleep 2
+    # Tentar build com retry
+    max_retries=3
+    retry_count=0
+    build_success=false
+    
+    while [ $retry_count -lt $max_retries ] && [ "$build_success" = false ]; do
+      if [ $retry_count -gt 0 ]; then
+        printf "${YELLOW} >> Tentativa ${retry_count} de ${max_retries}...${WHITE}\n"
+        printf "${WHITE} >> Aguardando 10 segundos antes de tentar novamente...\n"
+        sleep 10
       fi
-    else
-      printf "${RED}❌ ERRO: Falha ao subir os containers do WhatsMeow.${WHITE}\n"
-      printf "${RED}   Verifique os logs com: cd /home/deploy/${empresa}/wuzapi && docker compose logs${WHITE}\n"
-      exit 1
+      
+      # Executar build primeiro
+      printf "${WHITE} >> Executando docker compose build...\n"
+      docker_output=$(docker compose build --no-cache 2>&1)
+      build_exit_code=$?
+      
+      echo "$docker_output"
+      echo
+      
+      # Verificar se o erro é relacionado a DNS/rede
+      if echo "$docker_output" | grep -qiE "(could not resolve|failed to fetch|network|dns)"; then
+        printf "${YELLOW}⚠️  Erro de rede/DNS detectado.${WHITE}\n"
+        if [ $retry_count -lt $((max_retries - 1)) ]; then
+          printf "${WHITE} >> Tentando novamente...${WHITE}\n"
+          retry_count=$((retry_count + 1))
+          continue
+        fi
+      fi
+      
+      if [ $build_exit_code -eq 0 ]; then
+        build_success=true
+        printf "${GREEN} >> Build concluído com sucesso!${WHITE}\n"
+        echo
+      else
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -ge $max_retries ]; then
+          printf "${RED}❌ ERRO: Falha ao fazer build após ${max_retries} tentativas.${WHITE}\n"
+          printf "${YELLOW}   Possíveis causas:${WHITE}\n"
+          printf "${YELLOW}   1. Problema de conectividade de rede${WHITE}\n"
+          printf "${YELLOW}   2. DNS não configurado corretamente${WHITE}\n"
+          printf "${YELLOW}   3. Firewall bloqueando conexões${WHITE}\n"
+          printf "${WHITE}   Verifique os logs acima para mais detalhes.${WHITE}\n"
+          printf "${WHITE}   Tente executar manualmente:${WHITE}\n"
+          printf "${WHITE}   cd /home/deploy/${empresa}/wuzapi && docker compose build${WHITE}\n"
+          exit 1
+        fi
+      fi
+    done
+    
+    if [ "$build_success" = true ]; then
+      printf "${WHITE} >> Executando docker compose up -d...\n"
+      echo
+      
+      # Executar docker compose up
+      docker_output=$(docker compose up -d 2>&1)
+      docker_exit_code=$?
+      
+      echo "$docker_output"
+      echo
+      
+      if [ $docker_exit_code -eq 0 ]; then
+        # Verificar se os containers estão rodando
+        printf "${WHITE} >> Aguardando containers iniciarem...\n"
+        sleep 10
+        
+        # Verificar status dos containers
+        if docker compose ps | grep -qE "(Healthy|Running|Up)"; then
+          printf "${GREEN}✅ Containers do WhatsMeow iniciados com sucesso!${WHITE}\n"
+          echo
+          docker compose ps
+          echo
+          sleep 2
+        else
+          printf "${YELLOW}⚠️  Containers iniciados, mas alguns podem estar iniciando ainda...${WHITE}\n"
+          printf "${WHITE}   Verifique o status com: cd /home/deploy/${empresa}/wuzapi && docker compose ps${WHITE}\n"
+          echo
+          sleep 2
+        fi
+      else
+        printf "${RED}❌ ERRO: Falha ao subir os containers do WhatsMeow.${WHITE}\n"
+        printf "${RED}   Verifique os logs com: cd /home/deploy/${empresa}/wuzapi && docker compose logs${WHITE}\n"
+        exit 1
+      fi
     fi
   } || trata_erro "subir_containers_whatsmeow"
 }
@@ -722,11 +885,12 @@ main() {
   verificar_dns_whatsmeow
   configurar_nginx_whatsmeow
   clonar_repositorio_wuzapi
+  verificar_e_instalar_docker
+  verificar_e_corrigir_dns
   corrigir_dockerfile_wuzapi
   configurar_env_wuzapi
   configurar_docker_compose
   atualizar_env_backend
-  verificar_e_instalar_docker
   subir_containers_whatsmeow
   reiniciar_servicos
   reiniciar_pm2_backend
