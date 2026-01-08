@@ -2885,6 +2885,30 @@ instalar_transcricao_audio_nativa() {
   echo
   sleep 2
   
+  # Parar processos PM2 relacionados à transcrição desta instância antes de atualizar
+  banner
+  printf "${WHITE} >> Verificando processos PM2 da transcrição...\n"
+  echo
+  
+  sudo su - deploy <<STOPPM2TRANSC
+  # Configura PATH para Node.js e PM2
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  else
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
+  fi
+  
+  # Parar processos relacionados à transcrição desta instância
+  pm2 stop transc-${empresa} 2>/dev/null || true
+  pm2 delete transc-${empresa} 2>/dev/null || true
+  pm2 stop ${empresa}-transcricao 2>/dev/null || true
+  pm2 delete ${empresa}-transcricao 2>/dev/null || true
+  pm2 save 2>/dev/null || true
+STOPPM2TRANSC
+  
+  echo
+  sleep 2
+  
   # Atualizar main.py com a nova porta
   banner
   printf "${WHITE} >> Atualizando configuração do main.py...\n"
@@ -2909,18 +2933,25 @@ try:
     
     original_content = content
     
+    # Substituir port=XXXX ou port = XXXX (qualquer número de dígitos)
     # Padrão 1: app.run(host='0.0.0.0', port=4002, debug=True)
     # Padrão 2: app.run(host="0.0.0.0", port=4002, debug=True)
     # Padrão 3: app.run(host='0.0.0.0', port = 4002, debug=True)
-    # Substituir port=XXXX ou port = XXXX
-    content = re.sub(r"port\s*=\s*\d+", f"port={new_port}", content)
+    # Preservar o formato original (com ou sem espaços)
+    def replace_port(match):
+        # Manter o formato original (port= ou port =)
+        original = match.group(0)
+        if ' = ' in original:
+            return f"port = {new_port}"
+        else:
+            return f"port={new_port}"
     
-    # Atualizar mensagens de log (português)
-    content = re.sub(r"porta\s+4002", f"porta {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"port\s*=\s*\d+", replace_port, content)
+    
+    # Atualizar mensagens de log (português) - qualquer porta
     content = re.sub(r"porta\s+\d+", f"porta {new_port}", content, flags=re.IGNORECASE)
     
-    # Atualizar mensagens de log (inglês)
-    content = re.sub(r"port\s+4002", f"port {new_port}", content, flags=re.IGNORECASE)
+    # Atualizar mensagens de log (inglês) - qualquer porta
     content = re.sub(r"Servidor iniciado na porta \d+", f"Servidor iniciado na porta {new_port}", content, flags=re.IGNORECASE)
     content = re.sub(r"Server started on port \d+", f"Server started on port {new_port}", content, flags=re.IGNORECASE)
     
@@ -2939,14 +2970,35 @@ PYTHON_SCRIPT
     
     if [ $? -eq 0 ]; then
       printf "${GREEN} >> Porta atualizada no main.py para ${porta_transcricao}${WHITE}\n"
+      
+      # Verificar se a porta foi realmente alterada
+      if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
+        printf "${GREEN} >> Verificação: Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
+      else
+        printf "${YELLOW} >> AVISO: Não foi possível verificar a porta no main.py${WHITE}\n"
+      fi
     else
       # Fallback para sed se Python falhar
       printf "${YELLOW} >> Tentando método alternativo (sed)...${WHITE}\n"
+      
+      # Substituir qualquer porta de 4 dígitos
       sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
       sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
       sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
-      printf "${GREEN} >> Tentativa de atualização concluída${WHITE}\n"
+      
+      # Verificar novamente
+      if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
+        printf "${GREEN} >> Porta atualizada com sucesso usando sed${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Não foi possível atualizar a porta no main.py${WHITE}\n"
+        printf "${YELLOW} >> Por favor, verifique manualmente o arquivo: $main_py${WHITE}\n"
+      fi
     fi
+    
+    # Mostrar a linha do app.run para confirmação
+    printf "${WHITE} >> Linha app.run encontrada:${WHITE}\n"
+    grep "app.run" "$main_py" | head -1 || printf "${YELLOW} >> Não foi possível encontrar app.run${WHITE}\n"
+    
   else
     printf "${YELLOW} >> AVISO: Arquivo main.py não encontrado em $main_py${WHITE}\n"
     printf "${YELLOW} >> A porta será configurada apenas no .env do backend${WHITE}\n"
@@ -2964,7 +3016,44 @@ PYTHON_SCRIPT
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
     bash "$script_path"
-    printf "${GREEN} >> Script de instalação executado com sucesso!${WHITE}\n"
+    printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
+    echo
+    
+    # Verificar novamente se a porta está correta após a execução do script
+    sleep 2
+    banner
+    printf "${WHITE} >> Verificando configuração final da porta...\n"
+    echo
+    
+    local main_py="/home/deploy/${empresa}/api_transcricao/main.py"
+    if [ -f "$main_py" ]; then
+      if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
+        printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
+      else
+        printf "${RED} >> ✗ ERRO: Porta não está correta no main.py após a instalação!${WHITE}\n"
+        printf "${YELLOW} >> A porta pode ter sido sobrescrita pelo script de instalação${WHITE}\n"
+        printf "${WHITE} >> Tentando corrigir novamente...${WHITE}\n"
+        
+        # Tentar corrigir novamente
+        sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+        sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+        
+        if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
+          printf "${GREEN} >> ✓ Porta corrigida com sucesso!${WHITE}\n"
+        else
+          printf "${RED} >> ✗ Não foi possível corrigir automaticamente${WHITE}\n"
+          printf "${YELLOW} >> Por favor, edite manualmente o arquivo: $main_py${WHITE}\n"
+          printf "${YELLOW} >> Procure por 'app.run' e altere a porta para: ${porta_transcricao}${WHITE}\n"
+        fi
+      fi
+      
+      # Mostrar a linha atual do app.run
+      printf "${WHITE} >> Configuração atual do app.run:${WHITE}\n"
+      grep "app.run" "$main_py" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+    fi
+    
+    echo
+    sleep 2
   else
     printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
     printf "${YELLOW} >> A configuração da porta foi atualizada, mas o script de instalação não foi encontrado.${WHITE}\n"
@@ -2975,6 +3064,10 @@ PYTHON_SCRIPT
   printf "${GREEN} >> Processo de instalação da transcrição finalizado!${WHITE}\n"
   printf "${GREEN} >> Porta configurada: ${BLUE}${porta_transcricao}${WHITE}\n"
   printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE}\n"
+  echo
+  printf "${YELLOW} >> IMPORTANTE: Verifique se o serviço está rodando na porta correta${WHITE}\n"
+  printf "${YELLOW} >> Use: pm2 list (para ver processos)${WHITE}\n"
+  printf "${YELLOW} >> Use: lsof -i:${porta_transcricao} (para verificar a porta)${WHITE}\n"
   echo
   printf "${WHITE} >> Pressione Enter para voltar ao menu...${WHITE}\n"
   read -r
