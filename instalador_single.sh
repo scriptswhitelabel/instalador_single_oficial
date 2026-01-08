@@ -3200,20 +3200,20 @@ CLEANBEFORESCRIPT
     pm2 save --force 2>/dev/null || true
 CLEANROOTAFTER
     
-    # Limpar processos PM2 iniciados como DEPLOY
+    # Limpar processos PM2 iniciados como DEPLOY (se houver)
+    # Mas a transcrição roda como ROOT, então vamos limpar apenas para garantir
     sudo su - deploy <<CLEANDEPLOYAFTER
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
       export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
       export PATH=/usr/bin:/usr/local/bin:\$PATH
     fi
-    pm2 stop transcricao-${empresa} 2>/dev/null || true
-    pm2 delete transcricao-${empresa} 2>/dev/null || true
-    pm2 stop ${empresa}-transcricao 2>/dev/null || true
-    pm2 delete ${empresa}-transcricao 2>/dev/null || true
-    pm2 stop transc-${empresa} 2>/dev/null || true
-    pm2 delete transc-${empresa} 2>/dev/null || true
-    pm2 save --force 2>/dev/null || true
+    # Limpar apenas se existir (a transcrição roda como root)
+    if pm2 list | grep -q "transcricao-${empresa}"; then
+      pm2 stop transcricao-${empresa} 2>/dev/null || true
+      pm2 delete transcricao-${empresa} 2>/dev/null || true
+      pm2 save --force 2>/dev/null || true
+    fi
 CLEANDEPLOYAFTER
     
     printf "${GREEN} >> Processos PM2 parados. Agora vamos atualizar o main.py e iniciar o PM2 corretamente.${WHITE}\n"
@@ -3324,10 +3324,11 @@ PYTHON_FIX
       # Agora sim, iniciar o PM2 DEPOIS de tudo estar instalado e o main.py estar correto
       banner
       printf "${WHITE} >> Iniciando PM2 com a porta correta (${porta_transcricao})...${WHITE}\n"
+      printf "${YELLOW} >> NOTA: A transcrição roda como ROOT junto com os outros processos${WHITE}\n"
       echo
       
-      # Iniciar o PM2 como usuário DEPLOY
-      sudo su - deploy <<STARTPM2CORRECT
+      # Iniciar o PM2 como usuário ROOT (a transcrição roda como root)
+      sudo su - root <<STARTPM2CORRECT
       # Configura PATH para Node.js e PM2
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
         export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
