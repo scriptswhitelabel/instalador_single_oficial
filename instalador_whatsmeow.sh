@@ -727,6 +727,50 @@ verificar_e_instalar_docker() {
     printf "${YELLOW} >> Instalando docker-compose-plugin...${WHITE}\n"
     sudo apt-get install -y docker-compose-plugin >/dev/null 2>&1
   fi
+  
+  # Garantir que Docker está no PATH e funcionando
+  if ! command -v docker >/dev/null 2>&1; then
+    printf "${YELLOW} >> Docker não encontrado no PATH. Tentando atualizar PATH...${WHITE}\n"
+    export PATH=$PATH:/usr/bin:/usr/local/bin
+    # Tentar encontrar docker
+    if [ -f /usr/bin/docker ]; then
+      export PATH=/usr/bin:$PATH
+    elif [ -f /usr/local/bin/docker ]; then
+      export PATH=/usr/local/bin:$PATH
+    fi
+  fi
+  
+  # Verificar novamente se docker está disponível
+  if ! command -v docker >/dev/null 2>&1; then
+    printf "${RED}❌ ERRO: Docker não está disponível após instalação!${WHITE}\n"
+    printf "${WHITE}   Tente executar manualmente:${WHITE}\n"
+    printf "${WHITE}   sudo apt-get install -y docker.io docker-compose${WHITE}\n"
+    exit 1
+  fi
+  
+  # Verificar se serviço Docker está rodando
+  if ! systemctl is-active --quiet docker 2>/dev/null; then
+    printf "${WHITE} >> Iniciando serviço Docker...${WHITE}\n"
+    systemctl start docker
+    sleep 3
+  fi
+  
+  # Verificar se docker compose funciona
+  if ! docker compose version >/dev/null 2>&1; then
+    printf "${YELLOW}⚠️  Aviso: docker compose não está funcionando.${WHITE}\n"
+    printf "${WHITE}   Tentando usar docker-compose (versão antiga)...${WHITE}\n"
+    if command -v docker-compose >/dev/null 2>&1; then
+      printf "${GREEN} >> docker-compose encontrado!${WHITE}\n"
+    else
+      printf "${RED}❌ ERRO: docker compose não está disponível!${WHITE}\n"
+      exit 1
+    fi
+  else
+    printf "${GREEN} >> Docker e docker compose verificados e funcionando!${WHITE}\n"
+  fi
+  
+  echo
+  sleep 2
 }
 
 # Subir containers do WhatsMeow
@@ -736,6 +780,26 @@ subir_containers_whatsmeow() {
   echo
   
   {
+    # Verificar se Docker está disponível antes de continuar
+    if ! command -v docker >/dev/null 2>&1; then
+      printf "${RED}❌ ERRO: Comando 'docker' não encontrado!${WHITE}\n"
+      printf "${WHITE}   Verifique se o Docker está instalado e no PATH.${WHITE}\n"
+      printf "${WHITE}   Tente executar: sudo apt-get install -y docker.io${WHITE}\n"
+      exit 1
+    fi
+    
+    # Verificar se docker compose está disponível
+    docker_compose_cmd="docker compose"
+    if ! docker compose version >/dev/null 2>&1; then
+      if command -v docker-compose >/dev/null 2>&1; then
+        docker_compose_cmd="docker-compose"
+        printf "${WHITE} >> Usando docker-compose (versão antiga)${WHITE}\n"
+      else
+        printf "${RED}❌ ERRO: docker compose não está disponível!${WHITE}\n"
+        exit 1
+      fi
+    fi
+    
     cd /home/deploy/${empresa}/wuzapi
     
     # Verificar conectividade antes do build
@@ -750,7 +814,7 @@ subir_containers_whatsmeow() {
     
     # Limpar builds anteriores que podem ter falhado
     printf "${WHITE} >> Limpando builds anteriores...\n"
-    docker compose down -v 2>/dev/null || true
+    $docker_compose_cmd down -v 2>/dev/null || true
     docker builder prune -f >/dev/null 2>&1 || true
     echo
     
@@ -771,7 +835,7 @@ subir_containers_whatsmeow() {
       
       # Executar build primeiro
       printf "${WHITE} >> Executando docker compose build...\n"
-      docker_output=$(docker compose build --no-cache 2>&1)
+      docker_output=$($docker_compose_cmd build --no-cache 2>&1)
       build_exit_code=$?
       
       echo "$docker_output"
@@ -801,7 +865,7 @@ subir_containers_whatsmeow() {
           printf "${YELLOW}   3. Firewall bloqueando conexões${WHITE}\n"
           printf "${WHITE}   Verifique os logs acima para mais detalhes.${WHITE}\n"
           printf "${WHITE}   Tente executar manualmente:${WHITE}\n"
-          printf "${WHITE}   cd /home/deploy/${empresa}/wuzapi && docker compose build${WHITE}\n"
+          printf "${WHITE}   cd /home/deploy/${empresa}/wuzapi && $docker_compose_cmd build${WHITE}\n"
           exit 1
         fi
       fi
@@ -812,7 +876,7 @@ subir_containers_whatsmeow() {
       echo
       
       # Executar docker compose up
-      docker_output=$(docker compose up -d 2>&1)
+      docker_output=$($docker_compose_cmd up -d 2>&1)
       docker_exit_code=$?
       
       echo "$docker_output"
@@ -824,21 +888,21 @@ subir_containers_whatsmeow() {
         sleep 10
         
         # Verificar status dos containers
-        if docker compose ps | grep -qE "(Healthy|Running|Up)"; then
+        if $docker_compose_cmd ps | grep -qE "(Healthy|Running|Up)"; then
           printf "${GREEN}✅ Containers do WhatsMeow iniciados com sucesso!${WHITE}\n"
           echo
-          docker compose ps
+          $docker_compose_cmd ps
           echo
           sleep 2
         else
           printf "${YELLOW}⚠️  Containers iniciados, mas alguns podem estar iniciando ainda...${WHITE}\n"
-          printf "${WHITE}   Verifique o status com: cd /home/deploy/${empresa}/wuzapi && docker compose ps${WHITE}\n"
+          printf "${WHITE}   Verifique o status com: cd /home/deploy/${empresa}/wuzapi && $docker_compose_cmd ps${WHITE}\n"
           echo
           sleep 2
         fi
       else
         printf "${RED}❌ ERRO: Falha ao subir os containers do WhatsMeow.${WHITE}\n"
-        printf "${RED}   Verifique os logs com: cd /home/deploy/${empresa}/wuzapi && docker compose logs${WHITE}\n"
+        printf "${RED}   Verifique os logs com: cd /home/deploy/${empresa}/wuzapi && $docker_compose_cmd logs${WHITE}\n"
         exit 1
       fi
     fi
