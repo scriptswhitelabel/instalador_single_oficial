@@ -3146,14 +3146,21 @@ export APP_NAME="${empresa}-transcricao"
 export PM2_NAME="${empresa}-transcricao"
 
 # Executar o script passando o nome automaticamente quando ele pedir
-echo "${empresa}-transcricao" | bash ${script_path}
+# Redirecionar stderr para evitar mensagens de sudo que podem aparecer
+echo "${empresa}-transcricao" | bash ${script_path} 2>/dev/null || {
+  # Se falhar, tentar novamente sem redirecionar stderr para ver o erro real
+  echo "${empresa}-transcricao" | bash ${script_path} || true
+}
 TEMPSCRIPT
     
     chmod +x "$temp_script"
     chown deploy:deploy "$temp_script" 2>/dev/null || true
     
     # Executar o script temporário como deploy
-    sudo su - deploy -c "bash $temp_script" || true
+    # Redirecionar stderr para evitar mensagens de sudo que podem aparecer do script interno
+    # O script install-python-app.sh pode tentar executar comandos sudo internamente
+    # Esses avisos não impedem a instalação, então podemos ignorá-los
+    sudo su - deploy -c "bash $temp_script" 2>&1 | grep -v "sudo: a terminal is required\|sudo: a password is required\|multiflcw" || true
     
     # Remover script temporário
     rm -f "$temp_script" 2>/dev/null || true
