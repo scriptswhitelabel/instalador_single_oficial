@@ -2977,15 +2977,13 @@ RESTARTBACKEND
   fi
   
   # Verificar se existe processo PM2 desta instância ESPECÍFICA e parar apenas se existir
-  # IMPORTANTE: Só para processos com o nome exato desta instância (transcricao-${empresa} ou ${empresa}-transcricao)
+  # IMPORTANTE: Só para processos com o nome exato desta instância (${empresa}-transcricao)
   # NÃO afeta processos genéricos como "transcricao" ou processos de outras instâncias
   # Na primeira instalação, não haverá nada para parar
-  if pm2 list | grep -qE "transcricao-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
+    if pm2 list | grep -qE "${empresa}-transcricao[[:space:]]"; then
     printf "Processos PM2 encontrados para a instância ${empresa}. Parando apenas processos desta instância...\n"
     # Parar APENAS processos com o nome exato desta instância
     # Não para processos genéricos ou de outras instâncias
-    pm2 stop transcricao-${empresa} 2>/dev/null || true
-    pm2 delete transcricao-${empresa} 2>/dev/null || true
     pm2 stop ${empresa}-transcricao 2>/dev/null || true
     pm2 delete ${empresa}-transcricao 2>/dev/null || true
     pm2 save 2>/dev/null || true
@@ -3097,32 +3095,6 @@ PYTHON_SCRIPT
   echo
   sleep 2
   
-  # Limpar processos PM2 que possam estar rodando como root ANTES de executar o script
-  # Isso evita que o script inicie processos como root e cause conflitos
-  banner
-  printf "${WHITE} >> Limpando processos PM2 conflitantes (root) antes da instalação...\n"
-  echo
-  
-  sudo su - root <<CLEANBEFORESCRIPT
-  # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-  else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
-  fi
-  
-  # Parar e deletar processos desta instância que possam estar rodando como root
-  # Isso garante que não haverá conflito quando iniciarmos como deploy depois
-  pm2 stop transcricao-${empresa} 2>/dev/null || true
-  pm2 delete transcricao-${empresa} 2>/dev/null || true
-  pm2 stop ${empresa}-transcricao 2>/dev/null || true
-  pm2 delete ${empresa}-transcricao 2>/dev/null || true
-  pm2 save 2>/dev/null || true
-CLEANBEFORESCRIPT
-  
-  echo
-  sleep 2
-  
   # Fazer backup do main.py atualizado ANTES de executar o script
   # O script pode fazer git checkout/reset que sobrescreve o main.py
   local main_py="/home/deploy/${empresa}/api_transcricao/main.py"
@@ -3130,33 +3102,52 @@ CLEANBEFORESCRIPT
   if [ -f "$main_py" ]; then
     printf "${WHITE} >> Criando backup protegido do main.py atualizado...${WHITE}\n"
     cp "$main_py" "$main_py_backup_protected" 2>/dev/null || true
+    # Garantir que o backup tenha permissões corretas para deploy
+    chown deploy:deploy "$main_py_backup_protected" 2>/dev/null || true
+    chmod 644 "$main_py_backup_protected" 2>/dev/null || true
     printf "${GREEN} >> Backup criado: ${main_py_backup_protected}${WHITE}\n"
     echo
   fi
   
-  # Executar script de instalação
+  # Executar script de instalação como usuário DEPLOY (não root)
+  # Isso garante que o PM2 não será iniciado como root
   banner
-  printf "${WHITE} >> Executando script de instalação da transcrição...\n"
-  printf "${YELLOW} >> NOTA: Se o script tentar iniciar PM2 como root, vamos limpar depois${WHITE}\n"
+  printf "${WHITE} >> Executando script de instalação da transcrição como usuário DEPLOY...\n"
+  printf "${GREEN} >> Isso garante que o PM2 não será iniciado como root${WHITE}\n"
   echo
   
   local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
     
-    # Passar o nome do app como variável de ambiente (padrão: transcricao-${empresa})
+    # Passar o nome do app como variável de ambiente (padrão: ${empresa}-transcricao)
     # O nome é obtido do arquivo de variáveis da instância
-    export PM2_APP_NAME="transcricao-${empresa}"
-    export APP_NAME="transcricao-${empresa}"
-    export PM2_NAME="transcricao-${empresa}"
+    export PM2_APP_NAME="${empresa}-transcricao"
+    export APP_NAME="${empresa}-transcricao"
+    export PM2_NAME="${empresa}-transcricao"
+    
+    # Executar o script como usuário DEPLOY para evitar que inicie PM2 como root
+    sudo su - deploy <<EXECUTASCRIPT
+    # Configura PATH para Node.js e PM2
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    
+    cd /home/deploy/${empresa}/api_transcricao || exit 1
+    
+    # Passar variáveis de ambiente
+    export PM2_APP_NAME="${empresa}-transcricao"
+    export APP_NAME="${empresa}-transcricao"
+    export PM2_NAME="${empresa}-transcricao"
     
     # Executar o script passando o nome automaticamente quando ele pedir
-    # Usar echo para responder automaticamente ao prompt
-    printf "${WHITE} >> Executando script com nome automático: ${BLUE}transcricao-${empresa}${WHITE}\n"
-    echo "transcricao-${empresa}" | bash "$script_path"
+    echo "${empresa}-transcricao" | bash "$script_path"
+EXECUTASCRIPT
     
     printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
-    printf "${GREEN} >> Nome do app PM2 usado automaticamente: ${BLUE}transcricao-${empresa}${WHITE}\n"
+    printf "${GREEN} >> Nome do app PM2 usado automaticamente: ${BLUE}${empresa}-transcricao${WHITE}\n"
     echo
     
     # RESTAURAR o main.py atualizado imediatamente após o script
@@ -3164,6 +3155,10 @@ CLEANBEFORESCRIPT
     if [ -f "$main_py_backup_protected" ]; then
       printf "${WHITE} >> Restaurando main.py com a porta correta após execução do script...${WHITE}\n"
       cp "$main_py_backup_protected" "$main_py" 2>/dev/null || true
+      
+      # Garantir permissões corretas para deploy
+      chown deploy:deploy "$main_py" 2>/dev/null || true
+      chmod 644 "$main_py" 2>/dev/null || true
       
       # Verificar se a porta está correta após restaurar
       if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
@@ -3173,50 +3168,36 @@ CLEANBEFORESCRIPT
         # Corrigir usando sed forçado
         sed -i "s|port=[0-9]\+|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
         sed -i "s|port = [0-9]\+|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+        # Garantir permissões após modificar
+        chown deploy:deploy "$main_py" 2>/dev/null || true
+        chmod 644 "$main_py" 2>/dev/null || true
       fi
       echo
     fi
     
-    # Parar qualquer PM2 que o script possa ter iniciado
+    # Parar qualquer PM2 que o script possa ter iniciado como DEPLOY
     # IMPORTANTE: Não vamos iniciar o PM2 agora, apenas depois de atualizar o main.py
     sleep 2
     banner
     printf "${WHITE} >> Parando qualquer PM2 iniciado pelo script de instalação...\n"
     echo
     
-    # Limpar processos PM2 iniciados como ROOT
-    sudo su - root <<CLEANROOTAFTER
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
-    fi
-    pm2 stop transcricao-${empresa} 2>/dev/null || true
-    pm2 delete transcricao-${empresa} 2>/dev/null || true
-    pm2 stop ${empresa}-transcricao 2>/dev/null || true
-    pm2 delete ${empresa}-transcricao 2>/dev/null || true
-    pm2 stop transc-${empresa} 2>/dev/null || true
-    pm2 delete transc-${empresa} 2>/dev/null || true
-    pm2 save --force 2>/dev/null || true
-CLEANROOTAFTER
-    
-    # Limpar processos PM2 iniciados como DEPLOY (se houver)
-    # Mas a transcrição roda como ROOT, então vamos limpar apenas para garantir
+    # Limpar processos PM2 iniciados como DEPLOY (o script foi executado como deploy)
     sudo su - deploy <<CLEANDEPLOYAFTER
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
       export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
       export PATH=/usr/bin:/usr/local/bin:\$PATH
     fi
-    # Limpar apenas se existir (a transcrição roda como root)
-    if pm2 list | grep -q "transcricao-${empresa}"; then
-      pm2 stop transcricao-${empresa} 2>/dev/null || true
-      pm2 delete transcricao-${empresa} 2>/dev/null || true
-      pm2 save --force 2>/dev/null || true
-    fi
+    # Limpar processos desta instância se existirem
+    pm2 stop ${empresa}-transcricao 2>/dev/null || true
+    pm2 delete ${empresa}-transcricao 2>/dev/null || true
+    pm2 stop transc-${empresa} 2>/dev/null || true
+    pm2 delete transc-${empresa} 2>/dev/null || true
+    pm2 save --force 2>/dev/null || true
 CLEANDEPLOYAFTER
     
-    printf "${GREEN} >> Processos PM2 parados. Agora vamos atualizar o main.py e iniciar o PM2 corretamente.${WHITE}\n"
+    printf "${GREEN} >> Processos PM2 parados. Agora vamos atualizar o main.py e iniciar o PM2 corretamente como DEPLOY.${WHITE}\n"
     echo
     sleep 2
     
@@ -3249,6 +3230,9 @@ CLEANDEPLOYAFTER
         python3 <<PYTHON_FIX
 import re
 import sys
+import os
+import pwd
+import grp
 
 file_path = "$main_py"
 new_port = "$porta_transcricao"
@@ -3275,6 +3259,14 @@ try:
     if content != original_content:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
+        # Ajustar permissões para deploy
+        try:
+            deploy_uid = pwd.getpwnam('deploy').pw_uid
+            deploy_gid = grp.getgrnam('deploy').gr_gid
+            os.chown(file_path, deploy_uid, deploy_gid)
+            os.chmod(file_path, 0o644)
+        except:
+            pass  # Se não conseguir ajustar permissões, continua
         print(f"SUCCESS: Porta corrigida para {new_port}")
         sys.exit(0)
     else:
@@ -3285,18 +3277,28 @@ except Exception as e:
     sys.exit(1)
 PYTHON_FIX
         
+        # Garantir permissões após Python (mesmo se não modificou)
+        chown deploy:deploy "$main_py" 2>/dev/null || true
+        chmod 644 "$main_py" 2>/dev/null || true
+        
         # Fallback para sed se Python falhar - substituir QUALQUER porta de 4 dígitos
         if [ $? -ne 0 ]; then
           printf "${YELLOW} >> Tentando correção com sed...${WHITE}\n"
           sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
           sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
           sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+          # Garantir permissões após modificar
+          chown deploy:deploy "$main_py" 2>/dev/null || true
+          chmod 644 "$main_py" 2>/dev/null || true
         fi
         
         # Verificar novamente
         sleep 1
         if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
           printf "${GREEN} >> ✓ Porta corrigida com sucesso!${WHITE}\n"
+          # Garantir permissões finais
+          chown deploy:deploy "$main_py" 2>/dev/null || true
+          chmod 644 "$main_py" 2>/dev/null || true
         else
           printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível corrigir automaticamente${WHITE}\n"
           printf "${YELLOW} >> Por favor, edite manualmente o arquivo: $main_py${WHITE}\n"
@@ -3316,7 +3318,19 @@ PYTHON_FIX
         return 1
       fi
       
+      # Garantir permissões finais antes de iniciar PM2
+      printf "${WHITE} >> Ajustando permissões finais dos arquivos para deploy...${WHITE}\n"
+      chown deploy:deploy "$main_py" 2>/dev/null || true
+      chmod 644 "$main_py" 2>/dev/null || true
+      if [ -f "$main_py_backup_protected" ]; then
+        chown deploy:deploy "$main_py_backup_protected" 2>/dev/null || true
+        chmod 644 "$main_py_backup_protected" 2>/dev/null || true
+      fi
+      # Ajustar permissões do diretório também
+      chown deploy:deploy "/home/deploy/${empresa}/api_transcricao" -R 2>/dev/null || true
+      printf "${GREEN} >> ✓ Permissões ajustadas para deploy${WHITE}\n"
       echo
+      
       printf "${GREEN} >> ✓ main.py atualizado com sucesso para porta ${porta_transcricao}${WHITE}\n"
       echo
       sleep 2
@@ -3366,8 +3380,6 @@ PYTHON_FIX
       echo
       
       # Parar qualquer processo PM2 desta instância que possa existir
-      pm2 stop transcricao-${empresa} 2>/dev/null || true
-      pm2 delete transcricao-${empresa} 2>/dev/null || true
       pm2 stop ${empresa}-transcricao 2>/dev/null || true
       pm2 delete ${empresa}-transcricao 2>/dev/null || true
       pm2 stop transc-${empresa} 2>/dev/null || true
@@ -3375,20 +3387,20 @@ PYTHON_FIX
       
       # Iniciar PM2 com o arquivo correto
       printf "${GREEN} >> Iniciando PM2...${WHITE}\n"
-      pm2 start "\$MAIN_PY_PATH" --name transcricao-${empresa} --interpreter python3 --cwd "\$TRANSC_DIR"
+      pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
       pm2 save --force
       
       # Verificar se iniciou corretamente
       sleep 3
-      if pm2 list | grep -q "transcricao-${empresa}.*online"; then
-        printf "${GREEN} >> ✓ Processo transcricao-${empresa} está ONLINE${WHITE}\n"
-        # Verificar logs para confirmar porta
-        sleep 2
-        pm2 logs transcricao-${empresa} --lines 10 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado" | head -3 || true
-      else
-        printf "${YELLOW} >> ⚠ Verifique o status: pm2 list${WHITE}\n"
-        printf "${YELLOW} >> Verifique os logs: pm2 logs transcricao-${empresa}${WHITE}\n"
-      fi
+        if pm2 list | grep -q "${empresa}-transcricao.*online"; then
+          printf "${GREEN} >> ✓ Processo ${empresa}-transcricao está ONLINE${WHITE}\n"
+          # Verificar logs para confirmar porta
+          sleep 2
+          pm2 logs ${empresa}-transcricao --lines 10 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado" | head -3 || true
+        else
+          printf "${YELLOW} >> ⚠ Verifique o status: pm2 list${WHITE}\n"
+          printf "${YELLOW} >> Verifique os logs: pm2 logs ${empresa}-transcricao${WHITE}\n"
+        fi
 STARTPM2CORRECT
       
     else
