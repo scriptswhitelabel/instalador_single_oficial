@@ -47,6 +47,34 @@ carregar_variaveis_base() {
   fi
 }
 
+# Validar token do GitHub
+validar_token_github() {
+  local token=$1
+  local repo=$2
+  
+  if [ -z "$token" ] || [ -z "$repo" ]; then
+    return 1
+  fi
+  
+  # Preparar URL do repositório com token
+  repo_limpo=$(echo "${repo}" | sed 's|https://||' | sed 's|http://||' | sed 's|\.git$||' | sed 's|/$||')
+  repo_url_com_token="https://${token}@${repo_limpo}.git"
+  
+  # Criar diretório temporário para teste
+  TEST_DIR="/tmp/test_clone_$(date +%s)"
+  
+  # Tentar fazer clone de teste (shallow clone para ser rápido)
+  if git clone --depth 1 "${repo_url_com_token}" "${TEST_DIR}" >/dev/null 2>&1; then
+    # Clone bem-sucedido, remover diretório de teste
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    return 0
+  else
+    # Clone falhou, token inválido
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    return 1
+  fi
+}
+
 # Definir versões disponíveis para instalação (mesma do instalador_single.sh)
 definir_versoes_instalacao() {
   declare -gA VERSOES_INSTALACAO
@@ -359,16 +387,38 @@ solicitar_dados_adicionais() {
   printf "${WHITE} >> Dados Adicionais da Nova Instância\n"
   echo
   
+  # Carregar variáveis base se existirem
+  carregar_variaveis_base
+  
   # Email
-  printf "${WHITE} >> Digite o email para certificados SSL:${WHITE}\n"
-  read -p "> " email_deploy
+  if [ -f "$ARQUIVO_VARIAVEIS_BASE" ] && [ -n "${email_deploy}" ]; then
+    printf "${GREEN} >> Email encontrado no arquivo de variáveis base: ${email_deploy}${WHITE}\n"
+    printf "${WHITE} >> Deseja usar este email? (S/N):${WHITE}\n"
+    read -p "> " usar_email_base
+    usar_email_base=$(echo "${usar_email_base}" | tr '[:upper:]' '[:lower:]')
+    if [ "${usar_email_base}" != "s" ]; then
+      printf "${WHITE} >> Digite o email para certificados SSL:${WHITE}\n"
+      read -p "> " email_deploy
+    fi
+  else
+    printf "${WHITE} >> Digite o email para certificados SSL:${WHITE}\n"
+    read -p "> " email_deploy
+  fi
   echo
   
-  # Senha Deploy
-  banner
-  printf "${WHITE} >> Insira a senha para o usuário Deploy e Banco de Dados ${RED}(IMPORTANTE: Não utilizar caracteres especiais)${WHITE}:${WHITE}\n"
-  read -p "> " senha_deploy
-  echo
+  # Senha Deploy - Carregar do arquivo base se existir (sempre usar a mesma senha do deploy)
+  if [ -f "$ARQUIVO_VARIAVEIS_BASE" ] && [ -n "${senha_deploy}" ]; then
+    printf "${GREEN} >> Senha do usuário Deploy encontrada no arquivo de variáveis base.${WHITE}\n"
+    printf "${GREEN} >> Usando a mesma senha do deploy existente para esta instância.${WHITE}\n"
+    echo
+    sleep 2
+  else
+    banner
+    printf "${YELLOW} >> ATENÇÃO: Arquivo de variáveis base não encontrado ou senha não definida.${WHITE}\n"
+    printf "${WHITE} >> Insira a senha para o usuário Deploy e Banco de Dados ${RED}(IMPORTANTE: Não utilizar caracteres especiais)${WHITE}:${WHITE}\n"
+    read -p "> " senha_deploy
+    echo
+  fi
   
   # Senha Master
   banner
@@ -400,17 +450,56 @@ solicitar_dados_adicionais() {
   read -p "> " facebook_app_secret
   echo
   
-  # Token GitHub
-  banner
-  printf "${WHITE} >> Digite seu TOKEN de acesso pessoal do GitHub:${WHITE}\n"
-  printf "${WHITE} >> Passo a Passo para gerar o seu TOKEN no link ${BLUE}https://bit.ly/token-github ${WHITE}\n"
-  read -p "> " github_token
+  # Repositório - Carregar do arquivo base se existir
+  if [ -f "$ARQUIVO_VARIAVEIS_BASE" ] && [ -n "${repo_url}" ]; then
+    printf "${GREEN} >> URL do repositório encontrada no arquivo de variáveis base: ${repo_url}${WHITE}\n"
+    printf "${WHITE} >> Deseja usar este repositório? (S/N):${WHITE}\n"
+    read -p "> " usar_repo_base
+    usar_repo_base=$(echo "${usar_repo_base}" | tr '[:upper:]' '[:lower:]')
+    if [ "${usar_repo_base}" != "s" ]; then
+      banner
+      printf "${WHITE} >> Digite a URL do repositório privado no GitHub:${WHITE}\n"
+      read -p "> " repo_url
+    fi
+  else
+    banner
+    printf "${WHITE} >> Digite a URL do repositório privado no GitHub:${WHITE}\n"
+    read -p "> " repo_url
+  fi
   echo
   
-  # Repositório
-  banner
-  printf "${WHITE} >> Digite a URL do repositório privado no GitHub:${WHITE}\n"
-  read -p "> " repo_url
+  # Token GitHub - Carregar do arquivo base se existir e validar
+  token_valido=false
+  if [ -f "$ARQUIVO_VARIAVEIS_BASE" ] && [ -n "${github_token}" ]; then
+    printf "${WHITE} >> Validando token do GitHub encontrado no arquivo base...\n"
+    if validar_token_github "${github_token}" "${repo_url}"; then
+      printf "${GREEN} >> Token do GitHub válido!${WHITE}\n"
+      token_valido=true
+    else
+      printf "${RED} >> Token do GitHub inválido ou expirado!${WHITE}\n"
+      printf "${YELLOW} >> Será necessário informar um novo token.${WHITE}\n"
+      echo
+      sleep 2
+    fi
+  fi
+  
+  # Se token não foi validado ou não existe, pedir novo
+  if [ "$token_valido" = false ]; then
+    banner
+    printf "${WHITE} >> Digite seu TOKEN de acesso pessoal do GitHub:${WHITE}\n"
+    printf "${WHITE} >> Passo a Passo para gerar o seu TOKEN no link ${BLUE}https://bit.ly/token-github ${WHITE}\n"
+    read -p "> " github_token
+    
+    # Validar o novo token
+    printf "${WHITE} >> Validando token...\n"
+    while ! validar_token_github "${github_token}" "${repo_url}"; do
+      printf "${RED} >> Token inválido! Por favor, verifique o token e tente novamente.${WHITE}\n"
+      echo
+      printf "${WHITE} >> Digite seu TOKEN de acesso pessoal do GitHub:${WHITE}\n"
+      read -p "> " github_token
+    done
+    printf "${GREEN} >> Token validado com sucesso!${WHITE}\n"
+  fi
   echo
   
   # Validar que o repositório é o correto (usando mesma validação do instalador_single.sh)
