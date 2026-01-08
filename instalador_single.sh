@@ -3127,24 +3127,36 @@ PYTHON_SCRIPT
     export PM2_NAME="${empresa}-transcricao"
     
     # Executar o script como usuário DEPLOY para evitar que inicie PM2 como root
-    sudo su - deploy <<EXECUTASCRIPT
-    # Configura PATH para Node.js e PM2
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
-    fi
+    # Criar um script temporário para executar como deploy
+    local temp_script="/tmp/exec_install_transc_${empresa}.sh"
+    cat > "$temp_script" <<TEMPSCRIPT
+#!/bin/bash
+# Configura PATH para Node.js e PM2
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+else
+  export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+
+cd /home/deploy/${empresa}/api_transcricao || exit 1
+
+# Passar variáveis de ambiente
+export PM2_APP_NAME="${empresa}-transcricao"
+export APP_NAME="${empresa}-transcricao"
+export PM2_NAME="${empresa}-transcricao"
+
+# Executar o script passando o nome automaticamente quando ele pedir
+echo "${empresa}-transcricao" | bash ${script_path}
+TEMPSCRIPT
     
-    cd /home/deploy/${empresa}/api_transcricao || exit 1
+    chmod +x "$temp_script"
+    chown deploy:deploy "$temp_script" 2>/dev/null || true
     
-    # Passar variáveis de ambiente
-    export PM2_APP_NAME="${empresa}-transcricao"
-    export APP_NAME="${empresa}-transcricao"
-    export PM2_NAME="${empresa}-transcricao"
+    # Executar o script temporário como deploy
+    sudo su - deploy -c "bash $temp_script" || true
     
-    # Executar o script passando o nome automaticamente quando ele pedir
-    echo "${empresa}-transcricao" | bash "$script_path"
-EXECUTASCRIPT
+    # Remover script temporário
+    rm -f "$temp_script" 2>/dev/null || true
     
     printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
     printf "${GREEN} >> Nome do app PM2 usado automaticamente: ${BLUE}${empresa}-transcricao${WHITE}\n"
