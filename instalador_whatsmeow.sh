@@ -279,37 +279,18 @@ corrigir_dockerfile_wuzapi() {
     
     printf "${WHITE} >> Verificando Dockerfile existente...${WHITE}\n"
     
-    # Adicionar configuração de DNS no início do Dockerfile se não existir
-    if ! grep -q "nameserver 8.8.8.8" "$dockerfile_path" 2>/dev/null; then
-      printf "${WHITE} >> Adicionando configuração de DNS ao Dockerfile...${WHITE}\n"
-      # Método mais seguro: usar um arquivo temporário
-      {
-        # Ler primeira linha (FROM)
-        first_line=$(head -n 1 "$dockerfile_path")
-        # Resto do arquivo
-        rest_of_file=$(tail -n +2 "$dockerfile_path")
-        
-        # Criar novo arquivo
-        {
-          echo "$first_line"
-          echo ""
-          echo "# Configure DNS for apt-get"
-          echo "RUN echo \"nameserver 8.8.8.8\" > /etc/resolv.conf && \\"
-          echo "    echo \"nameserver 8.8.4.4\" >> /etc/resolv.conf && \\"
-          echo "    echo \"nameserver 1.1.1.1\" >> /etc/resolv.conf"
-          echo ""
-          echo "$rest_of_file"
-        } > "${dockerfile_path}.tmp"
-        
-        mv "${dockerfile_path}.tmp" "$dockerfile_path"
-        printf "${GREEN} >> DNS adicionado ao Dockerfile!${WHITE}\n"
-      } || {
-        printf "${YELLOW}⚠️  Não foi possível adicionar DNS ao Dockerfile automaticamente.${WHITE}\n"
-        printf "${WHITE}   O build tentará usar o DNS configurado no docker-compose.yml${WHITE}\n"
-      }
-    else
-      printf "${GREEN} >> DNS já configurado no Dockerfile!${WHITE}\n"
+    # Remover tentativas de modificar /etc/resolv.conf (não funciona durante build)
+    if grep -q "nameserver 8.8.8.8" "$dockerfile_path" 2>/dev/null || grep -q "/etc/resolv.conf" "$dockerfile_path" 2>/dev/null; then
+      printf "${WHITE} >> Removendo tentativas de modificar /etc/resolv.conf (não funciona durante build)...${WHITE}\n"
+      # Remover linhas que tentam modificar resolv.conf
+      sed -i '/RUN echo.*nameserver.*resolv.conf/d' "$dockerfile_path" 2>/dev/null
+      sed -i '/Configure DNS for apt-get/d' "$dockerfile_path" 2>/dev/null
+      # Remover linhas vazias duplicadas
+      sed -i '/^$/N;/^\n$/D' "$dockerfile_path" 2>/dev/null
+      printf "${GREEN} >> Dockerfile limpo! DNS será configurado via docker-compose.yml${WHITE}\n"
     fi
+    
+    printf "${WHITE} >> DNS será configurado através do docker-compose.yml e Docker daemon${WHITE}\n"
     
     # Verificar se há problemas com apt-get (Ubuntu/Debian)
     if grep -q "apt-get install" "$dockerfile_path" 2>/dev/null; then
@@ -493,7 +474,27 @@ verificar_e_corrigir_dns() {
       printf "${GREEN} >> DNS do sistema configurado!${WHITE}\n"
     fi
     
+    # Verificar conectividade de rede
+    printf "${WHITE} >> Verificando conectividade de rede...\n"
+    if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+      printf "${YELLOW}⚠️  Aviso: Não foi possível fazer ping no Google DNS.${WHITE}\n"
+      printf "${WHITE}   Verifique sua conexão de internet.${WHITE}\n"
+    else
+      printf "${GREEN} >> Conectividade de rede OK!${WHITE}\n"
+    fi
+    
+    # Verificar resolução DNS
+    printf "${WHITE} >> Verificando resolução DNS...\n"
+    if command -v nslookup >/dev/null 2>&1; then
+      if ! nslookup deb.debian.org >/dev/null 2>&1; then
+        printf "${YELLOW}⚠️  Aviso: Não foi possível resolver deb.debian.org.${WHITE}\n"
+      else
+        printf "${GREEN} >> Resolução DNS OK!${WHITE}\n"
+      fi
+    fi
+    
     # Configurar DNS do Docker daemon
+    docker_daemon_updated=false
     if [ ! -f /etc/docker/daemon.json ]; then
       printf "${WHITE} >> Criando configuração do Docker daemon...\n"
       mkdir -p /etc/docker
@@ -502,10 +503,8 @@ verificar_e_corrigir_dns() {
   "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
 }
 EOF
+      docker_daemon_updated=true
       printf "${GREEN} >> Configuração do Docker daemon criada!${WHITE}\n"
-      printf "${WHITE} >> Reiniciando Docker...\n"
-      systemctl restart docker
-      sleep 3
     else
       # Verificar se DNS já está configurado
       if ! grep -q "8.8.8.8" /etc/docker/daemon.json 2>/dev/null; then
@@ -525,11 +524,25 @@ EOF
 EOF
           }
         fi
+        docker_daemon_updated=true
         printf "${GREEN} >> DNS adicionado à configuração do Docker!${WHITE}\n"
-        printf "${WHITE} >> Reiniciando Docker...\n"
-        systemctl restart docker
-        sleep 3
       fi
+    fi
+    
+    # Reiniciar Docker se configuração foi atualizada
+    if [ "$docker_daemon_updated" = true ]; then
+      printf "${WHITE} >> Reiniciando Docker para aplicar configurações...\n"
+      systemctl restart docker
+      sleep 5
+      printf "${GREEN} >> Docker reiniciado!${WHITE}\n"
+    fi
+    
+    # Verificar se Docker está rodando
+    if ! systemctl is-active --quiet docker; then
+      printf "${RED}❌ ERRO: Docker não está rodando!${WHITE}\n"
+      printf "${WHITE}   Tentando iniciar Docker...\n"
+      systemctl start docker
+      sleep 3
     fi
     
     printf "${GREEN} >> Verificação de DNS concluída!${WHITE}\n"
@@ -724,6 +737,16 @@ subir_containers_whatsmeow() {
   
   {
     cd /home/deploy/${empresa}/wuzapi
+    
+    # Verificar conectividade antes do build
+    printf "${WHITE} >> Verificando conectividade antes do build...\n"
+    if ! ping -c 1 -W 2 deb.debian.org >/dev/null 2>&1; then
+      printf "${YELLOW}⚠️  Aviso: Não foi possível fazer ping em deb.debian.org${WHITE}\n"
+      printf "${WHITE}   Tentando continuar mesmo assim...\n"
+    else
+      printf "${GREEN} >> Conectividade com deb.debian.org OK!${WHITE}\n"
+    fi
+    echo
     
     # Limpar builds anteriores que podem ter falhado
     printf "${WHITE} >> Limpando builds anteriores...\n"
