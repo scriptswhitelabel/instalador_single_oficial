@@ -2885,12 +2885,13 @@ instalar_transcricao_audio_nativa() {
   echo
   sleep 2
   
-  # Parar processos PM2 relacionados à transcrição desta instância antes de atualizar
+  # Verificar se há processos PM2 existentes desta instância (apenas se já estiver instalado)
+  # Na primeira instalação, não haverá processos para parar
   banner
-  printf "${WHITE} >> Verificando processos PM2 da transcrição...\n"
+  printf "${WHITE} >> Verificando se há processos PM2 existentes da transcrição...\n"
   echo
   
-  sudo su - deploy <<STOPPM2TRANSC
+  sudo su - deploy <<CHECKPM2TRANSC
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
     export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
@@ -2898,13 +2899,25 @@ instalar_transcricao_audio_nativa() {
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   
-  # Parar processos relacionados à transcrição desta instância
-  pm2 stop transc-${empresa} 2>/dev/null || true
-  pm2 delete transc-${empresa} 2>/dev/null || true
-  pm2 stop ${empresa}-transcricao 2>/dev/null || true
-  pm2 delete ${empresa}-transcricao 2>/dev/null || true
-  pm2 save 2>/dev/null || true
-STOPPM2TRANSC
+  # Verificar se existe processo PM2 desta instância ESPECÍFICA e parar apenas se existir
+  # IMPORTANTE: Só para processos com o nome exato desta instância (transc-${empresa} ou ${empresa}-transcricao)
+  # NÃO afeta processos genéricos como "transcricao" ou processos de outras instâncias
+  # Na primeira instalação, não haverá nada para parar
+  if pm2 list | grep -qE "transc-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
+    printf "Processos PM2 encontrados para a instância ${empresa}. Parando apenas processos desta instância...\n"
+    # Parar APENAS processos com o nome exato desta instância
+    # Não para processos genéricos ou de outras instâncias
+    pm2 stop transc-${empresa} 2>/dev/null || true
+    pm2 delete transc-${empresa} 2>/dev/null || true
+    pm2 stop ${empresa}-transcricao 2>/dev/null || true
+    pm2 delete ${empresa}-transcricao 2>/dev/null || true
+    pm2 save 2>/dev/null || true
+    printf "Processos da instância ${empresa} parados com sucesso.\n"
+  else
+    printf "Nenhum processo PM2 encontrado para esta instância (${empresa}). Primeira instalação ou processo não existe.\n"
+    printf "Processos de outras instâncias (incluindo instalação principal) não serão afetados.\n"
+  fi
+CHECKPM2TRANSC
   
   echo
   sleep 2
@@ -3019,10 +3032,47 @@ PYTHON_SCRIPT
     printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
     echo
     
-    # Verificar novamente se a porta está correta após a execução do script
+    # Verificar se o script iniciou algum processo PM2 e parar apenas se existir
+    # (na primeira instalação, pode não haver processo ainda)
     sleep 2
     banner
-    printf "${WHITE} >> Verificando configuração final da porta...\n"
+    printf "${WHITE} >> Verificando processos PM2 iniciados pelo script...\n"
+    echo
+    
+    sudo su - deploy <<CHECKPM2AFTER
+    # Configura PATH para Node.js e PM2
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    
+    # Verificar se o script iniciou algum processo PM2 desta instância ESPECÍFICA
+    # IMPORTANTE: Só para processos com o nome exato desta instância
+    # NÃO afeta processos genéricos como "transcricao" ou processos de outras instâncias (incluindo instalação principal)
+    # Se sim, parar para aplicar a porta correta. Se não, continuar normalmente.
+    if pm2 list | grep -qE "transc-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
+      printf "Processos PM2 encontrados para a instância ${empresa}. Parando para aplicar porta correta...\n"
+      # Parar APENAS processos com o nome exato desta instância
+      # Não para processos genéricos ou de outras instâncias
+      pm2 stop transc-${empresa} 2>/dev/null || true
+      pm2 delete transc-${empresa} 2>/dev/null || true
+      pm2 stop ${empresa}-transcricao 2>/dev/null || true
+      pm2 delete ${empresa}-transcricao 2>/dev/null || true
+      pm2 save 2>/dev/null || true
+      printf "Processos da instância ${empresa} parados. Processos de outras instâncias permanecem intactos.\n"
+    else
+      printf "Nenhum processo PM2 encontrado para esta instância. Continuando...\n"
+      printf "Processos de outras instâncias (incluindo instalação principal) não serão afetados.\n"
+    fi
+CHECKPM2AFTER
+    
+    echo
+    sleep 2
+    
+    # Verificar e corrigir a porta no main.py novamente (caso o script tenha sobrescrito)
+    banner
+    printf "${WHITE} >> Verificando e corrigindo configuração final da porta...\n"
     echo
     
     local main_py="/home/deploy/${empresa}/api_transcricao/main.py"
@@ -3030,14 +3080,54 @@ PYTHON_SCRIPT
       if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
         printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
       else
-        printf "${RED} >> ✗ ERRO: Porta não está correta no main.py após a instalação!${WHITE}\n"
-        printf "${YELLOW} >> A porta pode ter sido sobrescrita pelo script de instalação${WHITE}\n"
-        printf "${WHITE} >> Tentando corrigir novamente...${WHITE}\n"
+        printf "${YELLOW} >> Porta não está correta. Corrigindo...${WHITE}\n"
         
-        # Tentar corrigir novamente
-        sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
-        sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+        # Corrigir usando Python novamente
+        python3 <<PYTHON_FIX
+import re
+import sys
+
+file_path = "$main_py"
+new_port = "$porta_transcricao"
+
+try:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    original_content = content
+    
+    def replace_port(match):
+        original = match.group(0)
+        if ' = ' in original:
+            return f"port = {new_port}"
+        else:
+            return f"port={new_port}"
+    
+    content = re.sub(r"port\s*=\s*\d+", replace_port, content)
+    content = re.sub(r"porta\s+\d+", f"porta {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"Servidor iniciado na porta \d+", f"Servidor iniciado na porta {new_port}", content, flags=re.IGNORECASE)
+    content = re.sub(r"Server started on port \d+", f"Server started on port {new_port}", content, flags=re.IGNORECASE)
+    
+    if content != original_content:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"SUCCESS: Porta corrigida para {new_port}")
+        sys.exit(0)
+    else:
+        print(f"WARNING: Nenhuma alteração necessária")
+        sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {str(e)}")
+    sys.exit(1)
+PYTHON_FIX
         
+        # Fallback para sed se Python falhar
+        if [ $? -ne 0 ]; then
+          sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+          sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+        fi
+        
+        # Verificar novamente
         if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
           printf "${GREEN} >> ✓ Porta corrigida com sucesso!${WHITE}\n"
         else
@@ -3047,9 +3137,36 @@ PYTHON_SCRIPT
         fi
       fi
       
-      # Mostrar a linha atual do app.run
+      # Mostrar a linha atual do app.run para confirmação
       printf "${WHITE} >> Configuração atual do app.run:${WHITE}\n"
       grep "app.run" "$main_py" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+      
+      echo
+      printf "${WHITE} >> Agora iniciando o PM2 com a porta correta (${porta_transcricao})...${WHITE}\n"
+      echo
+      
+      # Iniciar o PM2 manualmente com a porta correta
+      sudo su - deploy <<STARTPM2CORRECT
+      # Configura PATH para Node.js e PM2
+      if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+        export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+      else
+        export PATH=/usr/bin:/usr/local/bin:\$PATH
+      fi
+      
+      TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
+      if [ -f "\$TRANSC_DIR/main.py" ]; then
+        cd "\$TRANSC_DIR"
+        pm2 start main.py --name transc-${empresa} --interpreter python3
+        pm2 save
+        printf "${GREEN} >> PM2 iniciado com sucesso na porta ${porta_transcricao}${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Arquivo main.py não encontrado${WHITE}\n"
+      fi
+STARTPM2CORRECT
+      
+    else
+      printf "${YELLOW} >> AVISO: Arquivo main.py não encontrado${WHITE}\n"
     fi
     
     echo
