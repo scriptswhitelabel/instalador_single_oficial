@@ -3336,6 +3336,7 @@ PYTHON_FIX
       
       # IMPORTANTE: Parar qualquer processo PM2 desta instância que possa ter sido iniciado como root
       # Isso evita conflitos entre processos rodando como root e deploy
+      printf "${WHITE} >> Limpando processos PM2 rodando como ROOT para esta instância...${WHITE}\n"
       sudo su - root <<CLEANROOTPM2
       # Configura PATH para Node.js e PM2
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -3344,13 +3345,17 @@ PYTHON_FIX
         export PATH=/usr/bin:/usr/local/bin:\$PATH
       fi
       
-      # Parar e deletar processos desta instância que possam estar rodando como root
-      # Isso evita conflitos com processos que devem rodar como deploy
+      # Parar e deletar TODOS os processos desta instância que possam estar rodando como root
+      # Incluir todas as variações de nome possíveis
       pm2 stop transcricao-${empresa} 2>/dev/null || true
       pm2 delete transcricao-${empresa} 2>/dev/null || true
       pm2 stop ${empresa}-transcricao 2>/dev/null || true
       pm2 delete ${empresa}-transcricao 2>/dev/null || true
-      pm2 save 2>/dev/null || true
+      pm2 stop transc-${empresa} 2>/dev/null || true
+      pm2 delete transc-${empresa} 2>/dev/null || true
+      # Salvar para remover do pm2 save do root
+      pm2 save --force 2>/dev/null || true
+      printf "Processos PM2 do root removidos para instância ${empresa}\n"
 CLEANROOTPM2
       
       echo
@@ -3369,95 +3374,132 @@ CLEANROOTPM2
         export PATH=/usr/bin:/usr/local/bin:\$PATH
       fi
       
-      # Verificar se já existe processo desta instância rodando como deploy
-      # Se existir, parar antes de iniciar novamente
-      if pm2 list | grep -qE "transcricao-${empresa}[[:space:]]|${empresa}-transcricao[[:space:]]"; then
-        printf "Processo existente encontrado. Parando antes de reiniciar...\n"
-        pm2 stop transcricao-${empresa} 2>/dev/null || true
-        pm2 delete transcricao-${empresa} 2>/dev/null || true
-        pm2 stop ${empresa}-transcricao 2>/dev/null || true
-        pm2 delete ${empresa}-transcricao 2>/dev/null || true
-        sleep 1
-      fi
+      # LIMPEZA COMPLETA: Deletar TODOS os processos desta instância antes de iniciar
+      # Isso garante que não há processos em cache ou antigos interferindo
+      printf "${WHITE} >> Limpando TODOS os processos PM2 desta instância (incluindo cache)...${WHITE}\n"
+      pm2 stop transcricao-${empresa} 2>/dev/null || true
+      pm2 delete transcricao-${empresa} 2>/dev/null || true
+      pm2 stop ${empresa}-transcricao 2>/dev/null || true
+      pm2 delete ${empresa}-transcricao 2>/dev/null || true
+      pm2 stop transc-${empresa} 2>/dev/null || true
+      pm2 delete transc-${empresa} 2>/dev/null || true
+      # Salvar após deletar para remover do pm2 save
+      pm2 save --force 2>/dev/null || true
+      sleep 2
+      printf "${GREEN} >> Processos antigos removidos completamente${WHITE}\n"
+      echo
       
       TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
-      if [ -f "\$TRANSC_DIR/main.py" ]; then
-        cd "\$TRANSC_DIR"
-        
-        # VERIFICAÇÃO CRÍTICA OBRIGATÓRIA: Confirmar que a porta está correta ANTES de iniciar
-        printf "${WHITE} >> Verificação final OBRIGATÓRIA da porta no main.py antes de iniciar PM2...${WHITE}\n"
-        printf "${YELLOW} >> Esta verificação é CRÍTICA - o PM2 NÃO será iniciado se a porta estiver incorreta${WHITE}\n"
-        echo
-        
-        # Extrair porta atual do arquivo
-        current_port=\$(grep -oP "port\s*=\s*\K\d+" main.py | head -1 || echo "")
-        if [ -n "\$current_port" ]; then
-          printf "${WHITE} >> Porta encontrada no main.py: ${YELLOW}\$current_port${WHITE}\n"
-          printf "${WHITE} >> Porta esperada: ${GREEN}${porta_transcricao}${WHITE}\n"
-        else
-          printf "${RED} >> ERRO: Não foi possível extrair a porta do main.py!${WHITE}\n"
-        fi
-        echo
-        
-        # FORÇAR atualização da porta SEMPRE antes de iniciar o PM2
-        # Isso garante que mesmo que o script tenha sobrescrito, a porta estará correta
-        printf "${WHITE} >> Forçando atualização da porta para ${GREEN}${porta_transcricao}${WHITE}...${WHITE}\n"
-        
-        # Método forçado: substituir QUALQUER porta (qualquer número de dígitos)
-        sed -i "s|port=[0-9]\+|port=${porta_transcricao}|g" main.py 2>/dev/null || true
-        sed -i "s|port = [0-9]\+|port = ${porta_transcricao}|g" main.py 2>/dev/null || true
-        sed -i "s|porta [0-9]\+|porta ${porta_transcricao}|g" main.py 2>/dev/null || true
-        
-        # Também atualizar mensagens de log
-        sed -i "s|Servidor iniciado na porta [0-9]\+|Servidor iniciado na porta ${porta_transcricao}|g" main.py 2>/dev/null || true
-        sed -i "s|Server started on port [0-9]\+|Server started on port ${porta_transcricao}|g" main.py 2>/dev/null || true
-        
-        sleep 1
-        
-        # Verificar se a porta foi atualizada corretamente
-        if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" main.py; then
-          printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
-        else
-          printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível atualizar a porta!${WHITE}\n"
-          printf "${RED} >> Porta encontrada: \$current_port${WHITE}\n"
-          printf "${RED} >> Porta esperada: ${porta_transcricao}${WHITE}\n"
-          printf "${RED} >> Não será possível iniciar o PM2 com a porta correta.${WHITE}\n"
-          printf "${YELLOW} >> Por favor, edite manualmente o arquivo main.py${WHITE}\n"
-          printf "${YELLOW} >> Arquivo: \$TRANSC_DIR/main.py${WHITE}\n"
-          printf "${YELLOW} >> Procure por 'app.run' e altere para: port=${porta_transcricao}${WHITE}\n"
-          exit 1
-        fi
-        
-        # Mostrar a linha do app.run para confirmação final
-        printf "${WHITE} >> Linha app.run confirmada:${WHITE}\n"
-        grep "app.run" main.py | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
-        echo
-        
-        # VERIFICAÇÃO FINAL: Não iniciar se a porta ainda não estiver correta
-        if ! grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" main.py; then
-          printf "${RED} >> ERRO FATAL: Porta ainda incorreta após correção!${WHITE}\n"
-          printf "${RED} >> Abortando para evitar conflitos de porta.${WHITE}\n"
-          exit 1
-        fi
-        
-        # Agora sim, iniciar PM2 como usuário deploy (não root)
-        printf "${GREEN} >> Iniciando PM2 com porta ${porta_transcricao}...${WHITE}\n"
-        pm2 start main.py --name transcricao-${empresa} --interpreter python3
-        pm2 save
-        printf "${GREEN} >> PM2 iniciado com sucesso como usuário DEPLOY na porta ${porta_transcricao}${WHITE}\n"
+      MAIN_PY_PATH="\$TRANSC_DIR/main.py"
+      
+      if [ ! -f "\$MAIN_PY_PATH" ]; then
+        printf "${RED} >> ERRO: Arquivo main.py não encontrado em \$MAIN_PY_PATH${WHITE}\n"
+        exit 1
+      fi
+      
+      # Mudar para o diretório correto
+      cd "\$TRANSC_DIR" || {
+        printf "${RED} >> ERRO: Não foi possível acessar o diretório \$TRANSC_DIR${WHITE}\n"
+        exit 1
+      }
+      
+      # VERIFICAÇÃO CRÍTICA OBRIGATÓRIA: Confirmar que a porta está correta ANTES de iniciar
+      printf "${WHITE} >> Verificação final OBRIGATÓRIA da porta no main.py antes de iniciar PM2...${WHITE}\n"
+      printf "${YELLOW} >> Esta verificação é CRÍTICA - o PM2 NÃO será iniciado se a porta estiver incorreta${WHITE}\n"
+      echo
+      
+      # Extrair porta atual do arquivo
+      current_port=\$(grep -oP "port\s*=\s*\K\d+" "\$MAIN_PY_PATH" | head -1 || echo "")
+      if [ -n "\$current_port" ]; then
+        printf "${WHITE} >> Porta encontrada no main.py: ${YELLOW}\$current_port${WHITE}\n"
+        printf "${WHITE} >> Porta esperada: ${GREEN}${porta_transcricao}${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Não foi possível extrair a porta do main.py!${WHITE}\n"
+      fi
+      echo
+      
+      # FORÇAR atualização da porta SEMPRE antes de iniciar o PM2
+      # Isso garante que mesmo que o script tenha sobrescrito, a porta estará correta
+      printf "${WHITE} >> Forçando atualização da porta para ${GREEN}${porta_transcricao}${WHITE}...${WHITE}\n"
+      
+      # Método forçado: substituir QUALQUER porta (qualquer número de dígitos)
+      sed -i "s|port=[0-9]\+|port=${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
+      sed -i "s|port = [0-9]\+|port = ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
+      sed -i "s|porta [0-9]\+|porta ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
+      
+      # Também atualizar mensagens de log
+      sed -i "s|Servidor iniciado na porta [0-9]\+|Servidor iniciado na porta ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
+      sed -i "s|Server started on port [0-9]\+|Server started on port ${porta_transcricao}|g" "\$MAIN_PY_PATH" 2>/dev/null || true
+      
+      sleep 1
+      
+      # Verificar se a porta foi atualizada corretamente
+      if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "\$MAIN_PY_PATH"; then
+        printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
+      else
+        printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível atualizar a porta!${WHITE}\n"
+        printf "${RED} >> Porta encontrada: \$current_port${WHITE}\n"
+        printf "${RED} >> Porta esperada: ${porta_transcricao}${WHITE}\n"
+        printf "${RED} >> Não será possível iniciar o PM2 com a porta correta.${WHITE}\n"
+        printf "${YELLOW} >> Por favor, edite manualmente o arquivo main.py${WHITE}\n"
+        printf "${YELLOW} >> Arquivo: \$MAIN_PY_PATH${WHITE}\n"
+        printf "${YELLOW} >> Procure por 'app.run' e altere para: port=${porta_transcricao}${WHITE}\n"
+        exit 1
+      fi
+      
+      # Mostrar a linha do app.run para confirmação final
+      printf "${WHITE} >> Linha app.run confirmada:${WHITE}\n"
+      grep "app.run" "\$MAIN_PY_PATH" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+      echo
+      
+      # VERIFICAÇÃO FINAL: Não iniciar se a porta ainda não estiver correta
+      if ! grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "\$MAIN_PY_PATH"; then
+        printf "${RED} >> ERRO FATAL: Porta ainda incorreta após correção!${WHITE}\n"
+        printf "${RED} >> Abortando para evitar conflitos de porta.${WHITE}\n"
+        exit 1
+      fi
+      
+      # Mostrar o caminho completo que será usado
+      printf "${WHITE} >> Caminho completo do arquivo: ${BLUE}\$MAIN_PY_PATH${WHITE}\n"
+      printf "${WHITE} >> Diretório de trabalho: ${BLUE}\$(pwd)${WHITE}\n"
+      echo
+      
+      # Agora sim, iniciar PM2 como usuário deploy (não root)
+      # Usar caminho absoluto completo para garantir que o PM2 use o arquivo correto
+      printf "${GREEN} >> Iniciando PM2 com porta ${porta_transcricao}...${WHITE}\n"
+      printf "${WHITE} >> Comando: pm2 start \$MAIN_PY_PATH --name transcricao-${empresa} --interpreter python3${WHITE}\n"
+      pm2 start "\$MAIN_PY_PATH" --name transcricao-${empresa} --interpreter python3 --cwd "\$TRANSC_DIR"
+      pm2 save --force
+      printf "${GREEN} >> PM2 iniciado com sucesso como usuário DEPLOY na porta ${porta_transcricao}${WHITE}\n"
         
         # Verificar se o processo está rodando corretamente
         sleep 3
+        
+        # Verificar qual arquivo o PM2 está realmente usando
+        printf "${WHITE} >> Verificando qual arquivo o PM2 está usando...${WHITE}\n"
+        pm2 describe transcricao-${empresa} 2>/dev/null | grep -i "script path\|exec cwd" || true
+        echo
+        
         if pm2 list | grep -q "transcricao-${empresa}.*online"; then
           printf "${GREEN} >> ✓ Processo transcricao-${empresa} está ONLINE${WHITE}\n"
           
           # Verificar logs para confirmar a porta
           sleep 2
           printf "${WHITE} >> Verificando logs para confirmar porta...${WHITE}\n"
-          pm2 logs transcricao-${empresa} --lines 10 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado" | head -3 || true
+          pm2 logs transcricao-${empresa} --lines 15 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado\|Server started" | head -5 || true
+          
+          # Verificar se a porta nos logs está correta
+          if pm2 logs transcricao-${empresa} --lines 20 --nostream 2>/dev/null | grep -qi "porta ${porta_transcricao}\|port ${porta_transcricao}"; then
+            printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada nos logs!${WHITE}\n"
+          else
+            printf "${YELLOW} >> ⚠ AVISO: Porta não encontrada nos logs. Verifique manualmente.${WHITE}\n"
+            printf "${YELLOW} >> Comando: pm2 logs transcricao-${empresa}${WHITE}\n"
+          fi
         else
-          printf "${YELLOW} >> ⚠ Verifique o status do processo: pm2 list${WHITE}\n"
+          printf "${RED} >> ✗ Processo transcricao-${empresa} NÃO está ONLINE${WHITE}\n"
+          printf "${YELLOW} >> Verifique o status: pm2 list${WHITE}\n"
           printf "${YELLOW} >> Verifique os logs: pm2 logs transcricao-${empresa}${WHITE}\n"
+          printf "${YELLOW} >> Verifique os erros: pm2 logs transcricao-${empresa} --err${WHITE}\n"
         fi
       else
         printf "${RED} >> ERRO: Arquivo main.py não encontrado${WHITE}\n"
