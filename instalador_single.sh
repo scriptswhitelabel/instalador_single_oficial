@@ -107,8 +107,9 @@ salvar_variaveis() {
   echo "proxy=${proxy}" >>$ARQUIVO_VARIAVEIS
   echo "backend_port=${backend_port}" >>$ARQUIVO_VARIAVEIS
   echo "frontend_port=${frontend_port}" >>$ARQUIVO_VARIAVEIS
-  echo "versao_instalacao=${versao_instalacao}" >>$ARQUIVO_VARIAVEIS
-  echo "commit_instalacao=${commit_instalacao}" >>$ARQUIVO_VARIAVEIS
+  # Salvar versão com aspas para evitar problemas com espaços
+  echo "versao_instalacao=\"${versao_instalacao}\"" >>$ARQUIVO_VARIAVEIS
+  echo "commit_instalacao=\"${commit_instalacao}\"" >>$ARQUIVO_VARIAVEIS
 }
 
 # Carregar variáveis
@@ -613,6 +614,8 @@ selecionar_instancia_atualizar() {
     
     # Carregar variáveis da instância única
     source "${INSTANCIAS_DETECTADAS[0]}"
+    # Salvar arquivo usado em variável global para uso posterior
+    declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[0]}"
     return 0
   else
     # Múltiplas instâncias, perguntar qual atualizar
@@ -674,6 +677,8 @@ selecionar_instancia_atualizar() {
     # Carregar variáveis da instância selecionada
     local indice_selecionado=$((escolha_instancia - 1))
     source "${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+    # Salvar arquivo usado em variável global para uso posterior
+    declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
     
     printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n"
     echo
@@ -1763,10 +1768,11 @@ selecionar_versao_instalacao() {
   
   # Tratar opção 0 - Mais Recente
   if [ "$ESCOLHA" -eq 0 ]; then
-    declare -g versao_instalacao="Mais Recente"
+    declare -g versao_instalacao="Mais_Recente"
     declare -g commit_instalacao=""
     printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE}\n"
     printf "${GREEN} >> Será instalada a versão mais recente disponível no repositório${WHITE}\n"
+    # Usar "Mais_Recente" internamente para evitar problemas com espaços no source
     echo
     sleep 2
   else
@@ -1810,7 +1816,7 @@ baixa_codigo_base() {
     fi
 
     # Verificar se foi selecionada a opção "Mais Recente"
-    if [ -z "${commit_instalacao}" ] || [ "${versao_instalacao}" = "Mais Recente" ]; then
+    if [ -z "${commit_instalacao}" ] || [ "${versao_instalacao}" = "Mais_Recente" ] || [ "${versao_instalacao}" = "Mais Recente" ]; then
       banner
       printf "${WHITE} >> Instalando versão mais recente disponível no repositório...\n"
       echo
@@ -2798,6 +2804,45 @@ instalar_transcricao_audio_nativa() {
     return
   fi
   
+  # Identificar o arquivo de variáveis usado (salvo pela função selecionar_instancia_atualizar)
+  # A função já salva o arquivo em ARQUIVO_VARIAVEIS_USADO como variável global
+  ARQUIVO_VARIAVEIS_INSTANCIA="${ARQUIVO_VARIAVEIS_USADO:-}"
+  
+  # Se não foi salvo pela função, tentar identificar agora baseado na empresa atual
+  if [ -z "$ARQUIVO_VARIAVEIS_INSTANCIA" ] || [ ! -f "$ARQUIVO_VARIAVEIS_INSTANCIA" ]; then
+    INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local empresa_atual="${empresa}"
+    
+    # Verificar se é a instalação base
+    if [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ]; then
+      local temp_empresa_base=""
+      source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+      temp_empresa_base="${empresa:-}"
+      empresa="${empresa_atual}"
+      
+      if [ "${temp_empresa_base}" = "${empresa_atual}" ]; then
+        ARQUIVO_VARIAVEIS_INSTANCIA="${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}"
+      fi
+    fi
+    
+    # Se não é a base, procurar em instâncias adicionais
+    if [ -z "$ARQUIVO_VARIAVEIS_INSTANCIA" ] || [ ! -f "$ARQUIVO_VARIAVEIS_INSTANCIA" ]; then
+      for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+        if [ -f "$arquivo_instancia" ]; then
+          local temp_empresa_inst=""
+          source "$arquivo_instancia" 2>/dev/null
+          temp_empresa_inst="${empresa:-}"
+          empresa="${empresa_atual}"
+          
+          if [ "${temp_empresa_inst}" = "${empresa_atual}" ]; then
+            ARQUIVO_VARIAVEIS_INSTANCIA="$arquivo_instancia"
+            break
+          fi
+        fi
+      done
+    fi
+  fi
+  
   # Verificar se a instância existe
   if [ ! -d "/home/deploy/${empresa}" ]; then
     printf "${RED} >> ERRO: Diretório /home/deploy/${empresa} não existe!${WHITE}\n"
@@ -3083,8 +3128,12 @@ CLEANBEFORESCRIPT
   local script_path="/home/deploy/${empresa}/api_transcricao/install-python-app.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
+    # Passar o nome do app como variável de ambiente para evitar que o script peça
+    # Usar o padrão: transc-${empresa}
+    export PM2_APP_NAME="transc-${empresa}"
     bash "$script_path"
     printf "${GREEN} >> Script de instalação executado!${WHITE}\n"
+    printf "${GREEN} >> Nome do app PM2 usado: ${BLUE}transc-${empresa}${WHITE}\n"
     echo
     
     # Verificar se o script iniciou algum processo PM2 e parar apenas se existir
@@ -3151,10 +3200,21 @@ CHECKPM2AFTER
     
     local main_py="/home/deploy/${empresa}/api_transcricao/main.py"
     if [ -f "$main_py" ]; then
+      # Verificar qual porta está configurada atualmente
+      current_port=$(grep -oP "port\s*=\s*\K\d+" "$main_py" | head -1 || echo "")
+      
+      if [ -n "$current_port" ]; then
+        printf "${WHITE} >> Porta atual encontrada no main.py: ${YELLOW}${current_port}${WHITE}\n"
+        printf "${WHITE} >> Porta esperada: ${GREEN}${porta_transcricao}${WHITE}\n"
+      fi
+      
       if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
         printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
       else
-        printf "${YELLOW} >> Porta não está correta. Corrigindo...${WHITE}\n"
+        printf "${RED} >> ✗ ERRO: Porta não está correta no main.py!${WHITE}\n"
+        printf "${RED} >> Porta encontrada: ${current_port:-'NÃO ENCONTRADA'}${WHITE}\n"
+        printf "${RED} >> Porta esperada: ${porta_transcricao}${WHITE}\n"
+        printf "${YELLOW} >> Corrigindo agora...${WHITE}\n"
         
         # Corrigir usando Python novamente
         python3 <<PYTHON_FIX
@@ -3177,6 +3237,7 @@ try:
         else:
             return f"port={new_port}"
     
+    # Substituir TODAS as ocorrências de porta
     content = re.sub(r"port\s*=\s*\d+", replace_port, content)
     content = re.sub(r"porta\s+\d+", f"porta {new_port}", content, flags=re.IGNORECASE)
     content = re.sub(r"Servidor iniciado na porta \d+", f"Servidor iniciado na porta {new_port}", content, flags=re.IGNORECASE)
@@ -3195,25 +3256,36 @@ except Exception as e:
     sys.exit(1)
 PYTHON_FIX
         
-        # Fallback para sed se Python falhar
+        # Fallback para sed se Python falhar - substituir QUALQUER porta de 4 dígitos
         if [ $? -ne 0 ]; then
+          printf "${YELLOW} >> Tentando correção com sed...${WHITE}\n"
           sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "$main_py" 2>/dev/null || true
           sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
+          sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" "$main_py" 2>/dev/null || true
         fi
         
         # Verificar novamente
+        sleep 1
         if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
           printf "${GREEN} >> ✓ Porta corrigida com sucesso!${WHITE}\n"
         else
-          printf "${RED} >> ✗ Não foi possível corrigir automaticamente${WHITE}\n"
+          printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível corrigir automaticamente${WHITE}\n"
           printf "${YELLOW} >> Por favor, edite manualmente o arquivo: $main_py${WHITE}\n"
           printf "${YELLOW} >> Procure por 'app.run' e altere a porta para: ${porta_transcricao}${WHITE}\n"
+          printf "${RED} >> Não será possível continuar sem corrigir a porta!${WHITE}\n"
         fi
       fi
       
       # Mostrar a linha atual do app.run para confirmação
       printf "${WHITE} >> Configuração atual do app.run:${WHITE}\n"
       grep "app.run" "$main_py" | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+      
+      # Verificação final antes de prosseguir
+      if ! grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" "$main_py"; then
+        printf "${RED} >> ERRO: Porta ainda não está correta após todas as tentativas!${WHITE}\n"
+        printf "${RED} >> Abortando instalação para evitar conflitos.${WHITE}\n"
+        return 1
+      fi
       
       echo
       printf "${WHITE} >> Limpando processos PM2 conflitantes antes de iniciar...${WHITE}\n"
@@ -3268,20 +3340,83 @@ CLEANROOTPM2
       TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
       if [ -f "\$TRANSC_DIR/main.py" ]; then
         cd "\$TRANSC_DIR"
-        # Iniciar PM2 como usuário deploy (não root)
+        
+        # VERIFICAÇÃO CRÍTICA OBRIGATÓRIA: Confirmar que a porta está correta ANTES de iniciar
+        printf "${WHITE} >> Verificação final da porta no main.py antes de iniciar PM2...${WHITE}\n"
+        
+        # Extrair porta atual do arquivo
+        current_port=\$(grep -oP "port\s*=\s*\K\d+" main.py | head -1 || echo "")
+        if [ -n "\$current_port" ]; then
+          printf "${WHITE} >> Porta encontrada no main.py: ${YELLOW}\$current_port${WHITE}\n"
+          printf "${WHITE} >> Porta esperada: ${GREEN}${porta_transcricao}${WHITE}\n"
+        fi
+        
+        if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" main.py; then
+          printf "${GREEN} >> ✓ Porta ${porta_transcricao} confirmada no main.py${WHITE}\n"
+        else
+          printf "${RED} >> ✗ ERRO CRÍTICO: Porta não está correta no main.py!${WHITE}\n"
+          printf "${RED} >> Porta encontrada: \$current_port${WHITE}\n"
+          printf "${RED} >> Porta esperada: ${porta_transcricao}${WHITE}\n"
+          printf "${YELLOW} >> Corrigindo agora com método forçado...${WHITE}\n"
+          
+          # Método forçado: substituir QUALQUER porta de 4 dígitos
+          sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" main.py 2>/dev/null || true
+          sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" main.py 2>/dev/null || true
+          sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" main.py 2>/dev/null || true
+          
+          # Também substituir qualquer número de dígitos (caso tenha porta diferente de 4 dígitos)
+          sed -i "s|port=[0-9]\+|port=${porta_transcricao}|g" main.py 2>/dev/null || true
+          sed -i "s|port = [0-9]\+|port = ${porta_transcricao}|g" main.py 2>/dev/null || true
+          
+          sleep 1
+          
+          # Verificar novamente
+          if grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" main.py; then
+            printf "${GREEN} >> ✓ Porta corrigida com sucesso!${WHITE}\n"
+          else
+            printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível corrigir a porta!${WHITE}\n"
+            printf "${RED} >> Não será possível iniciar o PM2 com a porta correta.${WHITE}\n"
+            printf "${YELLOW} >> Por favor, edite manualmente o arquivo main.py${WHITE}\n"
+            printf "${YELLOW} >> Arquivo: \$TRANSC_DIR/main.py${WHITE}\n"
+            printf "${YELLOW} >> Procure por 'app.run' e altere para: port=${porta_transcricao}${WHITE}\n"
+            exit 1
+          fi
+        fi
+        
+        # Mostrar a linha do app.run para confirmação final
+        printf "${WHITE} >> Linha app.run confirmada:${WHITE}\n"
+        grep "app.run" main.py | head -1 || printf "${YELLOW} >> Não encontrado${WHITE}\n"
+        echo
+        
+        # VERIFICAÇÃO FINAL: Não iniciar se a porta ainda não estiver correta
+        if ! grep -q "port=${porta_transcricao}\|port = ${porta_transcricao}" main.py; then
+          printf "${RED} >> ERRO FATAL: Porta ainda incorreta após correção!${WHITE}\n"
+          printf "${RED} >> Abortando para evitar conflitos de porta.${WHITE}\n"
+          exit 1
+        fi
+        
+        # Agora sim, iniciar PM2 como usuário deploy (não root)
+        printf "${GREEN} >> Iniciando PM2 com porta ${porta_transcricao}...${WHITE}\n"
         pm2 start main.py --name transc-${empresa} --interpreter python3
         pm2 save
         printf "${GREEN} >> PM2 iniciado com sucesso como usuário DEPLOY na porta ${porta_transcricao}${WHITE}\n"
         
         # Verificar se o processo está rodando corretamente
-        sleep 2
+        sleep 3
         if pm2 list | grep -q "transc-${empresa}.*online"; then
           printf "${GREEN} >> ✓ Processo transc-${empresa} está ONLINE${WHITE}\n"
+          
+          # Verificar logs para confirmar a porta
+          sleep 2
+          printf "${WHITE} >> Verificando logs para confirmar porta...${WHITE}\n"
+          pm2 logs transc-${empresa} --lines 10 --nostream 2>/dev/null | grep -i "porta\|port\|Servidor iniciado" | head -3 || true
         else
           printf "${YELLOW} >> ⚠ Verifique o status do processo: pm2 list${WHITE}\n"
+          printf "${YELLOW} >> Verifique os logs: pm2 logs transc-${empresa}${WHITE}\n"
         fi
       else
         printf "${RED} >> ERRO: Arquivo main.py não encontrado${WHITE}\n"
+        exit 1
       fi
 STARTPM2CORRECT
       
@@ -3295,6 +3430,34 @@ STARTPM2CORRECT
     printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
     printf "${YELLOW} >> A configuração da porta foi atualizada, mas o script de instalação não foi encontrado.${WHITE}\n"
     sleep 2
+  fi
+  
+  # Salvar a porta da transcrição no arquivo de variáveis da instância
+  if [ -n "${ARQUIVO_VARIAVEIS_INSTANCIA:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_INSTANCIA}" ]; then
+    banner
+    printf "${WHITE} >> Salvando porta da transcrição no arquivo de variáveis...\n"
+    echo
+    
+    # Verificar se já existe porta_transcricao no arquivo
+    if grep -q "^porta_transcricao=" "$ARQUIVO_VARIAVEIS_INSTANCIA"; then
+      # Atualizar porta existente
+      sed -i "s|^porta_transcricao=.*|porta_transcricao=${porta_transcricao}|" "$ARQUIVO_VARIAVEIS_INSTANCIA"
+      printf "${GREEN} >> Porta da transcrição atualizada no arquivo de variáveis: ${porta_transcricao}${WHITE}\n"
+    else
+      # Adicionar porta_transcricao se não existir
+      echo "" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
+      echo "# Porta do serviço de transcrição de áudio" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
+      echo "porta_transcricao=${porta_transcricao}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
+      printf "${GREEN} >> Porta da transcrição salva no arquivo de variáveis: ${porta_transcricao}${WHITE}\n"
+    fi
+    
+    printf "${GREEN} >> Arquivo: ${BLUE}$ARQUIVO_VARIAVEIS_INSTANCIA${WHITE}\n"
+    echo
+    sleep 2
+  else
+    printf "${YELLOW} >> AVISO: Não foi possível identificar o arquivo de variáveis para salvar a porta${WHITE}\n"
+    printf "${YELLOW} >> A porta ${porta_transcricao} foi configurada, mas não foi salva no arquivo de variáveis${WHITE}\n"
+    echo
   fi
   
   echo
