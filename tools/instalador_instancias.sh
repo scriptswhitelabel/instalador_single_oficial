@@ -1000,11 +1000,29 @@ baixa_codigo_instancia() {
   printf "${WHITE} >> Fazendo download do código para ${nova_empresa}...\n"
   echo
   {
+    # Garantir que o array de versões está definido
+    if [ -z "${VERSOES_INSTALACAO[6.4.3]}" ]; then
+      definir_versoes_instalacao
+    fi
+    
     # Verificar se as variáveis de versão estão definidas
     if [ -z "${versao_instalacao}" ]; then
       printf "${YELLOW}⚠️  Aviso: versao_instalacao não está definida.${WHITE}\n"
       printf "${WHITE} >> Chamando selecionar_versao_instalacao...${WHITE}\n"
       selecionar_versao_instalacao
+    fi
+    
+    # Se versão está definida mas commit não, tentar recuperar do array
+    if [ -n "${versao_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ] && [ -z "${commit_instalacao}" ]; then
+      printf "${YELLOW}⚠️  Aviso: commit_instalacao está vazio para versão ${versao_instalacao}.${WHITE}\n"
+      printf "${WHITE} >> Tentando recuperar do array VERSOES_INSTALACAO...${WHITE}\n"
+      if [ -n "${VERSOES_INSTALACAO[${versao_instalacao}]}" ]; then
+        commit_instalacao="${VERSOES_INSTALACAO[${versao_instalacao}]}"
+        printf "${GREEN} >> Commit recuperado: ${commit_instalacao}${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Não foi possível encontrar commit para versão ${versao_instalacao}${WHITE}\n"
+        exit 1
+      fi
     fi
     
     if [ -z "${repo_url}" ] || [ -z "${github_token}" ]; then
@@ -1045,7 +1063,8 @@ FETCHALL
     echo
 
     # Verificar se foi selecionada a opção "Mais Recente"
-    if [ -z "${commit_instalacao}" ] || [ "${versao_instalacao}" = "Mais Recente" ]; then
+    # IMPORTANTE: Verificar primeiro se é "Mais Recente", depois verificar se commit está vazio
+    if [ "${versao_instalacao}" = "Mais Recente" ]; then
       banner
       printf "${WHITE} >> Instalando versão mais recente disponível no repositório...\n"
       echo
@@ -1071,7 +1090,20 @@ CHECKOUTRECENT
       printf "${GREEN} >> Versão mais recente do repositório será instalada${WHITE}\n"
       echo
       sleep 2
-    elif [ -n "${commit_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ]; then
+    else
+      # Versão específica selecionada
+      if [ -z "${commit_instalacao}" ]; then
+        printf "${RED} >> ERRO: Versão ${versao_instalacao} selecionada mas commit_instalacao está vazio!${WHITE}\n"
+        printf "${YELLOW} >> Verificando VERSOES_INSTALACAO...${WHITE}\n"
+        if [ -n "${VERSOES_INSTALACAO[${versao_instalacao}]}" ]; then
+          commit_instalacao="${VERSOES_INSTALACAO[${versao_instalacao}]}"
+          printf "${GREEN} >> Commit recuperado: ${commit_instalacao}${WHITE}\n"
+        else
+          printf "${RED} >> ERRO: Não foi possível encontrar commit para versão ${versao_instalacao}${WHITE}\n"
+          exit 1
+        fi
+      fi
+      
       banner
       printf "${WHITE} >> Fazendo checkout para o commit da versão ${versao_instalacao}...\n"
       printf "${WHITE} >> Commit hash: ${commit_instalacao}${WHITE}\n"
@@ -1101,9 +1133,18 @@ VERIFYCOMMIT
       
       if [ $? -eq 0 ]; then
         BRANCH_INSTALACAO="instalacao-${versao_instalacao}-$(date +%Y%m%d-%H%M%S)"
+        printf "${WHITE} >> Fazendo checkout para commit ${commit_instalacao}...\n"
         sudo su - deploy <<CHECKOUTCOMMIT
 cd ${dest_dir}
-git checkout -b "${BRANCH_INSTALACAO}" "${commit_instalacao}"
+# Limpar qualquer alteração local
+git reset --hard HEAD 2>/dev/null || true
+git clean -fd 2>/dev/null || true
+
+# Fazer checkout direto para o commit (detached HEAD primeiro)
+git checkout "${commit_instalacao}" 2>/dev/null
+
+# Criar branch a partir do commit
+git checkout -b "${BRANCH_INSTALACAO}" 2>/dev/null || git branch "${BRANCH_INSTALACAO}" && git checkout "${BRANCH_INSTALACAO}"
 CHECKOUTCOMMIT
         
         if [ $? -eq 0 ]; then
@@ -1138,6 +1179,33 @@ FORCECHECKOUT
         printf "${RED} >> ERRO: Commit ${commit_instalacao} não encontrado no repositório.${WHITE}\n"
         exit 1
       fi
+    fi
+
+    # Verificação final: garantir que estamos no commit correto
+    if [ -n "${commit_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ]; then
+      printf "${WHITE} >> Verificação final do commit instalado...\n"
+      FINAL_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
+      FINAL_VERSION=$(sudo su - deploy -c "cd ${dest_dir}/backend && cat package.json 2>/dev/null | grep '\"version\"' | head -1 | cut -d'\"' -f4" || echo "N/A")
+      
+      if [ "${FINAL_COMMIT}" = "${commit_instalacao}" ]; then
+        printf "${GREEN} >> ✓ Commit correto confirmado: ${FINAL_COMMIT}${WHITE}\n"
+        printf "${GREEN} >> ✓ Versão no package.json: ${FINAL_VERSION}${WHITE}\n"
+      else
+        printf "${RED} >> ✗ ERRO: Commit final (${FINAL_COMMIT}) não corresponde ao esperado (${commit_instalacao})${WHITE}\n"
+        printf "${YELLOW} >> Tentando corrigir novamente...${WHITE}\n"
+        sudo su - deploy <<FINALFIX
+cd ${dest_dir}
+git checkout -f "${commit_instalacao}" 2>/dev/null
+FINALFIX
+        FINAL_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
+        if [ "${FINAL_COMMIT}" = "${commit_instalacao}" ]; then
+          printf "${GREEN} >> ✓ Commit corrigido com sucesso!${WHITE}\n"
+        else
+          printf "${RED} >> ✗ ERRO CRÍTICO: Não foi possível manter o commit correto!${WHITE}\n"
+          exit 1
+        fi
+      fi
+      echo
     fi
 
     mkdir -p /home/deploy/${nova_empresa}/backend/public/
