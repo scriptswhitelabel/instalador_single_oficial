@@ -1000,6 +1000,13 @@ baixa_codigo_instancia() {
   printf "${WHITE} >> Fazendo download do código para ${nova_empresa}...\n"
   echo
   {
+    # Verificar se as variáveis de versão estão definidas
+    if [ -z "${versao_instalacao}" ]; then
+      printf "${YELLOW}⚠️  Aviso: versao_instalacao não está definida.${WHITE}\n"
+      printf "${WHITE} >> Chamando selecionar_versao_instalacao...${WHITE}\n"
+      selecionar_versao_instalacao
+    fi
+    
     if [ -z "${repo_url}" ] || [ -z "${github_token}" ]; then
       printf "${WHITE} >> Erro: URL do repositório ou token do GitHub não definidos.\n"
       exit 1
@@ -1010,16 +1017,32 @@ baixa_codigo_instancia() {
 
     dest_dir="/home/deploy/${nova_empresa}/"
 
-    git clone ${github_url} ${dest_dir}
+    # Clonar repositório com todas as branches para ter acesso a commits históricos
+    printf "${WHITE} >> Clonando repositório (isso pode levar alguns minutos)...\n"
+    git clone --no-single-branch ${github_url} ${dest_dir}
     echo
     if [ $? -eq 0 ]; then
-      printf "${WHITE} >> Código baixado, continuando a instalação...\n"
+      printf "${GREEN} >> Código baixado com sucesso!${WHITE}\n"
       echo
     else
-      printf "${WHITE} >> Falha ao baixar o código! Verifique as informações fornecidas...\n"
+      printf "${RED} >> Falha ao baixar o código! Verifique as informações fornecidas...${WHITE}\n"
       echo
       exit 1
     fi
+
+    # Sempre fazer fetch de todas as branches, tags e commits históricos
+    printf "${WHITE} >> Buscando todas as branches, tags e commits históricos...\n"
+    cd ${dest_dir} || trata_erro "cd para diretório do projeto"
+    chown -R deploy:deploy ${dest_dir} 2>/dev/null || true
+    chmod -R 755 ${dest_dir}/.git 2>/dev/null || true
+    
+    sudo su - deploy <<FETCHALL
+cd ${dest_dir}
+git fetch --all --tags --prune --unshallow 2>/dev/null || git fetch --all --tags --prune 2>/dev/null || true
+FETCHALL
+    
+    printf "${GREEN} >> Fetch concluído!${WHITE}\n"
+    echo
 
     # Verificar se foi selecionada a opção "Mais Recente"
     if [ -z "${commit_instalacao}" ] || [ "${versao_instalacao}" = "Mais Recente" ]; then
@@ -1048,9 +1071,10 @@ CHECKOUTRECENT
       printf "${GREEN} >> Versão mais recente do repositório será instalada${WHITE}\n"
       echo
       sleep 2
-    elif [ -n "${commit_instalacao}" ]; then
+    elif [ -n "${commit_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ]; then
       banner
       printf "${WHITE} >> Fazendo checkout para o commit da versão ${versao_instalacao}...\n"
+      printf "${WHITE} >> Commit hash: ${commit_instalacao}${WHITE}\n"
       echo
       
       cd ${dest_dir} || trata_erro "cd para diretório do projeto"
@@ -1058,11 +1082,14 @@ CHECKOUTRECENT
       chown -R deploy:deploy ${dest_dir} 2>/dev/null || true
       chmod -R 755 ${dest_dir}/.git 2>/dev/null || true
       
+      # Fetch já foi feito acima, mas vamos garantir que temos todos os commits
       sudo su - deploy <<FETCHCOMMIT
 cd ${dest_dir}
-git fetch --all --prune 2>/dev/null || true
+git fetch --all --tags --prune --unshallow 2>/dev/null || git fetch --all --tags --prune 2>/dev/null || true
 FETCHCOMMIT
       
+      # Verificar se o commit existe
+      printf "${WHITE} >> Verificando se o commit ${commit_instalacao} existe...\n"
       sudo su - deploy <<VERIFYCOMMIT
 cd ${dest_dir}
 if git cat-file -e "${commit_instalacao}^{commit}" 2>/dev/null; then
@@ -1080,9 +1107,29 @@ git checkout -b "${BRANCH_INSTALACAO}" "${commit_instalacao}"
 CHECKOUTCOMMIT
         
         if [ $? -eq 0 ]; then
-          printf "${GREEN} >> Checkout para commit ${commit_instalacao} concluído com sucesso!${WHITE}\n"
-          printf "${GREEN} >> Branch criada: ${BRANCH_INSTALACAO}${WHITE}\n"
-          echo
+          # Verificar se o checkout foi bem-sucedido
+          CURRENT_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
+          if [ "${CURRENT_COMMIT}" = "${commit_instalacao}" ]; then
+            printf "${GREEN} >> Checkout para commit ${commit_instalacao} concluído com sucesso!${WHITE}\n"
+            printf "${GREEN} >> Branch criada: ${BRANCH_INSTALACAO}${WHITE}\n"
+            printf "${GREEN} >> Commit atual confirmado: ${CURRENT_COMMIT}${WHITE}\n"
+            echo
+          else
+            printf "${YELLOW}⚠️  Aviso: Checkout realizado, mas commit atual (${CURRENT_COMMIT}) difere do esperado (${commit_instalacao})${WHITE}\n"
+            printf "${WHITE} >> Tentando corrigir...${WHITE}\n"
+            sudo su - deploy <<FORCECHECKOUT
+cd ${dest_dir}
+git checkout -f "${commit_instalacao}" 2>/dev/null || git checkout -b "${BRANCH_INSTALACAO}" "${commit_instalacao}" 2>/dev/null
+FORCECHECKOUT
+            CURRENT_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
+            if [ "${CURRENT_COMMIT}" = "${commit_instalacao}" ]; then
+              printf "${GREEN} >> Commit corrigido com sucesso!${WHITE}\n"
+            else
+              printf "${RED} >> ERRO: Não foi possível fazer checkout para o commit ${commit_instalacao}${WHITE}\n"
+              printf "${YELLOW} >> Commit atual: ${CURRENT_COMMIT}${WHITE}\n"
+              exit 1
+            fi
+          fi
         else
           printf "${RED} >> ERRO: Falha ao fazer checkout do commit ${commit_instalacao}${WHITE}\n"
           exit 1
