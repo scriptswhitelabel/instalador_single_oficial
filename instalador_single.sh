@@ -3169,6 +3169,76 @@ TEMPSCRIPT
     printf "${GREEN} >> Nome do app PM2 usado automaticamente: ${BLUE}${empresa}-transcricao${WHITE}\n"
     echo
     
+    # Instalar dependências Python após o script de instalação
+    banner
+    printf "${WHITE} >> Verificando e instalando dependências Python...\n"
+    echo
+    
+    sudo su - deploy <<INSTALLPYTHONDEP
+    # Configura PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    
+    TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
+    cd "\$TRANSC_DIR" || exit 1
+    
+    # Verificar se pip3 está disponível
+    if ! command -v pip3 &> /dev/null; then
+      printf "${YELLOW} >> pip3 não encontrado. Tentando instalar...${WHITE}\n"
+      sudo apt-get update -qq && sudo apt-get install -y python3-pip 2>/dev/null || true
+    fi
+    
+    # Obter o caminho do site-packages do usuário
+    USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+    if [ -n "\$USER_SITE" ]; then
+      export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+    fi
+    
+    # Instalar dependências
+    if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
+      printf "${GREEN} >> Instalando dependências do requirements.txt...${WHITE}\n"
+      pip3 install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+      printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+    else
+      printf "${YELLOW} >> requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
+      pip3 install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+      printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+    fi
+    
+    # Atualizar USER_SITE após instalação
+    USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+    if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+      export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+      printf "${GREEN} >> PYTHONPATH configurado: \$USER_SITE${WHITE}\n"
+    fi
+    
+    # Verificar se Flask está instalado
+    if python3 -c "import flask" 2>/dev/null; then
+      printf "${GREEN} >> ✓ Flask está instalado e acessível${WHITE}\n"
+    else
+      printf "${RED} >> ERRO: Flask não está instalado! Tentando instalar novamente...${WHITE}\n"
+      pip3 install --user --force-reinstall flask 2>&1 || true
+      # Atualizar USER_SITE novamente
+      USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+      if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+        export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+      fi
+      # Verificar novamente
+      if python3 -c "import flask" 2>/dev/null; then
+        printf "${GREEN} >> ✓ Flask instalado com sucesso${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Ainda não foi possível importar Flask!${WHITE}\n"
+      fi
+    fi
+    echo
+INSTALLPYTHONDEP
+    
+    echo
+    sleep 2
+    
     # RESTAURAR o main.py atualizado imediatamente após o script
     # O script pode ter feito git checkout/reset que sobrescreveu o main.py
     if [ -f "$main_py_backup_protected" ]; then
@@ -3389,6 +3459,38 @@ PYTHON_FIX
       find "\$TRANSC_DIR" -name "*.pyc" -delete 2>/dev/null || true
       find "\$TRANSC_DIR" -name "*.pyo" -delete 2>/dev/null || true
       
+      # Instalar dependências Python
+      printf "${WHITE} >> Instalando dependências Python...${WHITE}\n"
+      
+      # Obter o caminho do site-packages do usuário
+      USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "\$HOME/.local/lib/python3*/site-packages")
+      
+      if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
+        printf "${GREEN} >> Arquivo requirements.txt encontrado. Instalando dependências...${WHITE}\n"
+        pip3 install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      else
+        printf "${YELLOW} >> Arquivo requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
+        # Instalar Flask e outras dependências comuns para transcrição
+        pip3 install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+      fi
+      
+      # Verificar se Flask está instalado e acessível
+      if python3 -c "import flask" 2>/dev/null; then
+        printf "${GREEN} >> ✓ Flask verificado e disponível${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: Flask não está acessível! Tentando instalar novamente...${WHITE}\n"
+        pip3 install --user --force-reinstall flask 2>&1 || true
+        # Tentar novamente após reinstalar
+        if python3 -c "import flask" 2>/dev/null; then
+          printf "${GREEN} >> ✓ Flask instalado com sucesso${WHITE}\n"
+        else
+          printf "${RED} >> ERRO: Ainda não foi possível importar Flask!${WHITE}\n"
+        fi
+      fi
+      echo
+      
       # Verificar que a porta está correta no main.py
       final_port=\$(grep -oP "port\s*=\s*\K\d+" "\$MAIN_PY_PATH" | head -1 || echo "")
       if [ "\$final_port" != "${porta_transcricao}" ]; then
@@ -3404,9 +3506,31 @@ PYTHON_FIX
       pm2 stop transc-${empresa} 2>/dev/null || true
       pm2 delete transc-${empresa} 2>/dev/null || true
       
-      # Iniciar PM2 com o arquivo correto
+      # Obter o caminho do site-packages do usuário e configurar PYTHONPATH
+      USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+      if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+        export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+        printf "${GREEN} >> PYTHONPATH configurado: \$USER_SITE${WHITE}\n"
+      fi
+      
+      # Verificar Flask antes de iniciar
+      if ! python3 -c "import flask" 2>/dev/null; then
+        printf "${RED} >> ERRO: Flask não está disponível! Instalando...${WHITE}\n"
+        pip3 install --user flask 2>&1 || true
+        # Atualizar USER_SITE após instalação
+        USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+        if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+          export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+        fi
+      fi
+      
+      # Iniciar PM2 com o arquivo correto e PYTHONPATH configurado
       printf "${GREEN} >> Iniciando PM2...${WHITE}\n"
-      pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
+      if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+        PYTHONPATH="\$USER_SITE:\$PYTHONPATH" pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
+      else
+        pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
+      fi
       pm2 save --force
       
       # Verificar se iniciou corretamente
