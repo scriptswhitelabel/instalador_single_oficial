@@ -3187,8 +3187,33 @@ TEMPSCRIPT
     
     # Verificar se pip3 está disponível
     if ! command -v pip3 &> /dev/null; then
-      printf "${YELLOW} >> pip3 não encontrado. Tentando instalar...${WHITE}\n"
-      sudo apt-get update -qq && sudo apt-get install -y python3-pip 2>/dev/null || true
+      printf "${YELLOW} >> pip3 não encontrado. Tentando métodos alternativos...${WHITE}\n"
+      # Tentar usar python3 -m pip (geralmente disponível mesmo sem pip3 instalado)
+      if python3 -m pip --version &>/dev/null; then
+        printf "${GREEN} >> python3 -m pip está disponível${WHITE}\n"
+        alias pip3="python3 -m pip"
+      else
+        # Tentar instalar pip3 usando get-pip.py (não requer sudo)
+        printf "${YELLOW} >> Tentando instalar pip usando get-pip.py...${WHITE}\n"
+        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py 2>/dev/null || true
+        if [ -f /tmp/get-pip.py ]; then
+          python3 /tmp/get-pip.py --user 2>&1 | grep -v "already installed\|Requirement already satisfied" || true
+          rm -f /tmp/get-pip.py 2>/dev/null || true
+          # Verificar se pip3 está disponível agora
+          if command -v pip3 &>/dev/null || python3 -m pip --version &>/dev/null; then
+            printf "${GREEN} >> pip instalado com sucesso${WHITE}\n"
+            if ! command -v pip3 &>/dev/null; then
+              alias pip3="python3 -m pip"
+            fi
+          fi
+        fi
+      fi
+    fi
+    
+    # Se ainda não tiver pip3, usar python3 -m pip como fallback
+    if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &>/dev/null; then
+      printf "${RED} >> AVISO: pip3 não está disponível. Tentando continuar com python3 -m pip...${WHITE}\n"
+      printf "${YELLOW} >> Se houver erros, instale pip3 manualmente: sudo apt-get install -y python3-pip${WHITE}\n"
     fi
     
     # Obter o caminho do site-packages do usuário
@@ -3197,14 +3222,27 @@ TEMPSCRIPT
       export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
     fi
     
+    # Determinar comando pip a usar
+    PIP_CMD="pip3"
+    if ! command -v pip3 &>/dev/null; then
+      if python3 -m pip --version &>/dev/null; then
+        PIP_CMD="python3 -m pip"
+        printf "${GREEN} >> Usando python3 -m pip como alternativa${WHITE}\n"
+      else
+        printf "${RED} >> ERRO: pip3 e python3 -m pip não estão disponíveis!${WHITE}\n"
+        printf "${YELLOW} >> Instale pip3 manualmente: sudo apt-get install -y python3-pip${WHITE}\n"
+        exit 1
+      fi
+    fi
+    
     # Instalar dependências
     if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
       printf "${GREEN} >> Instalando dependências do requirements.txt...${WHITE}\n"
-      pip3 install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+      \$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
       printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
     else
       printf "${YELLOW} >> requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
-      pip3 install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+      \$PIP_CMD install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
       printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
     fi
     
@@ -3220,7 +3258,7 @@ TEMPSCRIPT
       printf "${GREEN} >> ✓ Flask está instalado e acessível${WHITE}\n"
     else
       printf "${RED} >> ERRO: Flask não está instalado! Tentando instalar novamente...${WHITE}\n"
-      pip3 install --user --force-reinstall flask 2>&1 || true
+      \$PIP_CMD install --user --force-reinstall flask 2>&1 || true
       # Atualizar USER_SITE novamente
       USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
       if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
@@ -3462,17 +3500,28 @@ PYTHON_FIX
       # Instalar dependências Python
       printf "${WHITE} >> Instalando dependências Python...${WHITE}\n"
       
+      # Determinar comando pip a usar
+      PIP_CMD="pip3"
+      if ! command -v pip3 &>/dev/null; then
+        if python3 -m pip --version &>/dev/null; then
+          PIP_CMD="python3 -m pip"
+          printf "${GREEN} >> Usando python3 -m pip como alternativa${WHITE}\n"
+        else
+          printf "${YELLOW} >> AVISO: pip3 não está disponível. Tentando continuar...${WHITE}\n"
+        fi
+      fi
+      
       # Obter o caminho do site-packages do usuário
-      USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "\$HOME/.local/lib/python3*/site-packages")
+      USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
       
       if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
         printf "${GREEN} >> Arquivo requirements.txt encontrado. Instalando dependências...${WHITE}\n"
-        pip3 install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        \$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
         printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
       else
         printf "${YELLOW} >> Arquivo requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
         # Instalar Flask e outras dependências comuns para transcrição
-        pip3 install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        \$PIP_CMD install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
         printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
       fi
       
@@ -3481,7 +3530,7 @@ PYTHON_FIX
         printf "${GREEN} >> ✓ Flask verificado e disponível${WHITE}\n"
       else
         printf "${RED} >> ERRO: Flask não está acessível! Tentando instalar novamente...${WHITE}\n"
-        pip3 install --user --force-reinstall flask 2>&1 || true
+        \$PIP_CMD install --user --force-reinstall flask 2>&1 || true
         # Tentar novamente após reinstalar
         if python3 -c "import flask" 2>/dev/null; then
           printf "${GREEN} >> ✓ Flask instalado com sucesso${WHITE}\n"
@@ -3513,10 +3562,18 @@ PYTHON_FIX
         printf "${GREEN} >> PYTHONPATH configurado: \$USER_SITE${WHITE}\n"
       fi
       
+      # Determinar comando pip a usar
+      PIP_CMD="pip3"
+      if ! command -v pip3 &>/dev/null; then
+        if python3 -m pip --version &>/dev/null; then
+          PIP_CMD="python3 -m pip"
+        fi
+      fi
+      
       # Verificar Flask antes de iniciar
       if ! python3 -c "import flask" 2>/dev/null; then
         printf "${RED} >> ERRO: Flask não está disponível! Instalando...${WHITE}\n"
-        pip3 install --user flask 2>&1 || true
+        \$PIP_CMD install --user flask 2>&1 || true
         # Atualizar USER_SITE após instalação
         USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
         if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
