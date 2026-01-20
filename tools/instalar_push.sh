@@ -18,16 +18,16 @@ detectar_instancias_instaladas() {
   local temp_empresa=""
   
   # Verificar instalação base (arquivo VARIAVEIS_INSTALACAO)
-  if [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ]; then
+  if [ -f "${ARQUIVO_VARIAVEIS}" ]; then
     # Salvar variáveis atuais
     local empresa_original="${empresa:-}"
     
     # Carregar variáveis do arquivo
-    source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+    source "${ARQUIVO_VARIAVEIS}" 2>/dev/null
     temp_empresa="${empresa:-}"
     
     if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
-      instancias+=("${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}")
+      instancias+=("${ARQUIVO_VARIAVEIS}")
       nomes_empresas+=("${temp_empresa}")
     fi
     
