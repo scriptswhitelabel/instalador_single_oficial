@@ -3174,6 +3174,33 @@ TEMPSCRIPT
     printf "${WHITE} >> Verificando e instalando dependências Python...\n"
     echo
     
+    # Tentar instalar pip3 primeiro (se não estiver disponível)
+    if ! command -v pip3 &>/dev/null && ! python3 -m pip --version &>/dev/null; then
+      printf "${YELLOW} >> pip3 não está disponível. Tentando instalar via apt-get...${WHITE}\n"
+      if sudo -n apt-get update -qq && sudo -n apt-get install -y python3-pip 2>/dev/null; then
+        printf "${GREEN} >> pip3 instalado com sucesso!${WHITE}\n"
+      else
+        printf "${YELLOW} >> Não foi possível instalar pip3 automaticamente (pode requerer senha)${WHITE}\n"
+        printf "${YELLOW} >> Tentando instalar Flask diretamente via apt-get...${WHITE}\n"
+        if sudo -n apt-get install -y python3-flask python3-flask-cors python3-requests 2>/dev/null; then
+          printf "${GREEN} >> Flask instalado via apt-get!${WHITE}\n"
+        else
+          printf "${RED} >> AVISO: Não foi possível instalar pip3 ou Flask automaticamente${WHITE}\n"
+          printf "${YELLOW} >> Execute manualmente: sudo apt-get install -y python3-pip python3-flask python3-flask-cors${WHITE}\n"
+        fi
+      fi
+    fi
+    
+    # Verificar se Flask está disponível antes de continuar
+    if ! sudo su - deploy -c "python3 -c 'import flask'" 2>/dev/null; then
+      printf "${YELLOW} >> Flask não está disponível. Tentando instalar via apt-get...${WHITE}\n"
+      if sudo -n apt-get install -y python3-flask python3-flask-cors python3-requests 2>/dev/null; then
+        printf "${GREEN} >> Flask instalado via apt-get!${WHITE}\n"
+      else
+        printf "${YELLOW} >> Não foi possível instalar via apt-get sem senha. Continuando...${WHITE}\n"
+      fi
+    fi
+    
     sudo su - deploy <<INSTALLPYTHONDEP
     # Configura PATH
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -3187,23 +3214,32 @@ TEMPSCRIPT
     
     # Verificar se pip3 está disponível
     if ! command -v pip3 &> /dev/null; then
-      printf "${YELLOW} >> pip3 não encontrado. Tentando métodos alternativos...${WHITE}\n"
-      # Tentar usar python3 -m pip (geralmente disponível mesmo sem pip3 instalado)
-      if python3 -m pip --version &>/dev/null; then
-        printf "${GREEN} >> python3 -m pip está disponível${WHITE}\n"
-        alias pip3="python3 -m pip"
+      printf "${YELLOW} >> pip3 não encontrado. Tentando instalar...${WHITE}\n"
+      
+      # Tentar instalar pip3 usando apt-get (requer sudo, mas tenta sem senha)
+      if sudo -n apt-get install -y python3-pip 2>/dev/null; then
+        printf "${GREEN} >> pip3 instalado com sucesso via apt-get${WHITE}\n"
       else
-        # Tentar instalar pip3 usando get-pip.py (não requer sudo)
-        printf "${YELLOW} >> Tentando instalar pip usando get-pip.py...${WHITE}\n"
-        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py 2>/dev/null || true
-        if [ -f /tmp/get-pip.py ]; then
-          python3 /tmp/get-pip.py --user 2>&1 | grep -v "already installed\|Requirement already satisfied" || true
-          rm -f /tmp/get-pip.py 2>/dev/null || true
-          # Verificar se pip3 está disponível agora
-          if command -v pip3 &>/dev/null || python3 -m pip --version &>/dev/null; then
-            printf "${GREEN} >> pip instalado com sucesso${WHITE}\n"
-            if ! command -v pip3 &>/dev/null; then
-              alias pip3="python3 -m pip"
+        printf "${YELLOW} >> Não foi possível instalar pip3 via apt-get (pode requerer senha)${WHITE}\n"
+        printf "${YELLOW} >> Tentando métodos alternativos...${WHITE}\n"
+        
+        # Tentar usar python3 -m pip (geralmente disponível mesmo sem pip3 instalado)
+        if python3 -m pip --version &>/dev/null; then
+          printf "${GREEN} >> python3 -m pip está disponível${WHITE}\n"
+          alias pip3="python3 -m pip"
+        else
+          # Tentar instalar pip3 usando get-pip.py (não requer sudo)
+          printf "${YELLOW} >> Tentando instalar pip usando get-pip.py...${WHITE}\n"
+          curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py 2>/dev/null || true
+          if [ -f /tmp/get-pip.py ]; then
+            python3 /tmp/get-pip.py --user --break-system-packages 2>&1 | grep -v "already installed\|Requirement already satisfied" || true
+            rm -f /tmp/get-pip.py 2>/dev/null || true
+            # Verificar se pip3 está disponível agora
+            if command -v pip3 &>/dev/null || python3 -m pip --version &>/dev/null; then
+              printf "${GREEN} >> pip instalado com sucesso${WHITE}\n"
+              if ! command -v pip3 &>/dev/null; then
+                alias pip3="python3 -m pip"
+              fi
             fi
           fi
         fi
@@ -3212,8 +3248,18 @@ TEMPSCRIPT
     
     # Se ainda não tiver pip3, usar python3 -m pip como fallback
     if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &>/dev/null; then
-      printf "${RED} >> AVISO: pip3 não está disponível. Tentando continuar com python3 -m pip...${WHITE}\n"
-      printf "${YELLOW} >> Se houver erros, instale pip3 manualmente: sudo apt-get install -y python3-pip${WHITE}\n"
+      printf "${RED} >> ERRO CRÍTICO: pip3 e python3 -m pip não estão disponíveis!${WHITE}\n"
+      printf "${YELLOW} >> Instalando pip3 manualmente...${WHITE}\n"
+      printf "${YELLOW} >> Execute manualmente: sudo apt-get install -y python3-pip${WHITE}\n"
+      printf "${YELLOW} >> Ou instale Flask via apt: sudo apt-get install -y python3-flask${WHITE}\n"
+      
+      # Tentar instalar Flask via apt-get como último recurso
+      if sudo -n apt-get install -y python3-flask python3-flask-cors 2>/dev/null; then
+        printf "${GREEN} >> Flask instalado via apt-get${WHITE}\n"
+      else
+        printf "${RED} >> Não foi possível instalar Flask automaticamente${WHITE}\n"
+        printf "${RED} >> Por favor, execute manualmente: sudo apt-get install -y python3-pip python3-flask python3-flask-cors${WHITE}\n"
+      fi
     fi
     
     # Obter o caminho do site-packages do usuário
@@ -3663,17 +3709,25 @@ PYTHON_FIX
       # Verificar Flask uma última vez antes de iniciar
       if ! python3 -c "import flask" 2>/dev/null; then
         printf "${RED} >> ERRO CRÍTICO: Flask ainda não está disponível!${WHITE}\n"
-        printf "${YELLOW} >> Tentando instalação final com --break-system-packages...${WHITE}\n"
-        \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${YELLOW} >> Tentando instalação final...${WHITE}\n"
+        
+        # Tentar via pip primeiro
+        if [ -n "\$PIP_CMD" ] && command -v \$PIP_CMD &>/dev/null 2>&1; then
+          \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        fi
+        
         # Atualizar USER_SITE após instalação
         USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
         if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
           export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
         fi
+        
         # Verificar novamente
         if ! python3 -c "import flask" 2>/dev/null; then
-          printf "${RED} >> ERRO: Não foi possível instalar Flask!${WHITE}\n"
-          printf "${YELLOW} >> O PM2 será iniciado, mas pode falhar. Verifique os logs.${WHITE}\n"
+          printf "${RED} >> ERRO: Não foi possível instalar Flask via pip!${WHITE}\n"
+          printf "${YELLOW} >> Por favor, execute manualmente: sudo apt-get install -y python3-flask python3-flask-cors${WHITE}\n"
+          printf "${YELLOW} >> Ou: sudo apt-get install -y python3-pip && pip3 install --user flask flask-cors${WHITE}\n"
+          printf "${RED} >> O PM2 será iniciado, mas falhará sem Flask instalado.${WHITE}\n"
         else
           printf "${GREEN} >> ✓ Flask instalado com sucesso!${WHITE}\n"
         fi
@@ -3758,8 +3812,31 @@ STARTPM2CORRECT
   printf "${GREEN} >> Porta configurada: ${BLUE}${porta_transcricao}${WHITE}\n"
   printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE}\n"
   echo
-  printf "${YELLOW} >> IMPORTANTE: Verifique se o serviço está rodando na porta correta${WHITE}\n"
+  
+  # Verificar se Flask está realmente instalado
+  if ! sudo su - deploy -c "python3 -c 'import flask'" 2>/dev/null; then
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED} >> ATENÇÃO: Flask não está instalado!${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    printf "${YELLOW} >> Para instalar Flask manualmente, execute:${WHITE}\n"
+    printf "${BLUE}    sudo apt-get update${WHITE}\n"
+    printf "${BLUE}    sudo apt-get install -y python3-pip python3-flask python3-flask-cors${WHITE}\n"
+    echo
+    printf "${YELLOW} >> Ou se preferir usar pip:${WHITE}\n"
+    printf "${BLUE}    sudo apt-get install -y python3-pip${WHITE}\n"
+    printf "${BLUE}    pip3 install --user --break-system-packages flask flask-cors requests${WHITE}\n"
+    echo
+    printf "${YELLOW} >> Após instalar, reinicie o serviço:${WHITE}\n"
+    printf "${BLUE}    sudo su - deploy -c 'pm2 restart ${empresa}-transcricao'${WHITE}\n"
+    echo
+  else
+    printf "${GREEN} >> ✓ Flask está instalado e disponível${WHITE}\n"
+  fi
+  
+  printf "${YELLOW} >> IMPORTANTE: Verifique se o serviço está rodando corretamente${WHITE}\n"
   printf "${YELLOW} >> Use: pm2 list (para ver processos)${WHITE}\n"
+  printf "${YELLOW} >> Use: pm2 logs ${empresa}-transcricao (para ver logs)${WHITE}\n"
   printf "${YELLOW} >> Use: lsof -i:${porta_transcricao} (para verificar a porta)${WHITE}\n"
   echo
   printf "${WHITE} >> Pressione Enter para voltar ao menu...${WHITE}\n"
