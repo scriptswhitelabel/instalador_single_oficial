@@ -3235,15 +3235,43 @@ TEMPSCRIPT
       fi
     fi
     
-    # Instalar dependências
+    # Instalar dependências (usar --break-system-packages para ambientes externally managed)
     if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
       printf "${GREEN} >> Instalando dependências do requirements.txt...${WHITE}\n"
-      \$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
-      printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      # Tentar com --user primeiro
+      INSTALL_OUTPUT=\$(\$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1)
+      INSTALL_STATUS=\$?
+      if [ \$INSTALL_STATUS -eq 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "already satisfied\|Requirement already satisfied"; then
+        printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      elif echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+        # Se falhar por externally-managed, usar --break-system-packages com --user
+        printf "${YELLOW} >> Ambiente externally-managed detectado. Usando --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      else
+        # Outro erro, mostrar e tentar com --break-system-packages
+        printf "${YELLOW} >> Erro na instalação. Tentando com --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      fi
     else
       printf "${YELLOW} >> requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
-      \$PIP_CMD install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
-      printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+      # Tentar com --user primeiro
+      INSTALL_OUTPUT=\$(\$PIP_CMD install --user flask flask-cors requests 2>&1)
+      INSTALL_STATUS=\$?
+      if [ \$INSTALL_STATUS -eq 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "already satisfied\|Requirement already satisfied"; then
+        printf "${GREEN} >> ✓ Dependências básicas instaladas${WHITE}\n"
+      elif echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+        # Se falhar por externally-managed, usar --break-system-packages com --user
+        printf "${YELLOW} >> Ambiente externally-managed detectado. Usando --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+      else
+        # Outro erro, mostrar e tentar com --break-system-packages
+        printf "${YELLOW} >> Erro na instalação. Tentando com --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        printf "${GREEN} >> ✓ Dependências básicas instaladas${WHITE}\n"
+      fi
     fi
     
     # Atualizar USER_SITE após instalação
@@ -3258,7 +3286,19 @@ TEMPSCRIPT
       printf "${GREEN} >> ✓ Flask está instalado e acessível${WHITE}\n"
     else
       printf "${RED} >> ERRO: Flask não está instalado! Tentando instalar novamente...${WHITE}\n"
-      \$PIP_CMD install --user --force-reinstall flask 2>&1 || true
+      # Tentar com --user primeiro
+      INSTALL_OUTPUT=\$(\$PIP_CMD install --user --force-reinstall flask 2>&1)
+      INSTALL_STATUS=\$?
+      if [ \$INSTALL_STATUS -eq 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "already satisfied\|Requirement already satisfied"; then
+        printf "${GREEN} >> Flask reinstalado${WHITE}\n"
+      elif echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+        # Se falhar, usar --break-system-packages
+        printf "${YELLOW} >> Usando --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages --force-reinstall flask 2>&1 || true
+      else
+        # Tentar com --break-system-packages de qualquer forma
+        \$PIP_CMD install --user --break-system-packages --force-reinstall flask 2>&1 || true
+      fi
       # Atualizar USER_SITE novamente
       USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
       if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
@@ -3516,13 +3556,36 @@ PYTHON_FIX
       
       if [ -f "\$TRANSC_DIR/requirements.txt" ]; then
         printf "${GREEN} >> Arquivo requirements.txt encontrado. Instalando dependências...${WHITE}\n"
-        \$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
-        printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+        # Tentar com --user primeiro
+        INSTALL_OUTPUT=\$(\$PIP_CMD install --user -r "\$TRANSC_DIR/requirements.txt" 2>&1)
+        INSTALL_STATUS=\$?
+        if [ \$INSTALL_STATUS -eq 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "already satisfied\|Requirement already satisfied"; then
+          printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+        elif echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+          printf "${YELLOW} >> Ambiente externally-managed detectado. Usando --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+          printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+        else
+          printf "${YELLOW} >> Tentando com --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+          printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+        fi
       else
         printf "${YELLOW} >> Arquivo requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
-        # Instalar Flask e outras dependências comuns para transcrição
-        \$PIP_CMD install --user flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
-        printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+        # Tentar com --user primeiro
+        INSTALL_OUTPUT=\$(\$PIP_CMD install --user flask flask-cors requests 2>&1)
+        INSTALL_STATUS=\$?
+        if [ \$INSTALL_STATUS -eq 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "already satisfied\|Requirement already satisfied"; then
+          printf "${GREEN} >> ✓ Dependências básicas instaladas${WHITE}\n"
+        elif echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+          printf "${YELLOW} >> Ambiente externally-managed detectado. Usando --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+          printf "${GREEN} >> ✓ Dependências básicas instaladas (Flask, Flask-CORS, Requests)${WHITE}\n"
+        else
+          printf "${YELLOW} >> Tentando com --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+          printf "${GREEN} >> ✓ Dependências básicas instaladas${WHITE}\n"
+        fi
       fi
       
       # Verificar se Flask está instalado e acessível
@@ -3530,7 +3593,12 @@ PYTHON_FIX
         printf "${GREEN} >> ✓ Flask verificado e disponível${WHITE}\n"
       else
         printf "${RED} >> ERRO: Flask não está acessível! Tentando instalar novamente...${WHITE}\n"
-        \$PIP_CMD install --user --force-reinstall flask 2>&1 || true
+        INSTALL_OUTPUT=\$(\$PIP_CMD install --user --force-reinstall flask 2>&1)
+        INSTALL_STATUS=\$?
+        if [ \$INSTALL_STATUS -ne 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+          printf "${YELLOW} >> Usando --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages --force-reinstall flask 2>&1 || true
+        fi
         # Tentar novamente após reinstalar
         if python3 -c "import flask" 2>/dev/null; then
           printf "${GREEN} >> ✓ Flask instalado com sucesso${WHITE}\n"
@@ -3573,7 +3641,12 @@ PYTHON_FIX
       # Verificar Flask antes de iniciar
       if ! python3 -c "import flask" 2>/dev/null; then
         printf "${RED} >> ERRO: Flask não está disponível! Instalando...${WHITE}\n"
-        \$PIP_CMD install --user flask 2>&1 || true
+        INSTALL_OUTPUT=\$(\$PIP_CMD install --user flask 2>&1)
+        INSTALL_STATUS=\$?
+        if [ \$INSTALL_STATUS -ne 0 ] || echo "\$INSTALL_OUTPUT" | grep -q "externally-managed-environment"; then
+          printf "${YELLOW} >> Usando --break-system-packages...${WHITE}\n"
+          \$PIP_CMD install --user --break-system-packages flask 2>&1 || true
+        fi
         # Atualizar USER_SITE após instalação
         USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
         if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
@@ -3581,13 +3654,50 @@ PYTHON_FIX
         fi
       fi
       
-      # Iniciar PM2 com o arquivo correto e PYTHONPATH configurado
-      printf "${GREEN} >> Iniciando PM2...${WHITE}\n"
+      # Configurar PYTHONPATH antes de iniciar PM2
       if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
-        PYTHONPATH="\$USER_SITE:\$PYTHONPATH" pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
-      else
-        pm2 start "\$MAIN_PY_PATH" --name ${empresa}-transcricao --interpreter python3 --cwd "\$TRANSC_DIR"
+        export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+        printf "${GREEN} >> PYTHONPATH configurado: \$USER_SITE${WHITE}\n"
       fi
+      
+      # Verificar Flask uma última vez antes de iniciar
+      if ! python3 -c "import flask" 2>/dev/null; then
+        printf "${RED} >> ERRO CRÍTICO: Flask ainda não está disponível!${WHITE}\n"
+        printf "${YELLOW} >> Tentando instalação final com --break-system-packages...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages flask flask-cors requests 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
+        # Atualizar USER_SITE após instalação
+        USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+        if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+          export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+        fi
+        # Verificar novamente
+        if ! python3 -c "import flask" 2>/dev/null; then
+          printf "${RED} >> ERRO: Não foi possível instalar Flask!${WHITE}\n"
+          printf "${YELLOW} >> O PM2 será iniciado, mas pode falhar. Verifique os logs.${WHITE}\n"
+        else
+          printf "${GREEN} >> ✓ Flask instalado com sucesso!${WHITE}\n"
+        fi
+      fi
+      
+      # Criar script wrapper para garantir PYTHONPATH correto
+      WRAPPER_SCRIPT="\$TRANSC_DIR/run_transcricao.sh"
+      cat > "\$WRAPPER_SCRIPT" <<WRAPPEREOF
+#!/bin/bash
+cd "\$TRANSC_DIR"
+# Configurar PYTHONPATH
+USER_SITE=\$(python3 -m site --user-site 2>/dev/null || echo "")
+if [ -n "\$USER_SITE" ] && [ -d "\$USER_SITE" ]; then
+  export PYTHONPATH="\$USER_SITE:\$PYTHONPATH"
+fi
+# Executar o main.py
+exec python3 "\$MAIN_PY_PATH"
+WRAPPEREOF
+      chmod +x "\$WRAPPER_SCRIPT"
+      chown deploy:deploy "\$WRAPPER_SCRIPT" 2>/dev/null || true
+      
+      # Iniciar PM2 com o wrapper script
+      printf "${GREEN} >> Iniciando PM2 com wrapper script (garante PYTHONPATH correto)...${WHITE}\n"
+      pm2 start "\$WRAPPER_SCRIPT" --name ${empresa}-transcricao --interpreter bash --cwd "\$TRANSC_DIR"
       pm2 save --force
       
       # Verificar se iniciou corretamente
