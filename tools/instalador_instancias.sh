@@ -568,7 +568,12 @@ salvar_variaveis_instancia() {
     echo "backend_port=${nova_backend_port}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "frontend_port=${nova_frontend_port}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "redis_port=${nova_redis_port}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
-    echo "versao_instalacao=${versao_instalacao:-Mais Recente}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
+    # Salvar versão (usar underscore se for "Mais Recente" para evitar problemas com espaços)
+    local versao_para_salvar="${versao_instalacao:-Mais Recente}"
+    if [ "${versao_para_salvar}" = "Mais Recente" ] || [ "${versao_para_salvar}" = "Mais_Recente" ]; then
+      versao_para_salvar="Mais_Recente"
+    fi
+    echo "versao_instalacao=${versao_para_salvar}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "commit_instalacao=${commit_instalacao:-}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     
     printf "${GREEN} >> Variáveis da instância salvas em: ${ARQUIVO_VARIAVEIS_INSTANCIA}${WHITE}\n"
