@@ -2942,6 +2942,66 @@ instalar_transcricao_audio_nativa() {
   echo
   sleep 2
   
+  # Instalar bibliotecas compartilhadas do ffmpeg necessárias para transcrição
+  banner
+  printf "${WHITE} >> Instalando bibliotecas compartilhadas do ffmpeg...\n"
+  echo
+  
+  {
+    sudo apt-get update -qq
+    
+    # Verificar se o ffmpeg está instalado, se não estiver, instalar
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      printf "${YELLOW} >> FFmpeg não encontrado. Instalando...${WHITE}\n"
+      sudo apt-get install -y ffmpeg
+    fi
+    
+    # Instalar as bibliotecas compartilhadas necessárias para o ffmpeg funcionar corretamente
+    # Essas bibliotecas são necessárias para evitar erros como "libavdevice.so.62: cannot open shared object file"
+    # Tentar diferentes versões e nomes de pacotes para compatibilidade com diferentes distribuições
+    
+    printf "${WHITE} >> Instalando bibliotecas libavdevice, libavformat e libavcodec...${WHITE}\n"
+    
+    # Tentar instalar com números de versão específicos (Ubuntu 20.04/22.04)
+    if sudo apt-get install -y libavdevice58 libavformat58 libavcodec58 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão 58)${WHITE}\n"
+    # Tentar versão 59 (Ubuntu mais recente)
+    elif sudo apt-get install -y libavdevice59 libavformat59 libavcodec59 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão 59)${WHITE}\n"
+    # Tentar versão 60
+    elif sudo apt-get install -y libavdevice60 libavformat60 libavcodec60 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão 60)${WHITE}\n"
+    # Tentar versão 61
+    elif sudo apt-get install -y libavdevice61 libavformat61 libavcodec61 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão 61)${WHITE}\n"
+    # Tentar versão 62
+    elif sudo apt-get install -y libavdevice62 libavformat62 libavcodec62 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão 62)${WHITE}\n"
+    # Tentar sem número de versão (instala a versão padrão)
+    elif sudo apt-get install -y libavdevice libavformat libavcodec 2>/dev/null; then
+      printf "${GREEN} >> Bibliotecas instaladas (versão padrão)${WHITE}\n"
+    # Como último recurso, tentar instalar via dependências do ffmpeg
+    else
+      printf "${YELLOW} >> Tentando instalar via dependências do ffmpeg...${WHITE}\n"
+      sudo apt-get install --reinstall -y ffmpeg 2>/dev/null || true
+      # Tentar instalar pacotes de desenvolvimento como alternativa
+      sudo apt-get install -y libavdevice-dev libavformat-dev libavcodec-dev 2>/dev/null || true
+    fi
+    
+    # Verificar se as bibliotecas foram instaladas corretamente
+    if ldconfig -p | grep -q libavdevice && ldconfig -p | grep -q libavformat && ldconfig -p | grep -q libavcodec; then
+      printf "${GREEN} >> Bibliotecas do ffmpeg verificadas com sucesso!${WHITE}\n"
+    else
+      printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não estar disponíveis. O ffmpeg pode precisar ser reinstalado.${WHITE}\n"
+      sudo apt-get install --reinstall -y ffmpeg 2>/dev/null || true
+    fi
+  } || {
+    printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não ter sido instaladas. Continuando...${WHITE}\n"
+  }
+  
+  echo
+  sleep 2
+  
   # Atualizar .env do backend com a nova porta
   banner
   printf "${WHITE} >> Atualizando configuração do backend...\n"
