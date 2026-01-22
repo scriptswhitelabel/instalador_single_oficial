@@ -2956,45 +2956,130 @@ instalar_transcricao_audio_nativa() {
       sudo apt-get install -y ffmpeg
     fi
     
-    # Instalar as bibliotecas compartilhadas necessárias para o ffmpeg funcionar corretamente
-    # Essas bibliotecas são necessárias para evitar erros como "libavdevice.so.62: cannot open shared object file"
-    # Tentar diferentes versões e nomes de pacotes para compatibilidade com diferentes distribuições
+    printf "${WHITE} >> Verificando dependências do ffmpeg instalado...${WHITE}\n"
     
-    printf "${WHITE} >> Instalando bibliotecas libavdevice, libavformat e libavcodec...${WHITE}\n"
-    
-    # Tentar instalar com números de versão específicos (Ubuntu 20.04/22.04)
-    if sudo apt-get install -y libavdevice58 libavformat58 libavcodec58 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão 58)${WHITE}\n"
-    # Tentar versão 59 (Ubuntu mais recente)
-    elif sudo apt-get install -y libavdevice59 libavformat59 libavcodec59 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão 59)${WHITE}\n"
-    # Tentar versão 60
-    elif sudo apt-get install -y libavdevice60 libavformat60 libavcodec60 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão 60)${WHITE}\n"
-    # Tentar versão 61
-    elif sudo apt-get install -y libavdevice61 libavformat61 libavcodec61 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão 61)${WHITE}\n"
-    # Tentar versão 62
-    elif sudo apt-get install -y libavdevice62 libavformat62 libavcodec62 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão 62)${WHITE}\n"
-    # Tentar sem número de versão (instala a versão padrão)
-    elif sudo apt-get install -y libavdevice libavformat libavcodec 2>/dev/null; then
-      printf "${GREEN} >> Bibliotecas instaladas (versão padrão)${WHITE}\n"
-    # Como último recurso, tentar instalar via dependências do ffmpeg
-    else
-      printf "${YELLOW} >> Tentando instalar via dependências do ffmpeg...${WHITE}\n"
-      sudo apt-get install --reinstall -y ffmpeg 2>/dev/null || true
-      # Tentar instalar pacotes de desenvolvimento como alternativa
-      sudo apt-get install -y libavdevice-dev libavformat-dev libavcodec-dev 2>/dev/null || true
+    # Verificar quais bibliotecas o ffmpeg precisa usando ldd
+    FFMPEG_PATH=$(which ffmpeg)
+    if [ -n "$FFMPEG_PATH" ] && [ -f "$FFMPEG_PATH" ]; then
+      printf "${WHITE} >> Analisando dependências de: $FFMPEG_PATH${WHITE}\n"
+      MISSING_LIBS=$(ldd "$FFMPEG_PATH" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
+      
+      if [ -n "$MISSING_LIBS" ]; then
+        printf "${YELLOW} >> Bibliotecas faltantes detectadas:${WHITE}\n"
+        echo "$MISSING_LIBS" | while read lib; do
+          printf "${YELLOW}   - $lib${WHITE}\n"
+        done
+        
+        # Extrair versão da biblioteca faltante e tentar instalar
+        for lib in $MISSING_LIBS; do
+          if echo "$lib" | grep -qE "libav(device|format|codec)"; then
+            # Extrair número da versão (ex: libavdevice.so.62 -> 62)
+            VERSION=$(echo "$lib" | grep -oE '[0-9]+' | head -1)
+            LIB_NAME=$(echo "$lib" | sed 's/\.so.*//' | sed 's/lib//')
+            
+            if [ -n "$VERSION" ] && [ -n "$LIB_NAME" ]; then
+              printf "${WHITE} >> Tentando instalar $LIB_NAME versão $VERSION...${WHITE}\n"
+              # Tentar diferentes formatos de nome de pacote
+              sudo apt-get install -y "lib${LIB_NAME}${VERSION}" 2>/dev/null || \
+              sudo apt-get install -y "lib${LIB_NAME}${VERSION:0:2}" 2>/dev/null || \
+              sudo apt-get install -y "lib${LIB_NAME}" 2>/dev/null || true
+            fi
+          fi
+        done
+      fi
     fi
     
-    # Verificar se as bibliotecas foram instaladas corretamente
+    printf "${WHITE} >> Instalando todas as bibliotecas do ffmpeg...${WHITE}\n"
+    
+    # Primeiro, tentar corrigir dependências quebradas
+    sudo apt-get install -f -y 2>/dev/null || true
+    
+    # Instalar ffmpeg e todas suas dependências de uma vez
+    sudo apt-get install --reinstall -y ffmpeg 2>/dev/null || true
+    
+    # Instalar bibliotecas específicas - tentar todas as versões possíveis
+    printf "${WHITE} >> Instalando bibliotecas libavdevice, libavformat e libavcodec (todas as versões)...${WHITE}\n"
+    
+    # Instalar todas as versões disponíveis (não usar elif, instalar todas que estiverem disponíveis)
+    sudo apt-get install -y \
+      libavdevice58 libavformat58 libavcodec58 \
+      libavdevice59 libavformat59 libavcodec59 \
+      libavdevice60 libavformat60 libavcodec60 \
+      libavdevice61 libavformat61 libavcodec61 \
+      libavdevice62 libavformat62 libavcodec62 \
+      libavdevice63 libavformat63 libavcodec63 \
+      libavdevice libavformat libavcodec \
+      2>/dev/null || true
+    
+    # Instalar pacotes de desenvolvimento também (podem conter as bibliotecas necessárias)
+    sudo apt-get install -y \
+      libavdevice-dev libavformat-dev libavcodec-dev \
+      libavutil-dev libswscale-dev libswresample-dev \
+      2>/dev/null || true
+    
+    # Adicionar PPA do ffmpeg se disponível (para versões mais recentes)
+    if ! grep -q "ppa:savoury1/ffmpeg" /etc/apt/sources.list.d/*.list 2>/dev/null; then
+      printf "${WHITE} >> Adicionando PPA do ffmpeg para versões mais recentes...${WHITE}\n"
+      sudo add-apt-repository -y ppa:savoury1/ffmpeg5 2>/dev/null || \
+      sudo add-apt-repository -y ppa:savoury1/ffmpeg6 2>/dev/null || true
+      sudo apt-get update -qq 2>/dev/null || true
+      
+      # Tentar instalar novamente após adicionar o PPA
+      sudo apt-get install -y \
+        libavdevice62 libavformat62 libavcodec62 \
+        libavdevice63 libavformat63 libavcodec63 \
+        2>/dev/null || true
+    fi
+    
+    # Atualizar cache do ldconfig para que o sistema encontre as bibliotecas
+    printf "${WHITE} >> Atualizando cache de bibliotecas compartilhadas...${WHITE}\n"
+    sudo ldconfig 2>/dev/null || true
+    
+    # Verificar novamente quais bibliotecas o ffmpeg precisa
+    if [ -n "$FFMPEG_PATH" ] && [ -f "$FFMPEG_PATH" ]; then
+      MISSING_LIBS_AFTER=$(ldd "$FFMPEG_PATH" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
+      
+      if [ -z "$MISSING_LIBS_AFTER" ]; then
+        printf "${GREEN} >> ✓ Todas as dependências do ffmpeg foram instaladas com sucesso!${WHITE}\n"
+      else
+        printf "${YELLOW} >> AVISO: Ainda há bibliotecas faltantes:${WHITE}\n"
+        echo "$MISSING_LIBS_AFTER" | while read lib; do
+          printf "${YELLOW}   - $lib${WHITE}\n"
+        done
+        
+        # Se ainda faltam bibliotecas, pode ser que o ffmpeg foi instalado do BtbN/FFmpeg-Builds
+        # Nesse caso, precisamos instalar o ffmpeg do repositório do sistema
+        printf "${WHITE} >> O ffmpeg pode ter sido instalado de fonte externa. Reinstalando do repositório do sistema...${WHITE}\n"
+        sudo apt-get remove -y ffmpeg 2>/dev/null || true
+        sudo apt-get install -y ffmpeg 2>/dev/null || true
+        sudo apt-get install -f -y 2>/dev/null || true
+        sudo ldconfig 2>/dev/null || true
+        
+        # Verificar novamente
+        MISSING_LIBS_FINAL=$(ldd "$(which ffmpeg)" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
+        if [ -z "$MISSING_LIBS_FINAL" ]; then
+          printf "${GREEN} >> ✓ FFmpeg reinstalado e funcionando!${WHITE}\n"
+        else
+          printf "${RED} >> ERRO: Ainda há bibliotecas faltantes após reinstalação.${WHITE}\n"
+          printf "${YELLOW} >> Bibliotecas faltantes: $MISSING_LIBS_FINAL${WHITE}\n"
+        fi
+      fi
+    fi
+    
+    # Verificação final usando ldconfig
     if ldconfig -p | grep -q libavdevice && ldconfig -p | grep -q libavformat && ldconfig -p | grep -q libavcodec; then
-      printf "${GREEN} >> Bibliotecas do ffmpeg verificadas com sucesso!${WHITE}\n"
+      printf "${GREEN} >> ✓ Bibliotecas do ffmpeg verificadas no sistema!${WHITE}\n"
     else
-      printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não estar disponíveis. O ffmpeg pode precisar ser reinstalado.${WHITE}\n"
-      sudo apt-get install --reinstall -y ffmpeg 2>/dev/null || true
+      printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não estar no cache do sistema.${WHITE}\n"
     fi
+    
+    # Teste final: tentar executar o ffmpeg para verificar se funciona
+    if ffmpeg -version >/dev/null 2>&1; then
+      printf "${GREEN} >> ✓ FFmpeg está funcionando corretamente!${WHITE}\n"
+    else
+      printf "${YELLOW} >> AVISO: FFmpeg pode ter problemas. Verifique manualmente.${WHITE}\n"
+    fi
+    
   } || {
     printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não ter sido instaladas. Continuando...${WHITE}\n"
   }
