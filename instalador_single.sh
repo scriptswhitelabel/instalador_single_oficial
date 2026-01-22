@@ -2600,7 +2600,12 @@ fim_instalacao_base() {
 ################################################################
 
 backup_app_atualizar() {
-  carregar_variaveis
+  # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    exit 1
+  fi
+  
   source /home/deploy/${empresa}/backend/.env
   {
     banner
@@ -2662,8 +2667,14 @@ STOPPM2
 
   verificar_e_adicionar_max_buffer
 
+  # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    exit 1
+  fi
+  
   banner
-  printf "${WHITE} >> Atualizando a Aplicação... \n"
+  printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   echo
   sleep 2
 
@@ -2687,7 +2698,7 @@ STOPPM2
     exit 1
   fi
   
-  printf "${WHITE} >> Atualizando Backend...\n"
+  printf "${WHITE} >> Atualizando Backend da empresa ${empresa}...\n"
   echo
   cd "\$APP_DIR"
   git fetch origin
@@ -2715,12 +2726,12 @@ STOPPM2
   npm i glob
   npm run build
   sleep 2
-  printf "${WHITE} >> Atualizando Banco...\n"
+  printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
   echo
   sleep 2
   npx sequelize db:migrate
   sleep 2
-  printf "${WHITE} >> Atualizando Frontend...\n"
+  printf "${WHITE} >> Atualizando Frontend da empresa ${empresa}...\n"
   echo
   sleep 2
   
@@ -2773,8 +2784,14 @@ EOF
 }
 
 otimiza_banco_atualizar() {
+  # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+  
   banner
-  printf "${WHITE} >> Realizando Manutenção do Banco de Dados... \n"
+  printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
   echo
   {
     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
@@ -2790,7 +2807,11 @@ EOF
 
 # Verificar e adicionar MAX_BUFFER_SIZE_MB no .env do backend
 verificar_e_adicionar_max_buffer() {
-  carregar_variaveis
+  # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
   
   ENV_FILE="/home/deploy/${empresa}/backend/.env"
   
