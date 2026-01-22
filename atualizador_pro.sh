@@ -31,6 +31,178 @@ trata_erro() {
   exit 1
 }
 
+# Função banner
+banner() {
+  printf " ${BLUE}"
+  printf "\n\n"
+  printf "██╗███╗   ██╗███████╗████████╗ █████╗ ██╗     ██╗     ███████╗██╗    ██╗██╗\n"
+  printf "██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██║     ██╔════╝██║    ██║██║\n"
+  printf "██║██╔██╗ ██║███████    ██║   ███████║██║     ██║     ███████╗██║ █╗ ██║██║\n"
+  printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
+  printf "██║██║ ╚████║███████║   ██║   ██║  ██║███████╗███████╗███████║╚███╔███╔╝██║\n"
+  printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚═╝\n"
+  printf "${WHITE}\n"
+}
+
+# Função para detectar e listar todas as instâncias instaladas
+detectar_instancias_instaladas() {
+  local instancias=()
+  local nomes_empresas=()
+  local temp_empresa=""
+  local temp_subdominio_backend=""
+  local temp_subdominio_frontend=""
+  
+  # Verificar instalação base (arquivo VARIAVEIS_INSTALACAO)
+  INSTALADOR_DIR="/root/instalador_single_oficial"
+  ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
+  if [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ]; then
+    # Salvar variáveis atuais
+    local empresa_original="${empresa:-}"
+    local subdominio_backend_original="${subdominio_backend:-}"
+    local subdominio_frontend_original="${subdominio_frontend:-}"
+    
+    # Carregar variáveis do arquivo
+    source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    
+    # Restaurar variáveis originais
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+  fi
+  
+  # Verificar instâncias adicionais (arquivos VARIAVEIS_INSTALACAO_INSTANCIA_*)
+  if [ -d "${INSTALADOR_DIR}" ]; then
+    for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+      if [ -f "$arquivo_instancia" ]; then
+        # Salvar variáveis atuais
+        local empresa_original="${empresa:-}"
+        local subdominio_backend_original="${subdominio_backend:-}"
+        local subdominio_frontend_original="${subdominio_frontend:-}"
+        
+        # Carregar variáveis do arquivo
+        source "$arquivo_instancia" 2>/dev/null
+        temp_empresa="${empresa:-}"
+        
+        if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+          instancias+=("$arquivo_instancia")
+          nomes_empresas+=("${temp_empresa}")
+        fi
+        
+        # Restaurar variáveis originais
+        empresa="${empresa_original}"
+        subdominio_backend="${subdominio_backend_original}"
+        subdominio_frontend="${subdominio_frontend_original}"
+      fi
+    done
+  fi
+  
+  # Retornar arrays (usando variáveis globais)
+  declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
+  declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
+}
+
+# Função para selecionar qual instância atualizar
+selecionar_instancia_atualizar() {
+  banner
+  printf "${WHITE} >> Detectando instâncias instaladas...\n"
+  echo
+  
+  detectar_instancias_instaladas
+  
+  local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+  
+  if [ $total_instancias -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma instância instalada detectada!${WHITE}\n"
+    printf "${YELLOW} >> Não é possível atualizar. Verifique se há instâncias instaladas.${WHITE}\n"
+    sleep 3
+    return 1
+  elif [ $total_instancias -eq 1 ]; then
+    # Apenas uma instância, usar diretamente
+    printf "${GREEN} >> Uma instância detectada: ${BLUE}${NOMES_EMPRESAS_DETECTADAS[0]}${WHITE}\n"
+    echo
+    sleep 2
+    
+    # Carregar variáveis da instância única
+    source "${INSTANCIAS_DETECTADAS[0]}"
+    # Salvar arquivo usado em variável global para uso posterior
+    declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[0]}"
+    return 0
+  else
+    # Múltiplas instâncias, perguntar qual atualizar
+    printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+    printf "  INSTÂNCIAS INSTALADAS DETECTADAS\n"
+    printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+    echo
+    
+    local index=1
+    for i in "${!NOMES_EMPRESAS_DETECTADAS[@]}"; do
+      local empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+      local arquivo_instancia="${INSTANCIAS_DETECTADAS[$i]}"
+      
+      # Salvar variáveis atuais antes de carregar
+      local empresa_original="${empresa:-}"
+      local subdominio_backend_original="${subdominio_backend:-}"
+      local subdominio_frontend_original="${subdominio_frontend:-}"
+      
+      # Tentar carregar informações adicionais da instância
+      source "$arquivo_instancia" 2>/dev/null
+      
+      local temp_subdominio_backend="${subdominio_backend:-}"
+      local temp_subdominio_frontend="${subdominio_frontend:-}"
+      
+      # Restaurar variáveis originais
+      empresa="${empresa_original}"
+      subdominio_backend="${subdominio_backend_original}"
+      subdominio_frontend="${subdominio_frontend_original}"
+      
+      printf "${BLUE}  [$index]${WHITE} Empresa: ${GREEN}${empresa_nome}${WHITE}\n"
+      if [ -n "${temp_subdominio_backend}" ]; then
+        printf "      Backend: ${YELLOW}${temp_subdominio_backend}${WHITE}\n"
+      fi
+      if [ -n "${temp_subdominio_frontend}" ]; then
+        printf "      Frontend: ${YELLOW}${temp_subdominio_frontend}${WHITE}\n"
+      fi
+      echo
+      ((index++))
+    done
+    
+    printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
+    echo
+    printf "${YELLOW} >> Qual instância deseja atualizar? (1-${total_instancias}):${WHITE}\n"
+    read -p "> " escolha_instancia
+    
+    # Validar entrada
+    if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]]; then
+      printf "${RED} >> ERRO: Entrada inválida. Digite um número.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    
+    if [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt $total_instancias ]; then
+      printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 1 e ${total_instancias}.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    
+    # Carregar variáveis da instância selecionada
+    local indice_selecionado=$((escolha_instancia - 1))
+    source "${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+    # Salvar arquivo usado em variável global para uso posterior
+    declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+    
+    printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n"
+    echo
+    sleep 2
+    return 0
+  fi
+}
+
 # Carregar variáveis
 dummy_carregar_variaveis() {
   INSTALADOR_DIR="/root/instalador_single_oficial"
@@ -534,7 +706,7 @@ baixa_codigo_atualizar() {
 
   sleep 2
 
-  printf "${WHITE} >> Parando Instancias... \n"
+  printf "${WHITE} >> Parando Instancias da empresa ${empresa}... \n"
   sleep 2
   sudo su - deploy <<STOPPM2
   # Configura PATH para Node.js e PM2
@@ -543,7 +715,14 @@ baixa_codigo_atualizar() {
   else
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
-  pm2 stop all || true
+  # Parar apenas processos PM2 relacionados à empresa específica
+  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
+  # Não afeta processos de outras instâncias
+  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
+    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
+      pm2 stop "\$process_name" 2>/dev/null || true
+    fi
+  done
 STOPPM2
 
   sleep 2
@@ -653,11 +832,14 @@ STOPPM2
   
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
-  pm2 flush
-  pm2 reset all
-  pm2 restart all
+  # Reiniciar apenas processos PM2 relacionados à empresa específica
+  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
+  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
+    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
+      pm2 restart "\$process_name" 2>/dev/null || true
+    fi
+  done
   pm2 save
-  pm2 startup
 UPDATEAPP
 
   sudo su - root <<EOF
@@ -703,6 +885,13 @@ done
 
 # Execução automática do fluxo de atualização
 verificar_instalacao_original
+
+# Verificar e selecionar instância para atualizar
+if ! selecionar_instancia_atualizar; then
+  printf "${RED} >> Erro ao selecionar instância. Encerrando script...${WHITE}\n"
+  exit 1
+fi
+
 verificar_versao_pro
 atualizar_git_config
 verificar_e_instalar_nodejs

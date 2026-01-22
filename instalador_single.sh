@@ -2559,14 +2559,20 @@ EOF
 
     sleep 2
 
-    sudo su - deploy <<'RESTARTPM2'
+    sudo su - deploy <<RESTARTPM2
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
-  pm2 restart all
+  # Reiniciar apenas processos PM2 relacionados à empresa específica
+  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
+  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
+    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
+      pm2 restart "\$process_name" 2>/dev/null || true
+    fi
+  done
 RESTARTPM2
 
     sleep 2
@@ -2630,17 +2636,24 @@ baixa_codigo_atualizar() {
   sleep 2
 
   banner
-  printf "${WHITE} >> Parando Instancias... \n"
+  printf "${WHITE} >> Parando Instancias da empresa ${empresa}... \n"
   echo
   sleep 2
-  sudo su - deploy <<'STOPPM2'
+  sudo su - deploy <<STOPPM2
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
-  pm2 stop all
+  # Parar apenas processos PM2 relacionados à empresa específica
+  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
+  # Não afeta processos de outras instâncias
+  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
+    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
+      pm2 stop "\$process_name" 2>/dev/null || true
+    fi
+  done
 STOPPM2
 
   sleep 2
@@ -2732,11 +2745,14 @@ STOPPM2
   
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
-  pm2 flush
-  pm2 reset all
-  pm2 restart all
+  # Reiniciar apenas processos PM2 relacionados à empresa específica
+  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
+  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
+    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
+      pm2 restart "\$process_name" 2>/dev/null || true
+    fi
+  done
   pm2 save
-  pm2 startup
 UPDATEAPP
 
   sudo su - root <<EOF
