@@ -354,6 +354,104 @@ EOF
   } || trata_erro "configurar_nginx_backend"
 }
 
+# Criar certificados autoassinados (para servidor em rede interna)
+criar_certificados_autoassinados() {
+  banner
+  printf "${WHITE} >> Criando certificados SSL autoassinados (uso em rede interna)...\n"
+  echo
+  
+  backend_domain=$(echo "${subdominio_backend}" | sed 's|https://||' | sed 's|http://||' | sed 's|/.*||')
+  frontend_domain=$(echo "${subdominio_frontend}" | sed 's|https://||' | sed 's|http://||' | sed 's|/.*||')
+  
+  SSL_DIR="/etc/nginx/ssl/${empresa}"
+  mkdir -p "${SSL_DIR}"
+  
+  # Backend
+  printf "${WHITE} >> Gerando certificado para ${backend_domain}...\n"
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout "${SSL_DIR}/backend-key.pem" \
+    -out "${SSL_DIR}/backend.pem" \
+    -subj "/CN=${backend_domain}/O=${empresa}" 2>/dev/null || trata_erro "Falha ao criar certificado backend"
+  
+  # Frontend
+  printf "${WHITE} >> Gerando certificado para ${frontend_domain}...\n"
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout "${SSL_DIR}/frontend-key.pem" \
+    -out "${SSL_DIR}/frontend.pem" \
+    -subj "/CN=${frontend_domain}/O=${empresa}" 2>/dev/null || trata_erro "Falha ao criar certificado frontend"
+  
+  printf "${GREEN} >> Certificados autoassinados criados em ${SSL_DIR}${WHITE}\n"
+  printf "${YELLOW} >> Navegadores podem exibir aviso de segurança (normal para certificados autoassinados).${WHITE}\n"
+  sleep 2
+}
+
+# Atualizar configuração Nginx para usar certificados autoassinados
+configurar_nginx_ssl_autoassinado() {
+  banner
+  printf "${WHITE} >> Configurando Nginx para SSL autoassinado...\n"
+  echo
+  
+  backend_hostname=$(echo "${subdominio_backend}" | sed 's|https://||' | sed 's|http://||' | sed 's|/.*||')
+  frontend_hostname=$(echo "${subdominio_frontend}" | sed 's|https://||' | sed 's|http://||' | sed 's|/.*||')
+  SSL_DIR="/etc/nginx/ssl/${empresa}"
+  
+  # Frontend com SSL
+  cat > /etc/nginx/sites-available/${empresa}-frontend << EOF
+server {
+  listen 80;
+  listen 443 ssl;
+  ssl_certificate ${SSL_DIR}/frontend.pem;
+  ssl_certificate_key ${SSL_DIR}/frontend-key.pem;
+  server_name ${frontend_hostname};
+  location / {
+    proxy_pass http://127.0.0.1:${frontend_port};
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_cache_bypass \$http_upgrade;
+  }
+}
+EOF
+  
+  # Backend com SSL
+  cat > /etc/nginx/sites-available/${empresa}-backend << EOF
+upstream backend {
+  server 127.0.0.1:${backend_port};
+  keepalive 32;
+}
+
+server {
+  listen 80;
+  listen 443 ssl;
+  ssl_certificate ${SSL_DIR}/backend.pem;
+  ssl_certificate_key ${SSL_DIR}/backend-key.pem;
+  server_name ${backend_hostname};
+  location / {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_cache_bypass \$http_upgrade;
+    proxy_buffering on;
+  }
+}
+EOF
+  
+  nginx -t >/dev/null 2>&1 || trata_erro "Configuração Nginx inválida com SSL autoassinado"
+  systemctl restart nginx || trata_erro "Falha ao reiniciar Nginx"
+  
+  printf "${GREEN} >> Nginx configurado com SSL autoassinado.${WHITE}\n"
+  sleep 2
+}
+
 # Aplicar certificado SSL para Backend
 aplicar_ssl_backend() {
   banner
@@ -371,6 +469,7 @@ aplicar_ssl_backend() {
             --redirect 2>&1 || {
       printf "${YELLOW} >> Aviso: Certificado SSL para backend pode ter falhado. Verifique manualmente.${WHITE}\n"
       printf "${YELLOW} >> Comando: certbot --nginx -d ${backend_domain}${WHITE}\n"
+      printf "${YELLOW} >> Se o servidor está em rede interna, execute o script novamente e escolha \"S\" para rede interna.${WHITE}\n"
     }
     
     printf "${GREEN} >> Certificado SSL do backend aplicado!${WHITE}\n"
@@ -395,6 +494,7 @@ aplicar_ssl_frontend() {
             --redirect 2>&1 || {
       printf "${YELLOW} >> Aviso: Certificado SSL para frontend pode ter falhado. Verifique manualmente.${WHITE}\n"
       printf "${YELLOW} >> Comando: certbot --nginx -d ${frontend_domain}${WHITE}\n"
+      printf "${YELLOW} >> Se o servidor está em rede interna, execute o script novamente e escolha \"S\" para rede interna.${WHITE}\n"
     }
     
     printf "${GREEN} >> Certificado SSL do frontend aplicado!${WHITE}\n"
@@ -448,9 +548,25 @@ main() {
   configurar_nginx_frontend
   configurar_nginx_backend
   
-  # Aplicar certificados SSL
-  aplicar_ssl_backend
-  aplicar_ssl_frontend
+  # Perguntar se o servidor está em rede interna (não acessível pela internet na porta 80)
+  banner
+  printf "${WHITE} >> O servidor está em ${YELLOW}rede interna${WHITE} (não acessível diretamente pela internet na porta 80)?\n"
+  printf "${WHITE} >> Se sim, será usado certificado SSL autoassinado (válido para uso interno).${WHITE}\n"
+  printf "${WHITE} >> Se não, será usado Let's Encrypt (exige que o domínio aponte para este servidor).${WHITE}\n"
+  echo
+  printf "${WHITE} >> Servidor em rede interna? (S/N):${WHITE}\n"
+  read -p "> " rede_interna
+  rede_interna=$(echo "${rede_interna}" | tr '[:upper:]' '[:lower:]')
+  
+  if [ "${rede_interna}" = "s" ]; then
+    # Rede interna: certificado autoassinado (não depende de acesso externo)
+    criar_certificados_autoassinados
+    configurar_nginx_ssl_autoassinado
+  else
+    # Servidor acessível pela internet: Let's Encrypt
+    aplicar_ssl_backend
+    aplicar_ssl_frontend
+  fi
   
   # Reiniciar Nginx final
   systemctl restart nginx
@@ -461,7 +577,12 @@ main() {
   printf "${WHITE}   Backend: ${BLUE}${subdominio_backend}${WHITE}\n"
   printf "${WHITE}   Frontend: ${BLUE}${subdominio_frontend}${WHITE}\n"
   echo
-  printf "${GREEN} >> Verifique se os certificados SSL foram aplicados corretamente.${WHITE}\n"
+  if [ "${rede_interna}" = "s" ]; then
+    printf "${GREEN} >> Certificados autoassinados aplicados (rede interna).${WHITE}\n"
+    printf "${YELLOW} >> Navegadores podem exibir aviso de segurança; é normal para certificados autoassinados.${WHITE}\n"
+  else
+    printf "${GREEN} >> Verifique se os certificados SSL (Let's Encrypt) foram aplicados corretamente.${WHITE}\n"
+  fi
   echo
 }
 
