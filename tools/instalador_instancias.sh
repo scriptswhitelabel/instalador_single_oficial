@@ -458,12 +458,12 @@ solicitar_dados_adicionais() {
     usar_repo_base=$(echo "${usar_repo_base}" | tr '[:upper:]' '[:lower:]')
     if [ "${usar_repo_base}" != "s" ]; then
       banner
-      printf "${WHITE} >> Digite a URL do repositório privado no GitHub:${WHITE}\n"
+      printf "${WHITE} >> Digite a URL do repositório Git (ex.: GitHub, GitLab):${WHITE}\n"
       read -p "> " repo_url
     fi
   else
     banner
-    printf "${WHITE} >> Digite a URL do repositório privado no GitHub:${WHITE}\n"
+    printf "${WHITE} >> Digite a URL do repositório Git (ex.: GitHub, GitLab):${WHITE}\n"
     read -p "> " repo_url
   fi
   echo
@@ -502,24 +502,36 @@ solicitar_dados_adicionais() {
   fi
   echo
   
-  # Validar que o repositório é o correto (usando mesma validação do instalador_single.sh)
-  repo_url_limpo=$(echo "${repo_url}" | sed 's|https://||' | sed 's|http://||' | sed 's|\.git$||' | sed 's|/$||')
-  repo_esperado="github.com/scriptswhitelabel/multiflow-pro"
-  
-  if [ "${repo_url_limpo}" != "${repo_esperado}" ]; then
+  # Validar que a URL parece ser um repositório Git válido (aceita qualquer repo: GitHub, GitLab, etc.)
+  repo_url_limpo=$(echo "${repo_url}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [ -z "${repo_url_limpo}" ]; then
     printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
-    printf "${RED}❌ ERRO: Repositório inválido!${WHITE}\n"
+    printf "${RED}❌ ERRO: URL do repositório não pode estar vazia!${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
     echo
-    printf "${YELLOW}   O repositório deve ser exatamente:${WHITE}\n"
-    printf "${BLUE}   https://github.com/scriptswhitelabel/multiflow-pro${WHITE}\n"
-    printf "${BLUE}   ou${WHITE}\n"
-    printf "${BLUE}   https://github.com/scriptswhitelabel/multiflow-pro.git${WHITE}\n"
+    sleep 5
+    exit 1
+  fi
+  if ! [[ "${repo_url_limpo}" =~ ^https?:// ]] && ! [[ "${repo_url_limpo}" =~ ^git@ ]]; then
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED}❌ ERRO: URL do repositório inválida!${WHITE}\n"
+    echo
+    printf "${YELLOW}   Use uma URL HTTPS (https://...) ou SSH (git@...).${WHITE}\n"
+    printf "${YELLOW}   Exemplos:${WHITE}\n"
+    printf "${BLUE}   https://github.com/usuario/repositorio.git${WHITE}\n"
+    printf "${BLUE}   git@github.com:usuario/repositorio.git${WHITE}\n"
     echo
     printf "${RED}   Repositório informado: ${repo_url}${WHITE}\n"
     printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
     echo
     sleep 5
     exit 1
+  fi
+  # Normalizar para uso posterior (garantir .git no final para clone, se for HTTPS)
+  if [[ "${repo_url_limpo}" =~ ^https?:// ]] && [[ "${repo_url_limpo}" != *.git ]]; then
+    repo_url="${repo_url_limpo}.git"
+  else
+    repo_url="${repo_url_limpo}"
   fi
   
   # Selecionar versão (usando mesma função do instalador_single.sh)
