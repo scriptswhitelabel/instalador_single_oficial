@@ -71,16 +71,18 @@ executar_backup() {
   fi
 
   DATA=$(date +%Y-%m-%d_%H-%M-%S)
-  export PGPASSWORD="${senha_deploy}"
+  POSTGRES_CONTAINER="postgres_${empresa}"
 
-  PSQL_CMD=$(command -v psql 2>/dev/null || echo "psql")
-  PGDUMP_CMD=$(command -v pg_dump 2>/dev/null || echo "pg_dump")
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${POSTGRES_CONTAINER}$"; then
+    echo "$(date): Container Postgres ${POSTGRES_CONTAINER} não está rodando. Backup cancelado." >> "${LOG}" 2>&1
+    return 1
+  fi
 
-  # Listar bancos (exclui templates) - conexão direta ao Postgres (porta 7532)
-  BANCOS=$("${PSQL_CMD}" -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${LOG}")
+  # Usar psql/pg_dump DENTRO do container para evitar incompatibilidade de versão (servidor 17 x cliente 14)
+  # Dentro do container: -h 127.0.0.1 -p 5432
+  BANCOS=$(docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_deploy}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${LOG}")
   if [ -z "${BANCOS}" ]; then
-    echo "$(date): Nenhum banco listado ou falha de conexão em ${DB_HOST}:${DB_PORT} (ver erros acima)" >> "${LOG}" 2>&1
-    unset PGPASSWORD
+    echo "$(date): Nenhum banco listado ou falha de conexão no container ${POSTGRES_CONTAINER} (ver erros acima)" >> "${LOG}" 2>&1
     return 1
   fi
 
@@ -89,7 +91,7 @@ executar_backup() {
     [ -z "${DB_CLEAN}" ] && continue
     ARQUIVO="${BACKUP_DIR}/backup-${DB_CLEAN}-${DATA}.sql.gz"
     TMP_SQL=$(mktemp)
-    if "${PGDUMP_CMD}" -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${LOG}"; then
+    if docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_deploy}" pg_dump -h 127.0.0.1 -p 5432 -U "${empresa}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${LOG}"; then
       if [ -s "${TMP_SQL}" ]; then
         gzip -c "${TMP_SQL}" > "${ARQUIVO}"
         chown deploy:deploy "${ARQUIVO}"
@@ -107,7 +109,6 @@ executar_backup() {
 
   # Remover backups mais antigos que RETENCAO_DIAS
   find "${BACKUP_DIR}" -maxdepth 1 -name "backup-*.sql.gz" -mtime +${RETENCAO_DIAS} -delete 2>/dev/null
-  unset PGPASSWORD
   return 0
 }
 
