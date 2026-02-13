@@ -1258,6 +1258,14 @@ instala_backend_instancia() {
       db_host_nova="localhost"
       db_port_nova="5432"
     fi
+    # Usar usuário e senha do BANCO da instalação principal (não criar outro usuário; só outro banco)
+    ENV_BACKEND_PRINCIPAL="/home/deploy/${empresa}/backend/.env"
+    if [ -f "${ENV_BACKEND_PRINCIPAL}" ]; then
+      db_user_principal=$(grep "^DB_USER=" "${ENV_BACKEND_PRINCIPAL}" 2>/dev/null | cut -d '=' -f2- | tr -d ' ' | tr -d '"' | head -1)
+      db_pass_principal=$(grep "^DB_PASS=" "${ENV_BACKEND_PRINCIPAL}" 2>/dev/null | cut -d '=' -f2- | tr -d ' ' | tr -d '"' | head -1)
+    fi
+    db_user_principal=${db_user_principal:-${empresa}}
+    db_pass_principal=${db_pass_principal:-${senha_deploy}}
     subdominio_backend_clean=$(echo "${nova_subdominio_backend/https:\/\//}")
     subdominio_backend_clean=${subdominio_backend_clean%%/*}
     subdominio_backend_final=https://${subdominio_backend_clean}
@@ -1274,12 +1282,12 @@ FRONTEND_URL=${subdominio_frontend_final}
 PROXY_PORT=443
 PORT=${nova_backend_port}
 
-# CREDENCIAIS BD
+# CREDENCIAIS BD (mesmo usuário da instalação principal; apenas o banco é novo)
 DB_HOST=${db_host_nova}
 DB_DIALECT=postgres
 DB_PORT=${db_port_nova}
-DB_USER=${nova_empresa}
-DB_PASS=${senha_deploy}
+DB_USER=${db_user_principal}
+DB_PASS=${db_pass_principal}
 DB_NAME=${nova_empresa}
 
 # DADOS REDIS (Docker)
