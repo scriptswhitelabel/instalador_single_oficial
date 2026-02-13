@@ -2650,10 +2650,22 @@ fim_instalacao_base() {
   [ "${ALTA_PERFORMANCE}" = "1" ] && [ -f "ALTA_PERFORMANCE_MODE" ] && rm -f "ALTA_PERFORMANCE_MODE"
 
   # Instalar Portainer ao final quando Alta Performance (senha admin = senha_deploy)
-  if [ "${ALTA_PERFORMANCE}" = "1" ] && [ -n "${senha_deploy}" ]; then
-    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
+  # Usa arquivo de senha PERSISTENTE para o container poder reiniciar (evita erro de mount com /tmp)
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+    if [ -z "${senha_deploy}" ]; then
+      senha_deploy=""
+    fi
+    # Se o container existe mas não inicia (ex.: mount do /tmp removido), remover para recriar
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
+      if ! docker start portainer 2>/dev/null; then
+        printf "   ${YELLOW}>> Container Portainer com erro de mount. Recriando com arquivo persistente...${WHITE}\n"
+        docker rm -f portainer 2>/dev/null || true
+      fi
+    fi
+    if [ -n "${senha_deploy}" ] && ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
       printf "   ${WHITE}>> Instalando Portainer (senha admin = senha do deploy)...${WHITE}\n"
-      PW_FILE=$(mktemp)
+      PW_FILE="/root/.portainer_admin_pw"
       printf '%s' "${senha_deploy}" > "${PW_FILE}"
       chmod 600 "${PW_FILE}"
       docker volume create portainer_data 2>/dev/null || true
@@ -2677,7 +2689,6 @@ fim_instalacao_base() {
           echo "portainer_instalado=1" >> "$ARQUIVO_VARIAVEIS"
         fi
       fi
-      rm -f "${PW_FILE}"
       echo
     fi
   fi

@@ -1039,7 +1039,8 @@ baixa_codigo_instancia() {
     fi
     
     # Se versão está definida mas commit não, tentar recuperar do array
-    if [ -n "${versao_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ] && [ -z "${commit_instalacao}" ]; then
+    # "Mais Recente" / "Mais_Recente" não têm commit fixo — usam o mais recente do repositório
+    if [ -n "${versao_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ] && [ "${versao_instalacao}" != "Mais_Recente" ] && [ -z "${commit_instalacao}" ]; then
       printf "${YELLOW}⚠️  Aviso: commit_instalacao está vazio para versão ${versao_instalacao}.${WHITE}\n"
       printf "${WHITE} >> Tentando recuperar do array VERSOES_INSTALACAO...${WHITE}\n"
       if [ -n "${VERSOES_INSTALACAO[${versao_instalacao}]}" ]; then
@@ -1088,9 +1089,9 @@ FETCHALL
     printf "${GREEN} >> Fetch concluído!${WHITE}\n"
     echo
 
-    # Verificar se foi selecionada a opção "Mais Recente"
+    # Verificar se foi selecionada a opção "Mais Recente" (ou "Mais_Recente" quando carregado do arquivo de variáveis)
     # IMPORTANTE: Verificar primeiro se é "Mais Recente", depois verificar se commit está vazio
-    if [ "${versao_instalacao}" = "Mais Recente" ]; then
+    if [ "${versao_instalacao}" = "Mais Recente" ] || [ "${versao_instalacao}" = "Mais_Recente" ]; then
       banner
       printf "${WHITE} >> Instalando versão mais recente disponível no repositório...\n"
       echo
@@ -1207,8 +1208,8 @@ FORCECHECKOUT
       fi
     fi
 
-    # Verificação final: garantir que estamos no commit correto
-    if [ -n "${commit_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ]; then
+    # Verificação final: garantir que estamos no commit correto (não aplica para Mais Recente/Mais_Recente)
+    if [ -n "${commit_instalacao}" ] && [ "${versao_instalacao}" != "Mais Recente" ] && [ "${versao_instalacao}" != "Mais_Recente" ]; then
       printf "${WHITE} >> Verificação final do commit instalado...\n"
       FINAL_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
       FINAL_VERSION=$(sudo su - deploy -c "cd ${dest_dir}/backend && cat package.json 2>/dev/null | grep '\"version\"' | head -1 | cut -d'\"' -f4" || echo "N/A")

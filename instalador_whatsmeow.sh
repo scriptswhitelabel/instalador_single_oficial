@@ -535,6 +535,7 @@ EOF
       systemctl restart docker
       sleep 5
       printf "${GREEN} >> Docker reiniciado!${WHITE}\n"
+      printf "${YELLOW}   (Containers com restart=always, ex.: Portainer, voltam a subir automaticamente.)${WHITE}\n"
     fi
     
     # Verificar se Docker está rodando
@@ -930,10 +931,10 @@ EOF
   } || trata_erro "reiniciar_servicos"
 }
 
-# Reiniciar PM2 do backend
+# Reiniciar PM2 do backend da empresa (para aplicar configuração WhatsMeow)
 reiniciar_pm2_backend() {
   banner
-  printf "${WHITE} >> Reiniciando PM2 do backend...\n"
+  printf "${WHITE} >> Reiniciando backend da empresa para aplicar a instalação do WhatsMeow...\n"
   echo
   {
     # Carregar variáveis necessárias
@@ -941,22 +942,22 @@ reiniciar_pm2_backend() {
     
     # Verificar se PM2 está instalado
     if command -v pm2 >/dev/null 2>&1; then
-      # Reiniciar PM2 do backend como usuário deploy
-      sudo -u deploy bash <<EOF
-        cd /home/deploy/${empresa}/backend
-        if [ -f "ecosystem.config.js" ] || [ -f "ecosystem.config.cjs" ] || [ -f "package.json" ]; then
-          pm2 restart all 2>/dev/null || pm2 restart backend 2>/dev/null || pm2 restart ecosystem.config.js 2>/dev/null
-          printf "${GREEN} >> PM2 do backend reiniciado com sucesso!${WHITE}\n"
+      # Reiniciar apenas o backend desta empresa (nome: ${empresa}-backend)
+      sudo -u deploy bash <<RESTARTBACKEND
+        export PATH="\$HOME/.nvm/versions/node/*/bin:/usr/local/bin:/usr/bin:\$PATH"
+        if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
+          pm2 restart ${empresa}-backend
+          pm2 save
+          printf "${GREEN} >> Backend ${empresa}-backend reiniciado com sucesso!${WHITE}\n"
         else
-          printf "${YELLOW}⚠️  Arquivo de configuração do PM2 não encontrado.${WHITE}\n"
-          printf "${WHITE}   Tentando reiniciar todos os processos PM2...${WHITE}\n"
-          pm2 restart all 2>/dev/null || true
+          printf "${YELLOW}⚠️  Processo ${empresa}-backend não encontrado no PM2.${WHITE}\n"
+          printf "${WHITE}   Reinicie o backend manualmente para aplicar as configurações do WhatsMeow.${WHITE}\n"
         fi
-EOF
+RESTARTBACKEND
       sleep 2
     else
       printf "${YELLOW}⚠️  PM2 não está instalado ou não está no PATH.${WHITE}\n"
-      printf "${WHITE}   Pulando reinicialização do PM2.${WHITE}\n"
+      printf "${WHITE}   Reinicie o backend manualmente para aplicar as configurações do WhatsMeow.${WHITE}\n"
       sleep 2
     fi
   } || trata_erro "reiniciar_pm2_backend"
