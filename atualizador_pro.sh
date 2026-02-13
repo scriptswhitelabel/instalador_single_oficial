@@ -639,6 +639,15 @@ otimiza_banco_atualizar() {
     return 0
   fi
   
+  [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ] && source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    db_host_opt="127.0.0.1"
+    db_port_opt="7532"
+  else
+    db_host_opt="localhost"
+    db_port_opt="5432"
+  fi
+  
   {
     db_password=$(grep "DB_PASS=" "$ENV_FILE" | cut -d '=' -f2)
     if [ -z "$db_password" ]; then
@@ -646,9 +655,9 @@ otimiza_banco_atualizar() {
       return 0
     fi
     sudo su - root <<EOF
-    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h localhost -d "${empresa}" --full --analyze
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "REINDEX DATABASE ${empresa};"
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "ANALYZE;"
+    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "ANALYZE;"
 EOF
     sleep 2
   } || trata_erro "otimiza_banco_atualizar"
@@ -773,7 +782,32 @@ STOPPM2
   printf "${WHITE} >> Atualizando Backend...\n"
   echo
   cd "\$APP_DIR"
-  
+
+  # ==== PASTA ESTÁTICA DE PERSONALIZAÇÕES ====
+  CUSTOM_DIR="/home/deploy/personalizacoes/${empresa}"
+
+  # Criar pasta de personalizações se não existir
+  if [ ! -d "\$CUSTOM_DIR" ]; then
+    printf "${YELLOW} >> Criando pasta de personalizações: \$CUSTOM_DIR${WHITE}\n"
+    mkdir -p "\$CUSTOM_DIR/assets"
+    mkdir -p "\$CUSTOM_DIR/public"
+
+    # Copiar arquivos atuais para a pasta de personalizações (primeira vez)
+    if [ -d "\$FRONTEND_DIR/src/assets" ]; then
+      cp -rf "\$FRONTEND_DIR/src/assets/"* "\$CUSTOM_DIR/assets/" 2>/dev/null || true
+      echo "  - Assets salvos: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
+    fi
+    if [ -d "\$FRONTEND_DIR/public" ]; then
+      cp -rf "\$FRONTEND_DIR/public/"* "\$CUSTOM_DIR/public/" 2>/dev/null || true
+      echo "  - Public salvos: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+    fi
+    printf "${GREEN} >> Pasta de personalizações criada com sucesso!${WHITE}\n"
+    printf "${YELLOW} >> DICA: Edite os arquivos em \$CUSTOM_DIR para personalizar logos/favicon${WHITE}\n"
+  else
+    printf "${GREEN} >> Pasta de personalizações encontrada: \$CUSTOM_DIR${WHITE}\n"
+  fi
+  # ==== FIM PASTA ESTÁTICA ====
+
   git fetch origin
   git checkout MULTI100-OFICIAL-u21
   git reset --hard origin/MULTI100-OFICIAL-u21
@@ -829,7 +863,27 @@ STOPPM2
   if [ -f "server.js" ]; then
     sed -i 's/3000/'"$frontend_port"'/g' server.js
   fi
-  
+
+  # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
+  if [ -d "\$CUSTOM_DIR" ]; then
+    printf "${WHITE} >> Aplicando personalizações de \$CUSTOM_DIR...\n"
+
+    # Restaurar assets
+    if [ -d "\$CUSTOM_DIR/assets" ] && [ "\$(ls -A \$CUSTOM_DIR/assets 2>/dev/null)" ]; then
+      cp -rf "\$CUSTOM_DIR/assets/"* "\$FRONTEND_DIR/src/assets/" 2>/dev/null || true
+      echo "  - Assets aplicados: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
+    fi
+
+    # Restaurar public
+    if [ -d "\$CUSTOM_DIR/public" ] && [ "\$(ls -A \$CUSTOM_DIR/public 2>/dev/null)" ]; then
+      cp -rf "\$CUSTOM_DIR/public/"* "\$FRONTEND_DIR/public/" 2>/dev/null || true
+      echo "  - Public aplicados: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+    fi
+
+    printf "${GREEN} >> Personalizações aplicadas com sucesso!${WHITE}\n"
+  fi
+  # ==== FIM RESTORE ====
+
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
   # Reiniciar apenas processos PM2 relacionados à empresa específica

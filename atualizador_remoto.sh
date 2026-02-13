@@ -397,6 +397,15 @@ otimiza_banco_atualizar() {
     return 0
   fi
   
+  [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    db_host_opt="127.0.0.1"
+    db_port_opt="7532"
+  else
+    db_host_opt="localhost"
+    db_port_opt="5432"
+  fi
+  
   {
     db_password=$(grep "DB_PASS=" "$ENV_FILE" | cut -d '=' -f2)
     if [ -z "$db_password" ]; then
@@ -404,9 +413,9 @@ otimiza_banco_atualizar() {
       return 0
     fi
     sudo su - root <<EOF
-    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h localhost -d "${empresa}" --full --analyze
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "REINDEX DATABASE ${empresa};"
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "ANALYZE;"
+    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "ANALYZE;"
 EOF
     sleep 2
   } || trata_erro "otimiza_banco_atualizar"

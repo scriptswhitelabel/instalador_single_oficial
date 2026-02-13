@@ -1,0 +1,116 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis_containerv3
+    volumes:
+      - /container-web/redis:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "1569:6379"
+    restart: always
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:17
+    container_name: postgres_containerv3
+    volumes:
+      - /container-web/banco:/var/lib/postgresql/data
+    # Se você NÃO precisa acessar Postgres direto de fora, remova esta porta (mais seguro)
+    ports:
+      - "7532:5432"
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: deploy2024
+      POSTGRES_DB: web
+      TZ: America/Sao_Paulo
+    restart: always
+    shm_size: "1g"
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=4GB
+      -c effective_cache_size=12GB
+      -c maintenance_work_mem=1GB
+      -c work_mem=16MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c wal_compression=on
+      -c max_wal_size=2GB
+      -c min_wal_size=512MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c seq_page_cost=1.0
+      -c max_worker_processes=6
+      -c max_parallel_workers=6
+      -c max_parallel_workers_per_gather=2
+      -c autovacuum=on
+      -c autovacuum_max_workers=4
+      -c autovacuum_vacuum_cost_limit=2000
+      -c autovacuum_naptime=30s
+      -c autovacuum_vacuum_threshold=50
+      -c autovacuum_analyze_threshold=50
+      -c autovacuum_vacuum_scale_factor=0.02
+      -c autovacuum_analyze_scale_factor=0.01
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d web -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.21.0-p2
+    container_name: pgbouncer_containerv3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Conecta no Postgres pelo nome do serviço
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: root
+      DB_PASSWORD: "deploy2024"
+
+      # Autenticação
+      AUTH_TYPE: scram-sha-256
+      LISTEN_PORT: 6432
+
+      # Aceita muitos clientes, mas limita conexões reais ao Postgres
+      MAX_CLIENT_CONN: 8000
+      DEFAULT_POOL_SIZE: 120
+      RESERVE_POOL_SIZE: 30
+      POOL_MODE: transaction
+
+      # Recomendado em transaction pooling
+      IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
+      TZ: America/Sao_Paulo
+    ports:
+      - "6732:6432"
+    restart: always
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+networks:
+  web:
+    driver: bridge

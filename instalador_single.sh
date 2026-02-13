@@ -11,6 +11,8 @@ ARCH=$(uname -m)
 UBUNTU_VERSION=$(lsb_release -sr)
 ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
 ARQUIVO_ETAPAS="ETAPA_INSTALACAO"
+# Modo Alta Performance: Redis, Postgres e PgBouncer via Docker (não instala nativos)
+[ -f "ALTA_PERFORMANCE_MODE" ] && source ALTA_PERFORMANCE_MODE 2>/dev/null || true
 FFMPEG="$(pwd)/ffmpeg.x"
 FFMPEG_DIR="$(pwd)/ffmpeg"
 ip_atual=$(curl -s http://checkip.amazonaws.com)
@@ -34,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 6.8\n"
+  printf "                                INSTALADOR 7.0\n"
   printf "\n\n"
 }
 
@@ -114,6 +116,9 @@ salvar_variaveis() {
   fi
   echo "versao_instalacao=${versao_para_salvar}" >>$ARQUIVO_VARIAVEIS
   echo "commit_instalacao=${commit_instalacao}" >>$ARQUIVO_VARIAVEIS
+  # Registro se a instalação foi em modo Alta Performance (Redis, Postgres e PgBouncer via Docker)
+  echo "# Instalação em modo Alta Performance (1=sim, 0=não)" >>$ARQUIVO_VARIAVEIS
+  echo "ALTA_PERFORMANCE=${ALTA_PERFORMANCE:-0}" >>$ARQUIVO_VARIAVEIS
 }
 
 # Carregar variáveis
@@ -300,6 +305,7 @@ menu_ferramentas() {
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
+    printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -367,6 +373,20 @@ menu_ferramentas() {
         sleep 3
       fi
       ;;
+    6)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      BACKUP_SCRIPT="${SCRIPT_DIR}/tools/agendar_backup_bd_docker.sh"
+      if [ -f "$BACKUP_SCRIPT" ]; then
+        chmod 775 "$BACKUP_SCRIPT"
+        bash "$BACKUP_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${BACKUP_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
     0)
       return
       ;;
@@ -390,6 +410,7 @@ menu() {
     printf "   [${BLUE}4${WHITE}] Instalar API Oficial\n"
     printf "   [${BLUE}5${WHITE}] Atualizar API Oficial\n"
     printf "   [${BLUE}6${WHITE}] Migrar para Multiflow-PRO\n"
+    printf "   [${BLUE}7${WHITE}] Instalação Alta Performance (Redis, Postgres, PgBouncer)\n"
     printf "   [${BLUE}10${WHITE}] Ferramentas\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
@@ -412,6 +433,9 @@ menu() {
       ;;
     6)
       migrar_multiflow_pro
+      ;;
+    7)
+      exec_instalador_alta_performance
       ;;
     10)
       menu_ferramentas
@@ -465,16 +489,26 @@ instalacao_base() {
     salvar_etapa 7
   fi
   if [ "$etapa" -le "7" ]; then
-    instala_postgres_base || trata_erro "instala_postgres_base"
-    salvar_etapa 8
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      printf "${GREEN} >> Modo Alta Performance: pulando instalação do Postgres nativo (uso de container).${WHITE}\n"
+      salvar_etapa 8
+    else
+      instala_postgres_base || trata_erro "instala_postgres_base"
+      salvar_etapa 8
+    fi
   fi
   if [ "$etapa" -le "8" ]; then
     instala_node_base || trata_erro "instala_node_base"
     salvar_etapa 9
   fi
   if [ "$etapa" -le "9" ]; then
-    instala_redis_base || trata_erro "instala_redis_base"
-    salvar_etapa 10
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      printf "${GREEN} >> Modo Alta Performance: pulando instalação do Redis nativo (uso de container).${WHITE}\n"
+      salvar_etapa 10
+    else
+      instala_redis_base || trata_erro "instala_redis_base"
+      salvar_etapa 10
+    fi
   fi
   if [ "$etapa" -le "10" ]; then
     instala_pm2_base || trata_erro "instala_pm2_base"
@@ -490,8 +524,13 @@ instalacao_base() {
     fi
   fi
   if [ "$etapa" -le "12" ]; then
-    cria_banco_base || trata_erro "cria_banco_base"
-    salvar_etapa 13
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      printf "${GREEN} >> Modo Alta Performance: banco já criado pelo container Postgres.${WHITE}\n"
+      salvar_etapa 13
+    else
+      cria_banco_base || trata_erro "cria_banco_base"
+      salvar_etapa 13
+    fi
   fi
   if [ "$etapa" -le "13" ]; then
     instala_git_base || trata_erro "instala_git_base"
@@ -891,8 +930,14 @@ questoes_variaveis_base() {
     repo_url="${repo_url_limpo}"
   fi
   
-  # Selecionar versão
-  selecionar_versao_instalacao
+  # Mostrar seleção de versão/commit apenas para o repositório multiflow-pro
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    selecionar_versao_instalacao
+  else
+    # Outros repositórios: sempre instalar a versão mais recente, sem menu
+    declare -g versao_instalacao="Mais_Recente"
+    declare -g commit_instalacao=""
+  fi
 }
 
 # Define proxy usado
@@ -1953,6 +1998,15 @@ instala_backend_base() {
     # subdominio_perfex=$(echo "${subdominio_perfex/https:\/\//}")
     # subdominio_perfex=${subdominio_perfex%%/*}
     # subdominio_perfex=https://${subdominio_perfex}
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      db_host_instalador="127.0.0.1"
+      db_port_instalador="6732"
+      redis_uri_instalador="redis://127.0.0.1:1569"
+    else
+      db_host_instalador="localhost"
+      db_port_instalador="5432"
+      redis_uri_instalador="redis://:${senha_deploy}@127.0.0.1:6379"
+    fi
     sudo su - deploy <<EOF
   cat <<[-]EOF > /home/deploy/${empresa}/backend/.env
 # Scripts WhiteLabel - All Rights Reserved - (18) 9 8802-9627
@@ -1963,15 +2017,15 @@ PROXY_PORT=443
 PORT=${backend_port}
 
 # CREDENCIAIS BD
-DB_HOST=localhost
+DB_HOST=${db_host_instalador}
 DB_DIALECT=postgres
-DB_PORT=5432
+DB_PORT=${db_port_instalador}
 DB_USER=${empresa}
 DB_PASS=${senha_deploy}
 DB_NAME=${empresa}
 
 # DADOS REDIS
-REDIS_URI=redis://:${senha_deploy}@127.0.0.1:6379
+REDIS_URI=${redis_uri_instalador}
 REDIS_OPT_LIMITER_MAX=1
 REDIS_OPT_LIMITER_DURATION=3000
 # REDIS_URI_ACK=redis://:${senha_deploy}@127.0.0.1:6379
@@ -2593,6 +2647,7 @@ RESTARTPM2
 
 # Finaliza a instalação e mostra dados de acesso
 fim_instalacao_base() {
+  [ "${ALTA_PERFORMANCE}" = "1" ] && [ -f "ALTA_PERFORMANCE_MODE" ] && rm -f "ALTA_PERFORMANCE_MODE"
   banner
   printf "   ${GREEN} >> Instalação concluída...\n"
   echo
@@ -2713,6 +2768,32 @@ STOPPM2
   printf "${WHITE} >> Atualizando Backend da empresa ${empresa}...\n"
   echo
   cd "\$APP_DIR"
+
+  # ==== PASTA ESTÁTICA DE PERSONALIZAÇÕES ====
+  CUSTOM_DIR="/home/deploy/personalizacoes/${empresa}"
+
+  # Criar pasta de personalizações se não existir
+  if [ ! -d "\$CUSTOM_DIR" ]; then
+    printf "${YELLOW} >> Criando pasta de personalizações: \$CUSTOM_DIR${WHITE}\n"
+    mkdir -p "\$CUSTOM_DIR/assets"
+    mkdir -p "\$CUSTOM_DIR/public"
+
+    # Copiar arquivos atuais para a pasta de personalizações (primeira vez)
+    if [ -d "\$FRONTEND_DIR/src/assets" ]; then
+      cp -rf "\$FRONTEND_DIR/src/assets/"* "\$CUSTOM_DIR/assets/" 2>/dev/null || true
+      echo "  - Assets salvos: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
+    fi
+    if [ -d "\$FRONTEND_DIR/public" ]; then
+      cp -rf "\$FRONTEND_DIR/public/"* "\$CUSTOM_DIR/public/" 2>/dev/null || true
+      echo "  - Public salvos: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+    fi
+    printf "${GREEN} >> Pasta de personalizações criada com sucesso!${WHITE}\n"
+    printf "${YELLOW} >> DICA: Edite os arquivos em \$CUSTOM_DIR para personalizar logos/favicon${WHITE}\n"
+  else
+    printf "${GREEN} >> Pasta de personalizações encontrada: \$CUSTOM_DIR${WHITE}\n"
+  fi
+  # ==== FIM PASTA ESTÁTICA ====
+
   git fetch origin
   git checkout MULTI100-OFICIAL-u21
   git reset --hard origin/MULTI100-OFICIAL-u21
@@ -2765,7 +2846,27 @@ STOPPM2
   if [ -f "server.js" ]; then
     sed -i 's/3000/'"$frontend_port"'/g' server.js
   fi
-  
+
+  # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
+  if [ -d "\$CUSTOM_DIR" ]; then
+    printf "${WHITE} >> Aplicando personalizações de \$CUSTOM_DIR...\n"
+
+    # Restaurar assets
+    if [ -d "\$CUSTOM_DIR/assets" ] && [ "\$(ls -A \$CUSTOM_DIR/assets 2>/dev/null)" ]; then
+      cp -rf "\$CUSTOM_DIR/assets/"* "\$FRONTEND_DIR/src/assets/" 2>/dev/null || true
+      echo "  - Assets aplicados: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
+    fi
+
+    # Restaurar public
+    if [ -d "\$CUSTOM_DIR/public" ] && [ "\$(ls -A \$CUSTOM_DIR/public 2>/dev/null)" ]; then
+      cp -rf "\$CUSTOM_DIR/public/"* "\$FRONTEND_DIR/public/" 2>/dev/null || true
+      echo "  - Public aplicados: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+    fi
+
+    printf "${GREEN} >> Personalizações aplicadas com sucesso!${WHITE}\n"
+  fi
+  # ==== FIM RESTORE ====
+
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
   # Reiniciar apenas processos PM2 relacionados à empresa específica
@@ -2802,15 +2903,24 @@ otimiza_banco_atualizar() {
     return 0
   fi
   
+  [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    db_host_opt="127.0.0.1"
+    db_port_opt="7532"
+  else
+    db_host_opt="localhost"
+    db_port_opt="5432"
+  fi
+  
   banner
   printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
   echo
   {
     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
     sudo su - root <<EOF
-    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h localhost -d "${empresa}" --full --analyze
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "REINDEX DATABASE ${empresa};"
-    PGPASSWORD="$db_password" psql -U ${empresa} -h 127.0.0.1 -d ${empresa} -c "ANALYZE;"
+    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
+    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "ANALYZE;"
 EOF
 
     sleep 2
@@ -4086,6 +4196,21 @@ migrar_multiflow_pro() {
     sleep 2
   fi
   printf "${GREEN} >> Processo de migração para Multiflow-PRO finalizado. Voltando ao menu...${WHITE}\n"
+  sleep 2
+}
+
+# Instalação em modo Alta Performance (Redis, Postgres, PgBouncer via Docker)
+exec_instalador_alta_performance() {
+  local script_path="$(pwd)/tools/instalador_alta_performance.sh"
+  if [ ! -f "$script_path" ]; then
+    printf "${RED} >> Script não encontrado: $script_path${WHITE}\n"
+    sleep 2
+    return
+  fi
+  chmod 775 "$script_path"
+  bash "$script_path"
+  # Se o script sair sem exec do instalador (cancelamento), volta ao menu
+  printf "${GREEN} >> Voltando ao menu...${WHITE}\n"
   sleep 2
 }
 

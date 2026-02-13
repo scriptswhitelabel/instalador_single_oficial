@@ -153,11 +153,27 @@ criar_banco_apioficial() {
   printf "${WHITE} >> Criando banco de dados para API Oficial...\n"
   echo
   {
-    sudo -u postgres psql <<EOF
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      # Postgres em Docker (Alta Performance): conectar na porta 7532
+      printf "${WHITE} >> Modo Alta Performance: conectando ao Postgres no Docker...\n"
+      command -v psql >/dev/null 2>&1 || apt-get install -y postgresql-client >/dev/null 2>&1
+      export PGPASSWORD="${senha_deploy}"
+      if ! psql -h 127.0.0.1 -p 7532 -U "${empresa}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
+        # Banco já pode existir; verifica se está acessível
+        if ! psql -h 127.0.0.1 -p 7532 -U "${empresa}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
+          unset PGPASSWORD
+          trata_erro "criar_banco_apioficial (conexão com Postgres Docker)"
+        fi
+      fi
+      unset PGPASSWORD
+      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado (Postgres Docker).${WHITE}\n"
+    else
+      sudo -u postgres psql <<EOF
 CREATE DATABASE oficialseparado;
 \q
 EOF
-    printf "${GREEN} >> Banco de dados 'oficialseparado' criado com sucesso!${WHITE}\n"
+      printf "${GREEN} >> Banco de dados 'oficialseparado' criado com sucesso!${WHITE}\n"
+    fi
     sleep 2
   } || trata_erro "criar_banco_apioficial"
 }
@@ -171,6 +187,17 @@ configurar_env_apioficial() {
     # Carregar variáveis necessárias
     source $ARQUIVO_VARIAVEIS
     
+    # Modo Alta Performance: Postgres e Redis em Docker (portas 7532 e 1569)
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      db_host_apioficial="127.0.0.1"
+      db_port_apioficial="7532"
+      redis_uri_apioficial="redis://127.0.0.1:1569"
+    else
+      db_host_apioficial="localhost"
+      db_port_apioficial="5432"
+      redis_uri_apioficial="redis://:${senha_deploy}@127.0.0.1:6379"
+    fi
+    
     # Buscar JWT_REFRESH_SECRET do backend existente
     jwt_refresh_secret_backend=$(grep "^JWT_REFRESH_SECRET=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2-)
     
@@ -182,15 +209,15 @@ configurar_env_apioficial() {
     
     # Criar arquivo .env
     cat > /home/deploy/${empresa}/api_oficial/.env <<EOF
-DATABASE_LINK=postgresql://${empresa}:${senha_deploy}@localhost:5432/oficialseparado?schema=public
-DATABASE_URL=localhost
-DATABASE_PORT=5432
+DATABASE_LINK=postgresql://${empresa}:${senha_deploy}@${db_host_apioficial}:${db_port_apioficial}/oficialseparado?schema=public
+DATABASE_URL=${db_host_apioficial}
+DATABASE_PORT=${db_port_apioficial}
 DATABASE_USER=${empresa}
 DATABASE_PASSWORD=${senha_deploy}
 DATABASE_NAME=oficialseparado
 TOKEN_ADMIN=adminpro
 URL_BACKEND_MULT100=https://${subdominio_backend}
-REDIS_URI=redis://:${senha_deploy}@127.0.0.1:6379
+REDIS_URI=${redis_uri_apioficial}
 PORT=${default_apioficial_port}
 NAME_ADMIN=SetupAutomatizado
 EMAIL_ADMIN=admin@multi100.com.br

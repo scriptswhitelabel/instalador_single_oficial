@@ -883,6 +883,13 @@ cria_banco_instancia() {
   DB_HOST_POSTGRES=${DB_HOST_POSTGRES:-localhost}
   DB_PORT_POSTGRES=${DB_PORT_POSTGRES:-5432}
   
+  # Modo Alta Performance: Postgres em Docker (porta 7532); .env do app usa PgBouncer (6732)
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    DB_HOST_POSTGRES="127.0.0.1"
+    DB_PORT_POSTGRES="7532"
+    printf "${GREEN} >> Modo Alta Performance: usando Postgres Docker (porta 7532) para criar banco.${WHITE}\n"
+  fi
+  
   if [ -z "${DB_USER_POSTGRES}" ] || [ -z "${DB_PASS_POSTGRES}" ]; then
     printf "${RED} >> ERRO: Não foi possível obter credenciais do banco de dados do arquivo .env.${WHITE}\n"
     printf "${YELLOW} >> Verifique se DB_USER e DB_PASS estão definidos em ${ENV_BACKEND_PRINCIPAL}${WHITE}\n"
@@ -895,8 +902,10 @@ cria_banco_instancia() {
   printf "${WHITE} >>   User: ${DB_USER_POSTGRES}${WHITE}\n"
   echo
   
-  # Verificar se PostgreSQL está rodando (apenas para banco local)
-  if [ "${DB_HOST_POSTGRES}" = "localhost" ] || [ "${DB_HOST_POSTGRES}" = "127.0.0.1" ]; then
+  # Verificar se PostgreSQL está rodando (apenas para banco local; não faz sentido em Alta Performance/Docker)
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    printf "${WHITE} >> Modo Alta Performance: Postgres em Docker, pulando verificação systemctl.${WHITE}\n"
+  elif [ "${DB_HOST_POSTGRES}" = "localhost" ] || [ "${DB_HOST_POSTGRES}" = "127.0.0.1" ]; then
     if ! systemctl is-active --quiet postgresql; then
       printf "${YELLOW} >> PostgreSQL não está rodando. Tentando iniciar...${WHITE}\n"
       if systemctl start postgresql 2>/dev/null; then
@@ -1240,6 +1249,14 @@ instala_backend_instancia() {
   
   {
     sleep 2
+    carregar_variaveis_base
+    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+      db_host_nova="127.0.0.1"
+      db_port_nova="6732"
+    else
+      db_host_nova="localhost"
+      db_port_nova="5432"
+    fi
     subdominio_backend_clean=$(echo "${nova_subdominio_backend/https:\/\//}")
     subdominio_backend_clean=${subdominio_backend_clean%%/*}
     subdominio_backend_final=https://${subdominio_backend_clean}
@@ -1257,9 +1274,9 @@ PROXY_PORT=443
 PORT=${nova_backend_port}
 
 # CREDENCIAIS BD
-DB_HOST=localhost
+DB_HOST=${db_host_nova}
 DB_DIALECT=postgres
-DB_PORT=5432
+DB_PORT=${db_port_nova}
 DB_USER=${nova_empresa}
 DB_PASS=${senha_deploy}
 DB_NAME=${nova_empresa}
