@@ -44,31 +44,42 @@ ler_retencao_dias() {
 
 # Executa apenas o backup (chamado pelo cron ou com --backup)
 executar_backup() {
+  export PATH="/usr/bin:/usr/local/bin:${PATH}"
+  mkdir -p "${BACKUP_DIR}"
+  chown deploy:deploy "${BACKUP_DIR}"
+  LOG="${BACKUP_DIR}/backup.log"
+
   RETENCAO_DIAS=$(ler_retencao_dias)
+  cd "${INSTALADOR_DIR}" || { echo "$(date): ERRO ao acessar ${INSTALADOR_DIR}" >> "${LOG}"; return 1; }
+
   if [ ! -f "${ARQUIVO_VARIAVEIS}" ]; then
-    echo "VARIAVEIS_INSTALACAO não encontrado. Backup cancelado." >> "${BACKUP_DIR}/backup.log" 2>&1
+    echo "$(date): VARIAVEIS_INSTALACAO não encontrado em ${ARQUIVO_VARIAVEIS}. Backup cancelado." >> "${LOG}" 2>&1
     return 1
   fi
   # shellcheck source=/dev/null
   source "${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  empresa=$(echo "${empresa:-}" | tr -d '\r\n' | xargs)
+  senha_deploy=$(echo "${senha_deploy:-}" | tr -d '\r\n' | xargs)
+
   if [ "${ALTA_PERFORMANCE}" != "1" ]; then
-    echo "$(date): Instalação não é Alta Performance. Backup cancelado." >> "${BACKUP_DIR}/backup.log" 2>&1
+    echo "$(date): Instalação não é Alta Performance. Backup cancelado." >> "${LOG}" 2>&1
     return 0
   fi
   if [ -z "${empresa}" ] || [ -z "${senha_deploy}" ]; then
-    echo "$(date): empresa ou senha_deploy não definidos." >> "${BACKUP_DIR}/backup.log" 2>&1
+    echo "$(date): empresa ou senha_deploy vazios após ler ${ARQUIVO_VARIAVEIS}" >> "${LOG}" 2>&1
     return 1
   fi
 
-  mkdir -p "${BACKUP_DIR}"
-  chown deploy:deploy "${BACKUP_DIR}"
   DATA=$(date +%Y-%m-%d_%H-%M-%S)
   export PGPASSWORD="${senha_deploy}"
 
-  # Listar bancos (exclui templates) - usar conexão direta ao Postgres (porta 7532)
-  BANCOS=$(psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${BACKUP_DIR}/backup.log")
+  PSQL_CMD=$(command -v psql 2>/dev/null || echo "psql")
+  PGDUMP_CMD=$(command -v pg_dump 2>/dev/null || echo "pg_dump")
+
+  # Listar bancos (exclui templates) - conexão direta ao Postgres (porta 7532)
+  BANCOS=$("${PSQL_CMD}" -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${LOG}")
   if [ -z "${BANCOS}" ]; then
-    echo "$(date): Nenhum banco listado ou falha de conexão em ${DB_HOST}:${DB_PORT}" >> "${BACKUP_DIR}/backup.log" 2>&1
+    echo "$(date): Nenhum banco listado ou falha de conexão em ${DB_HOST}:${DB_PORT} (ver erros acima)" >> "${LOG}" 2>&1
     unset PGPASSWORD
     return 1
   fi
@@ -78,16 +89,18 @@ executar_backup() {
     [ -z "${DB_CLEAN}" ] && continue
     ARQUIVO="${BACKUP_DIR}/backup-${DB_CLEAN}-${DATA}.sql.gz"
     TMP_SQL=$(mktemp)
-    if pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${BACKUP_DIR}/backup.log"; then
+    if "${PGDUMP_CMD}" -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${LOG}"; then
       if [ -s "${TMP_SQL}" ]; then
         gzip -c "${TMP_SQL}" > "${ARQUIVO}"
         chown deploy:deploy "${ARQUIVO}"
-        echo "$(date): OK ${DB_CLEAN} -> ${ARQUIVO} ($(stat -c%s "${ARQUIVO}" 2>/dev/null || echo 0) bytes)" >> "${BACKUP_DIR}/backup.log" 2>&1
+        echo "$(date): OK ${DB_CLEAN} -> ${ARQUIVO} ($(stat -c%s "${ARQUIVO}" 2>/dev/null || echo 0) bytes)" >> "${LOG}" 2>&1
       else
-        echo "$(date): AVISO ${DB_CLEAN} - pg_dump retornou 0 bytes. Verifique permissões e conexão." >> "${BACKUP_DIR}/backup.log" 2>&1
+        gzip -c "${TMP_SQL}" > "${ARQUIVO}"
+        chown deploy:deploy "${ARQUIVO}"
+        echo "$(date): AVISO ${DB_CLEAN} - pg_dump retornou 0 bytes (arquivo vazio salvo para diagnóstico)" >> "${LOG}" 2>&1
       fi
     else
-      echo "$(date): ERRO ao fazer dump de ${DB_CLEAN} (ver mensagens acima no log)" >> "${BACKUP_DIR}/backup.log" 2>&1
+      echo "$(date): ERRO ao fazer dump de ${DB_CLEAN} (ver mensagens acima no log)" >> "${LOG}" 2>&1
     fi
     rm -f "${TMP_SQL}"
   done
