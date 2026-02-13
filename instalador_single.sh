@@ -2696,7 +2696,7 @@ fim_instalacao_base() {
   echo
   if [ "${ALTA_PERFORMANCE}" = "1" ] && (docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer || [ "${portainer_instalado}" = "1" ]); then
     printf "   ${WHITE}Portainer: ${BLUE}https://${ip_atual}:${portainer_porta}${WHITE}\n"
-    printf "   ${WHITE}Usuário   ${BLUE}deploy${WHITE}\n"
+    printf "   ${WHITE}Usuário   ${BLUE}admin${WHITE}\n"
     printf "   ${WHITE}Senha     ${BLUE}(mesma senha do deploy)${WHITE}\n"
     echo
   fi
