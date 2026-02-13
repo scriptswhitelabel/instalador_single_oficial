@@ -120,6 +120,10 @@ main() {
   printf "${YELLOW}   O instalador ${RED}NÃO${YELLOW} irá instalar Postgres nem Redis nativos no sistema.${WHITE}\n"
   printf "${WHITE}   Tudo rodará via Docker (containers).${WHITE}\n"
   echo
+  printf "${WHITE}   Requisitos recomendados do servidor para operar bem:${WHITE}\n"
+  printf "${WHITE}   • Processador: 4 a 6 CORE${WHITE}\n"
+  printf "${WHITE}   • Memória RAM: 12 a 16 GB${WHITE}\n"
+  echo
   printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
   echo
   printf "${WHITE}   Deseja continuar? (S/N):${WHITE}\n"
@@ -142,7 +146,7 @@ main() {
       exit 1
     fi
     printf "${WHITE} >> Informe a senha do deploy (será usada no Postgres e no PgBouncer):${WHITE}\n"
-    read -s -p "> " senha_deploy
+    read -p "> " senha_deploy
     echo
     if [ -z "${senha_deploy}" ]; then
       printf "${RED} >> ERRO: Senha do deploy não pode ser vazia.${WHITE}\n"
