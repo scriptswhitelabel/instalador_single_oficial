@@ -65,8 +65,8 @@ executar_backup() {
   DATA=$(date +%Y-%m-%d_%H-%M-%S)
   export PGPASSWORD="${senha_deploy}"
 
-  # Listar bancos (exclui templates)
-  BANCOS=$(psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>/dev/null)
+  # Listar bancos (exclui templates) - usar conexão direta ao Postgres (porta 7532)
+  BANCOS=$(psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${BACKUP_DIR}/backup.log")
   if [ -z "${BANCOS}" ]; then
     echo "$(date): Nenhum banco listado ou falha de conexão em ${DB_HOST}:${DB_PORT}" >> "${BACKUP_DIR}/backup.log" 2>&1
     unset PGPASSWORD
@@ -77,12 +77,19 @@ executar_backup() {
     DB_CLEAN=$(echo "${DB}" | tr -d '\r\n')
     [ -z "${DB_CLEAN}" ] && continue
     ARQUIVO="${BACKUP_DIR}/backup-${DB_CLEAN}-${DATA}.sql.gz"
-    if pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d "${DB_CLEAN}" 2>/dev/null | gzip > "${ARQUIVO}"; then
-      chown deploy:deploy "${ARQUIVO}"
-      echo "$(date): OK ${DB_CLEAN} -> ${ARQUIVO}" >> "${BACKUP_DIR}/backup.log" 2>&1
+    TMP_SQL=$(mktemp)
+    if pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${empresa}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${BACKUP_DIR}/backup.log"; then
+      if [ -s "${TMP_SQL}" ]; then
+        gzip -c "${TMP_SQL}" > "${ARQUIVO}"
+        chown deploy:deploy "${ARQUIVO}"
+        echo "$(date): OK ${DB_CLEAN} -> ${ARQUIVO} ($(stat -c%s "${ARQUIVO}" 2>/dev/null || echo 0) bytes)" >> "${BACKUP_DIR}/backup.log" 2>&1
+      else
+        echo "$(date): AVISO ${DB_CLEAN} - pg_dump retornou 0 bytes. Verifique permissões e conexão." >> "${BACKUP_DIR}/backup.log" 2>&1
+      fi
     else
-      echo "$(date): ERRO ao fazer dump de ${DB_CLEAN}" >> "${BACKUP_DIR}/backup.log" 2>&1
+      echo "$(date): ERRO ao fazer dump de ${DB_CLEAN} (ver mensagens acima no log)" >> "${BACKUP_DIR}/backup.log" 2>&1
     fi
+    rm -f "${TMP_SQL}"
   done
 
   # Remover backups mais antigos que RETENCAO_DIAS
