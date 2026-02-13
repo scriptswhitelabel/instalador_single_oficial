@@ -2648,6 +2648,43 @@ RESTARTPM2
 # Finaliza a instalação e mostra dados de acesso
 fim_instalacao_base() {
   [ "${ALTA_PERFORMANCE}" = "1" ] && [ -f "ALTA_PERFORMANCE_MODE" ] && rm -f "ALTA_PERFORMANCE_MODE"
+
+  # Instalar Portainer ao final quando Alta Performance (senha admin = senha_deploy)
+  if [ "${ALTA_PERFORMANCE}" = "1" ] && [ -n "${senha_deploy}" ]; then
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
+      printf "   ${WHITE}>> Instalando Portainer (senha admin = senha do deploy)...${WHITE}\n"
+      PW_FILE=$(mktemp)
+      printf '%s' "${senha_deploy}" > "${PW_FILE}"
+      chmod 600 "${PW_FILE}"
+      docker volume create portainer_data 2>/dev/null || true
+      PORTAINER_PORTA=9443
+      if docker run -d -p 9000:9000 -p ${PORTAINER_PORTA}:9443 --name portainer --restart=always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        -v "${PW_FILE}:/run/portainer_admin_pw:ro" \
+        portainer/portainer-ce:latest --admin-password-file /run/portainer_admin_pw 2>/dev/null; then
+        printf "   ${GREEN}>> Portainer instalado. Senha do admin: mesma do deploy. Acesso: https://IP:${PORTAINER_PORTA}${WHITE}\n"
+        echo "portainer_porta=${PORTAINER_PORTA}" >> "$ARQUIVO_VARIAVEIS"
+        echo "portainer_instalado=1" >> "$ARQUIVO_VARIAVEIS"
+      else
+        docker rm -f portainer 2>/dev/null || true
+        if docker run -d -p 9000:9000 -p ${PORTAINER_PORTA}:9443 --name portainer --restart=always \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v portainer_data:/data \
+          portainer/portainer-ce:latest 2>/dev/null; then
+          printf "   ${YELLOW}>> Portainer instalado. Defina a senha no primeiro acesso (https://IP:${PORTAINER_PORTA}).${WHITE}\n"
+          echo "portainer_porta=${PORTAINER_PORTA}" >> "$ARQUIVO_VARIAVEIS"
+          echo "portainer_instalado=1" >> "$ARQUIVO_VARIAVEIS"
+        fi
+      fi
+      rm -f "${PW_FILE}"
+      echo
+    fi
+  fi
+
+  [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  portainer_porta=${portainer_porta:-9443}
+
   banner
   printf "   ${GREEN} >> Instalação concluída...\n"
   echo
@@ -2657,8 +2694,16 @@ fim_instalacao_base() {
   printf "   ${WHITE}Usuário ${BLUE}admin@multi100.com.br\n"
   printf "   ${WHITE}Senha   ${BLUE}adminpro\n"
   echo
-  printf "${WHITE}>> Aperte qualquer tecla para voltar ao menu principal ou CTRL+C Para finalizar esse script\n"
-  read -p ""
+  if [ "${ALTA_PERFORMANCE}" = "1" ] && (docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer || [ "${portainer_instalado}" = "1" ]); then
+    printf "   ${WHITE}Portainer: ${BLUE}https://${ip_atual}:${portainer_porta}${WHITE}\n"
+    printf "   ${WHITE}Usuário   ${BLUE}deploy${WHITE}\n"
+    printf "   ${WHITE}Senha     ${BLUE}(mesma senha do deploy)${WHITE}\n"
+    echo
+  fi
+  if [ "${ALTA_PERFORMANCE}" != "1" ]; then
+    printf "${WHITE}>> Aperte qualquer tecla para voltar ao menu principal ou CTRL+C Para finalizar esse script\n"
+    read -p ""
+  fi
   echo
 }
 
@@ -4213,6 +4258,30 @@ exec_instalador_alta_performance() {
   printf "${GREEN} >> Voltando ao menu...${WHITE}\n"
   sleep 2
 }
+
+# Modo: executar instalação completa Alta Performance sem menu (chamado pelo instalador_alta_performance.sh)
+if [ "${1:-}" = "--executar-instalacao-alta-performance" ]; then
+  [ -f "ALTA_PERFORMANCE_MODE" ] && source "ALTA_PERFORMANCE_MODE" 2>/dev/null
+  [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  export ALTA_PERFORMANCE=1
+  instalacao_base || exit 1
+  exit 0
+fi
+
+# Modo: apenas coletar variáveis para instalação Alta Performance (chamado pelo instalador_alta_performance.sh)
+if [ "${1:-}" = "--coletar-variaveis-alta-performance" ]; then
+  [ -f "ALTA_PERFORMANCE_MODE" ] && source "ALTA_PERFORMANCE_MODE" 2>/dev/null
+  export ALTA_PERFORMANCE=1
+  questoes_dns_base || trata_erro "questoes_dns_base"
+  verificar_dns_base || trata_erro "verificar_dns_base"
+  questoes_variaveis_base || trata_erro "questoes_variaveis_base"
+  define_proxy_base || trata_erro "define_proxy_base"
+  define_portas_base || trata_erro "define_portas_base"
+  confirma_dados_instalacao_base || trata_erro "confirma_dados_instalacao_base"
+  salvar_variaveis || trata_erro "salvar_variaveis"
+  salvar_etapa 1
+  exit 0
+fi
 
 carregar_variaveis
 menu

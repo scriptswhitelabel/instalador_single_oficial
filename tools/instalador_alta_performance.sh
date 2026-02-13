@@ -135,23 +135,28 @@ main() {
     exit 0
   fi
 
-  # Obter empresa e senha_deploy
-  if ! carregar_variaveis_se_existir; then
-    echo
-    printf "${WHITE} >> Informe o nome da empresa (será usado no banco e no stack):${WHITE}\n"
-    read -p "> " empresa
-    empresa=$(echo "${empresa}" | tr -d '[:space:]')
-    if [ -z "${empresa}" ]; then
-      printf "${RED} >> ERRO: Nome da empresa não pode ser vazio.${WHITE}\n"
-      exit 1
-    fi
-    printf "${WHITE} >> Informe a senha do deploy (será usada no Postgres e no PgBouncer):${WHITE}\n"
-    read -p "> " senha_deploy
-    echo
-    if [ -z "${senha_deploy}" ]; then
-      printf "${RED} >> ERRO: Senha do deploy não pode ser vazia.${WHITE}\n"
-      exit 1
-    fi
+  # Coletar todas as informações da instalação (igual ao instalador normal)
+  printf "${WHITE} >> Serão solicitadas todas as informações da instalação (DNS, URLs, email, proxy, portas, token, repositório, etc.).${WHITE}\n"
+  echo
+  printf "${GREEN} >> Pressione Enter para iniciar...${WHITE}\n"
+  read -r
+
+  echo "ALTA_PERFORMANCE=1" > "${MODE_FILE}"
+  cd "${INSTALADOR_DIR}" || exit 1
+  if ! bash "${INSTALADOR_DIR}/instalador_single.sh" --coletar-variaveis-alta-performance; then
+    printf "${RED} >> Coleta de variáveis interrompida ou falhou.${WHITE}\n"
+    rm -f "${MODE_FILE}"
+    sleep 3
+    exit 1
+  fi
+
+  # Carregar empresa e senha (já salvos em VARIAVEIS_INSTALACAO)
+  # shellcheck source=/dev/null
+  source "${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  if [ -z "${empresa}" ] || [ -z "${senha_deploy}" ]; then
+    printf "${RED} >> ERRO: empresa ou senha_deploy não encontrados em ${ARQUIVO_VARIAVEIS}.${WHITE}\n"
+    sleep 3
+    exit 1
   fi
 
   printf "${WHITE} >> Gerando stack Docker (empresa: ${empresa})...${WHITE}\n"
@@ -191,19 +196,23 @@ senha_deploy=${senha_deploy}
 EOF
   printf "${GREEN} >> Modo Alta Performance registrado.${WHITE}\n"
   echo
-  printf "${YELLOW}   Use a mesma empresa e senha ao preencher as variáveis no instalador.${WHITE}\n"
-  printf "${WHITE}   Empresa: ${BLUE}${empresa}${WHITE}\n"
+  printf "${WHITE} >> Iniciando instalação automaticamente (sem pausas)...${WHITE}\n"
   echo
-  printf "${GREEN} >> Pressione Enter para abrir o Menu Principal e escolha a opção 1 - Instalar.${WHITE}\n"
-  read -r
 
   cd "${INSTALADOR_DIR}" || exit 1
-  if [ -f "${INSTALADOR_DIR}/instalador_single.sh" ]; then
-    exec bash "${INSTALADOR_DIR}/instalador_single.sh"
-  else
+  if [ ! -f "${INSTALADOR_DIR}/instalador_single.sh" ]; then
     printf "${RED} >> instalador_single.sh não encontrado.${WHITE}\n"
     exit 1
   fi
+
+  if ! bash "${INSTALADOR_DIR}/instalador_single.sh" --executar-instalacao-alta-performance; then
+    printf "${RED} >> A instalação encontrou erros. Abrindo menu para verificação.${WHITE}\n"
+    sleep 3
+  fi
+
+  printf "${GREEN} >> Pressione Enter para abrir o Menu Principal.${WHITE}\n"
+  read -r
+  exec bash "${INSTALADOR_DIR}/instalador_single.sh"
 }
 
 main "$@"
