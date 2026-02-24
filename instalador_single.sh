@@ -2959,7 +2959,12 @@ otimiza_banco_atualizar() {
     return 0
   fi
   
-  [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  # Usar arquivo da instância SELECIONADA para não sobrescrever empresa com a primária (ex.: chat em vez de chat2)
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+  fi
   if [ "${ALTA_PERFORMANCE}" = "1" ]; then
     db_host_opt="127.0.0.1"
     db_port_opt="7532"
