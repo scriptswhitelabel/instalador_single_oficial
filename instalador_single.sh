@@ -2330,6 +2330,7 @@ REACT_APP_REQUIRE_BUSINESS_MANAGEMENT=TRUE
 REACT_APP_NAME_SYSTEM=${nome_titulo}
 REACT_APP_NUMBER_SUPPORT=${numero_suporte}
 SERVER_PORT=${frontend_port}
+PORT=${frontend_port}
 [-]EOF
 EOF
 
@@ -2801,8 +2802,13 @@ STOPPM2
   echo
   sleep 2
 
-  source /home/deploy/${empresa}/frontend/.env
+  source /home/deploy/${empresa}/frontend/.env 2>/dev/null || true
   frontend_port=${SERVER_PORT:-3000}
+  # Carregar porta da transcrição da instância (após git reset --hard o main.py volta ao padrão)
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+  porta_transcricao=${porta_transcricao:-4002}
   sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -2853,7 +2859,16 @@ STOPPM2
   git fetch origin
   git checkout MULTI100-OFICIAL-u21
   git reset --hard origin/MULTI100-OFICIAL-u21
-  
+
+  # Reaplicar porta da transcrição (git reset reverte main.py para o padrão 4002)
+  if [ -d "\$APP_DIR/api_transcricao" ] && [ -f "\$APP_DIR/api_transcricao/main.py" ]; then
+    main_py_transc="\$APP_DIR/api_transcricao/main.py"
+    sed -i "s|port=[0-9][0-9][0-9][0-9]|port=${porta_transcricao}|g" "\$main_py_transc" 2>/dev/null || true
+    sed -i "s|port = [0-9][0-9][0-9][0-9]|port = ${porta_transcricao}|g" "\$main_py_transc" 2>/dev/null || true
+    sed -i "s|porta [0-9][0-9][0-9][0-9]|porta ${porta_transcricao}|g" "\$main_py_transc" 2>/dev/null || true
+    printf " >> Porta da transcrição reaplicada no main.py: ${porta_transcricao}\n"
+  fi
+
   if [ ! -d "\$BACKEND_DIR" ]; then
     echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
     exit 1
@@ -2898,7 +2913,14 @@ STOPPM2
   
   npm prune --force > /dev/null 2>&1
   npm install --force
-  
+
+  # Garantir PORT= e SERVER_PORT= no .env do frontend (server.js lê PORT; git reset pode ter revertido)
+  if [ -f ".env" ]; then
+    if grep -q "^PORT=" .env 2>/dev/null; then sed -i "s|^PORT=.*|PORT=$frontend_port|" .env; else echo "PORT=$frontend_port" >> .env; fi
+    if grep -q "^SERVER_PORT=" .env 2>/dev/null; then sed -i "s|^SERVER_PORT=.*|SERVER_PORT=$frontend_port|" .env; else echo "SERVER_PORT=$frontend_port" >> .env; fi
+    printf " >> PORT e SERVER_PORT definidos no .env do frontend: $frontend_port\n"
+  fi
+
   if [ -f "server.js" ]; then
     sed -i 's/3000/'"$frontend_port"'/g' server.js
   fi
