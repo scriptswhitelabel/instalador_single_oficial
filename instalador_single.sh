@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 7.0\n"
+  printf "                                INSTALADOR 8.0\n"
   printf "\n\n"
 }
 
@@ -739,7 +739,15 @@ atualizar_base() {
     menu
     return
   fi
-  
+
+  # Validar token antes de atualizar; se expirado, pedir novo e atualizar .git/config + variáveis
+  if ! validar_e_atualizar_token_antes_atualizar; then
+    printf "${RED} >> Atualização cancelada. Voltando ao menu principal...${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+
   backup_app_atualizar || trata_erro "backup_app_atualizar"
   instala_ffmpeg_base || trata_erro "instala_ffmpeg_base"
   config_cron_base || trata_erro "config_cron_base"
@@ -1759,6 +1767,102 @@ codifica_clone_base() {
     *) printf '%%%02X' "'$c" ;;
     esac
   done
+}
+
+# Testa se o token tem acesso ao repositório (mesmo teste do git clone)
+# Usa variáveis globais: repo_url, github_token. Retorna 0 se válido, 1 se inválido.
+validar_token_git_clone() {
+  local token="${1:-$github_token}"
+  local url_base
+  url_base=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^[^@]*@||')
+  [ -z "$url_base" ] && url_base=$(echo "${repo_url}" | sed 's|^https://||')
+  local token_encoded
+  token_encoded=$(codifica_clone_base "$token")
+  local repo_url_com_token="https://${token_encoded}@${url_base}"
+  local test_dir
+  test_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test_clone_$(date +%s)"
+  if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>&1; then
+    rm -rf "${test_dir}" >/dev/null 2>&1
+    return 0
+  fi
+  rm -rf "${test_dir}" >/dev/null 2>&1
+  return 1
+}
+
+# Valida token antes da atualização; se expirado, pede novo, valida e atualiza .git/config + arquivo de variáveis
+validar_e_atualizar_token_antes_atualizar() {
+  # Garantir que temos repo_url e github_token da instância selecionada
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+  if [ -z "${repo_url}" ] || [ -z "${github_token}" ]; then
+    printf "${RED} >> ERRO: repo_url ou github_token não encontrados no arquivo da instância.${WHITE}\n"
+    return 1
+  fi
+
+  banner
+  printf "${WHITE} >> Validando token com teste de git clone (repositório da instância)...\n"
+  echo
+
+  if validar_token_git_clone; then
+    printf "${GREEN} >> Token válido. Continuando a atualização...${WHITE}\n"
+    echo
+    sleep 2
+    return 0
+  fi
+
+  printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  printf "${RED} >> O Token não está válido (expirado ou sem acesso).${WHITE}\n"
+  echo
+  printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
+  echo
+  read -p "> " novo_token
+  novo_token=$(echo "$novo_token" | tr -d '[:space:]')
+  if [ -z "$novo_token" ]; then
+    printf "${RED} >> Token não informado. Atualização cancelada.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  printf "${WHITE} >> Validando o novo token...\n"
+  echo
+  if ! validar_token_git_clone "$novo_token"; then
+    printf "${RED} >> O novo token também não é válido. Atualização cancelada.${WHITE}\n"
+    printf "${YELLOW} >> Verifique o token e tente novamente.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  printf "${GREEN} >> Novo token validado. Atualizando configuração...${WHITE}\n"
+  echo
+
+  local git_config="/home/deploy/${empresa}/.git/config"
+  if [ ! -f "$git_config" ]; then
+    printf "${RED} >> ERRO: Arquivo não encontrado: ${git_config}${WHITE}\n"
+    return 1
+  fi
+
+  cp "$git_config" "${git_config}.backup.$(date +%Y%m%d_%H%M%S)"
+  local novo_token_encoded
+  novo_token_encoded=$(codifica_clone_base "$novo_token")
+  local novo_token_encoded_sed="${novo_token_encoded//&/\\&}"
+  sed -i "s|url = https://[^@]*@|url = https://${novo_token_encoded_sed}@|" "$git_config"
+  printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
+
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_USADO"; then
+      novo_token_sed="${novo_token//&/\\&}"
+      sed -i "s|^github_token=.*|github_token=${novo_token_sed}|" "$ARQUIVO_VARIAVEIS_USADO"
+    else
+      echo "github_token=${novo_token}" >> "$ARQUIVO_VARIAVEIS_USADO"
+    fi
+    printf "${GREEN} >> Token atualizado no arquivo de variáveis da instância.${WHITE}\n"
+  fi
+
+  github_token="$novo_token"
+  echo
+  sleep 2
+  return 0
 }
 
 # Definir versões disponíveis para instalação
