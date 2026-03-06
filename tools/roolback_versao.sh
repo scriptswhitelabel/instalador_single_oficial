@@ -83,12 +83,35 @@ validar_token_git_clone() {
   token_encoded=$(codifica_clone_base "$token")
   local repo_url_com_token="https://${token_encoded}@${url_base}"
   local test_dir="${INSTALADOR_DIR}/test_clone_rollback_$(date +%s)"
+  # Evitar que o Git peça senha interativamente (usar só o token da URL)
+  export GIT_TERMINAL_PROMPT=0
   if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>&1; then
     rm -rf "${test_dir}" >/dev/null 2>&1
+    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
     return 0
   fi
   rm -rf "${test_dir}" >/dev/null 2>&1
+  unset GIT_TERMINAL_PROMPT 2>/dev/null || true
   return 1
+}
+
+# Grava o token atual no .git/config do repositório (para fetch/checkout/pull usarem o mesmo token)
+aplicar_token_no_git_config_rollback() {
+  local token="${1:-$github_token}"
+  [ -z "$token" ] && return 1
+  local git_config="/home/deploy/${empresa}/.git/config"
+  [ ! -f "$git_config" ] && return 1
+  local url_atual
+  url_atual=$(grep -E "^\s*url\s*=" "$git_config" | head -1 | sed 's/^[^=]*=\s*//' | tr -d ' ')
+  local path_repo
+  path_repo=$(echo "$url_atual" | sed 's|https://[^@]*@||' | sed 's|^[^@]*@||')
+  [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
+  local token_encoded
+  token_encoded=$(codifica_clone_base "$token")
+  local nova_url="https://${token_encoded}@${path_repo}"
+  local nova_url_sed="${nova_url//&/\\&}"
+  sed -i "s|^[[:space:]]*url[[:space:]]*=.*|  url = ${nova_url_sed}|" "$git_config"
+  return 0
 }
 
 # Valida token; se expirado, pede novo, valida e atualiza .git/config + VARIAVEIS_INSTALACAO
@@ -101,6 +124,8 @@ validar_e_atualizar_token_rollback() {
   printf "${WHITE} >> Validando token com teste de git clone...\n"
   if validar_token_git_clone; then
     printf "${GREEN} >> Token válido.${WHITE}\n"
+    # Garantir que o .git/config do repositório use este token (para fetch/checkout/pull)
+    aplicar_token_no_git_config_rollback && printf "${GREEN} >> Token aplicado no repositório (.git/config).${WHITE}\n"
     return 0
   fi
 
@@ -731,7 +756,7 @@ retornar_versao_principal() {
   fi
   echo
   
-  # 2) Fazer checkout para branch oficial
+  # 2) Fazer checkout para branch oficial (fetch + reset --hard evita "local changes would be overwritten")
   printf "${WHITE} [2/9] Fazendo checkout para branch MULTI100-OFICIAL-u21...\n"
   sudo su - deploy <<CHECKOUT
 cd "$APP_DIR"
@@ -740,9 +765,10 @@ cd "$APP_DIR"
 chmod -R u+w .git 2>/dev/null || true
 chown -R deploy:deploy .git 2>/dev/null || true
 
+# fetch e reset --hard (descarta alterações locais e evita erro de checkout com arquivos modificados)
 git fetch origin
-git checkout MULTI100-OFICIAL-u21
 git reset --hard origin/MULTI100-OFICIAL-u21
+git checkout -B MULTI100-OFICIAL-u21 origin/MULTI100-OFICIAL-u21
 CHECKOUT
   if [ $? -ne 0 ]; then
     trata_erro "git checkout"
