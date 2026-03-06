@@ -1776,6 +1776,7 @@ validar_token_git_clone() {
   local url_base
   url_base=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^[^@]*@||')
   [ -z "$url_base" ] && url_base=$(echo "${repo_url}" | sed 's|^https://||')
+  [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
   local token_encoded
   token_encoded=$(codifica_clone_base "$token")
   local repo_url_com_token="https://${token_encoded}@${url_base}"
@@ -1847,6 +1848,8 @@ validar_e_atualizar_token_antes_atualizar() {
   novo_token_encoded=$(codifica_clone_base "$novo_token")
   local novo_token_encoded_sed="${novo_token_encoded//&/\\&}"
   sed -i "s|url = https://[^@]*@|url = https://${novo_token_encoded_sed}@|" "$git_config"
+  # Garantir que a URL do remote termina em .git (evita "does not appear to be a git repository")
+  sed -i '/url = https:\/\/.*@github\.com\// { /\.git$/! s|$|.git| }' "$git_config"
   printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
 
   if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then

@@ -57,6 +57,97 @@ trata_erro() {
   exit 1
 }
 
+# Codificar token para URL (caracteres especiais em %XX)
+codifica_clone_base() {
+  local length="${#1}"
+  for ((i = 0; i < length; i++)); do
+    local c="${1:i:1}"
+    case $c in
+    [a-zA-Z0-9.~_-]) printf "$c" ;;
+    *) printf '%%%02X' "'$c" ;;
+    esac
+  done
+}
+
+# Testa se o token tem acesso ao repositório (git clone). Retorna 0 se válido, 1 se inválido.
+validar_token_git_clone() {
+  local token="${1:-$github_token}"
+  [ -z "$token" ] && return 1
+  local url_base
+  url_base=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^[^@]*@||')
+  [ -z "$url_base" ] && url_base=$(echo "${repo_url}" | sed 's|^https://||')
+  [ -z "$url_base" ] && return 1
+  # Garantir que a URL do repositório termina em .git
+  [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
+  local token_encoded
+  token_encoded=$(codifica_clone_base "$token")
+  local repo_url_com_token="https://${token_encoded}@${url_base}"
+  local test_dir="${INSTALADOR_DIR}/test_clone_rollback_$(date +%s)"
+  if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>&1; then
+    rm -rf "${test_dir}" >/dev/null 2>&1
+    return 0
+  fi
+  rm -rf "${test_dir}" >/dev/null 2>&1
+  return 1
+}
+
+# Valida token; se expirado, pede novo, valida e atualiza .git/config + VARIAVEIS_INSTALACAO
+validar_e_atualizar_token_rollback() {
+  if [ -z "${repo_url}" ] || [ -z "${github_token}" ]; then
+    printf "${YELLOW} >> repo_url ou github_token não encontrados. Pulando validação de token.${WHITE}\n"
+    return 0
+  fi
+
+  printf "${WHITE} >> Validando token com teste de git clone...\n"
+  if validar_token_git_clone; then
+    printf "${GREEN} >> Token válido.${WHITE}\n"
+    return 0
+  fi
+
+  printf "${RED} >> O Token não está válido (expirado ou sem acesso).${WHITE}\n"
+  printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
+  read -p "> " novo_token
+  novo_token=$(echo "$novo_token" | tr -d '[:space:]')
+  if [ -z "$novo_token" ]; then
+    printf "${RED} >> Token não informado.${WHITE}\n"
+    return 1
+  fi
+
+  printf "${WHITE} >> Validando o novo token...\n"
+  if ! validar_token_git_clone "$novo_token"; then
+    printf "${RED} >> O novo token também não é válido.${WHITE}\n"
+    return 1
+  fi
+
+  printf "${GREEN} >> Novo token validado. Atualizando configuração...${WHITE}\n"
+  local git_config="/home/deploy/${empresa}/.git/config"
+  if [ ! -f "$git_config" ]; then
+    printf "${RED} >> ERRO: Arquivo não encontrado: ${git_config}${WHITE}\n"
+    return 1
+  fi
+
+  cp "$git_config" "${git_config}.backup.$(date +%Y%m%d_%H%M%S)"
+  local novo_token_encoded
+  novo_token_encoded=$(codifica_clone_base "$novo_token")
+  local novo_token_encoded_sed="${novo_token_encoded//&/\\&}"
+  sed -i "s|url = https://[^@]*@|url = https://${novo_token_encoded_sed}@|" "$git_config"
+  # Garantir que a URL do remote termina em .git (evita "does not appear to be a git repository")
+  sed -i '/url = https:\/\/.*@github\.com\// { /\.git$/! s|$|.git| }' "$git_config"
+  printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
+
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_INSTALADOR"; then
+      novo_token_sed="${novo_token//&/\\&}"
+      sed -i "s|^github_token=.*|github_token=${novo_token_sed}|" "$ARQUIVO_VARIAVEIS_INSTALADOR"
+    else
+      echo "github_token=${novo_token}" >> "$ARQUIVO_VARIAVEIS_INSTALADOR"
+    fi
+    printf "${GREEN} >> Token atualizado no arquivo de variáveis.${WHITE}\n"
+  fi
+  github_token="$novo_token"
+  return 0
+}
+
 # Definir lista de versões disponíveis
 # Formato: "versao:commit_hash"
 definir_versoes() {
@@ -626,6 +717,13 @@ retornar_versao_principal() {
   printf "${GREEN} ✓ Diretório atual: $(pwd)\n${WHITE}"
   printf "${GREEN} ✓ Permissões corrigidas\n${WHITE}"
   echo
+
+  # Validar token antes de git fetch/pull (se expirado, pedir novo e atualizar .git/config + variáveis)
+  if ! validar_e_atualizar_token_rollback; then
+    printf "${RED} >> Não foi possível validar o token. Abortando.${WHITE}\n"
+    exit 1
+  fi
+  echo
   
   # 2) Fazer checkout para branch oficial
   printf "${WHITE} [2/9] Fazendo checkout para branch MULTI100-OFICIAL-u21...\n"
@@ -648,15 +746,33 @@ CHECKOUT
   
   # 3) Atualizar código com git pull
   printf "${WHITE} [3/9] Atualizando código com git pull...\n"
+  PULL_OK=0
   sudo su - deploy <<PULL
 cd "$APP_DIR"
 git pull
 PULL
-  if [ $? -ne 0 ]; then
-    printf "${YELLOW} >> Aviso: git pull pode ter tido problemas. Continuando...\n${WHITE}"
-  else
-    printf "${GREEN} ✓ Código atualizado\n${WHITE}"
+  [ $? -eq 0 ] && PULL_OK=1
+  if [ $PULL_OK -ne 1 ]; then
+    printf "${RED} >> git pull falhou (token pode estar expirado ou URL incorreta).${WHITE}\n"
+    printf "${YELLOW} >> Deseja informar um novo token e tentar novamente? (s/N):${WHITE}\n"
+    read -p "> " TENTAR_TOKEN
+    if [ "$TENTAR_TOKEN" = "s" ] || [ "$TENTAR_TOKEN" = "S" ]; then
+      if validar_e_atualizar_token_rollback; then
+        printf "${WHITE} >> Tentando git pull novamente...\n"
+        sudo su - deploy <<PULL2
+cd "$APP_DIR"
+git pull
+PULL2
+        [ $? -eq 0 ] && PULL_OK=1
+      fi
+    fi
+    if [ $PULL_OK -ne 1 ]; then
+      printf "${RED} >> git pull não concluído. Verifique o token e a URL do repositório em ${APP_DIR}/.git/config${WHITE}\n"
+      printf "${RED} >> Execute este script novamente após corrigir. Encerrando.${WHITE}\n"
+      exit 1
+    fi
   fi
+  printf "${GREEN} ✓ Código atualizado\n${WHITE}"
   echo
   
   # 4) Parar aplicações PM2
