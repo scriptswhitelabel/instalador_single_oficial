@@ -127,12 +127,18 @@ validar_e_atualizar_token_rollback() {
   fi
 
   cp "$git_config" "${git_config}.backup.$(date +%Y%m%d_%H%M%S)"
+  # Extrair o caminho do repositório (ex.: github.com/scriptswhitelabel/multiflow-pro.git) e reescrever a linha inteira
+  local url_atual
+  url_atual=$(grep -E "^\s*url\s*=" "$git_config" | head -1 | sed 's/^[^=]*=\s*//' | tr -d ' ')
+  local path_repo
+  path_repo=$(echo "$url_atual" | sed 's|https://[^@]*@||' | sed 's|^[^@]*@||')
+  [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
   local novo_token_encoded
   novo_token_encoded=$(codifica_clone_base "$novo_token")
-  local novo_token_encoded_sed="${novo_token_encoded//&/\\&}"
-  sed -i "s|url = https://[^@]*@|url = https://${novo_token_encoded_sed}@|" "$git_config"
-  # Garantir que a URL do remote termina em .git (evita "does not appear to be a git repository")
-  sed -i '/url = https:\/\/.*@github\.com\// { /\.git$/! s|$|.git| }' "$git_config"
+  local nova_url="https://${novo_token_encoded}@${path_repo}"
+  local nova_url_sed="${nova_url//&/\\&}"
+  # Substituir a primeira linha "url = ..." (remote origin) pela nova URL
+  sed -i "s|^[[:space:]]*url[[:space:]]*=.*|  url = ${nova_url_sed}|" "$git_config"
   printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
 
   if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
@@ -744,34 +750,31 @@ CHECKOUT
   printf "${GREEN} ✓ Checkout para branch oficial concluído\n${WHITE}"
   echo
   
-  # 3) Atualizar código com git pull
+  # 3) Atualizar código com git pull (com loop: se falhar, pede token novamente até sucesso ou usuário desistir)
   printf "${WHITE} [3/9] Atualizando código com git pull...\n"
   PULL_OK=0
-  sudo su - deploy <<PULL
+  while [ $PULL_OK -ne 1 ]; do
+    sudo su - deploy <<PULL
 cd "$APP_DIR"
 git pull
 PULL
-  [ $? -eq 0 ] && PULL_OK=1
-  if [ $PULL_OK -ne 1 ]; then
-    printf "${RED} >> git pull falhou (token pode estar expirado ou URL incorreta).${WHITE}\n"
-    printf "${YELLOW} >> Deseja informar um novo token e tentar novamente? (s/N):${WHITE}\n"
-    read -p "> " TENTAR_TOKEN
-    if [ "$TENTAR_TOKEN" = "s" ] || [ "$TENTAR_TOKEN" = "S" ]; then
-      if validar_e_atualizar_token_rollback; then
-        printf "${WHITE} >> Tentando git pull novamente...\n"
-        sudo su - deploy <<PULL2
-cd "$APP_DIR"
-git pull
-PULL2
-        [ $? -eq 0 ] && PULL_OK=1
-      fi
-    fi
+    [ $? -eq 0 ] && PULL_OK=1
     if [ $PULL_OK -ne 1 ]; then
-      printf "${RED} >> git pull não concluído. Verifique o token e a URL do repositório em ${APP_DIR}/.git/config${WHITE}\n"
-      printf "${RED} >> Execute este script novamente após corrigir. Encerrando.${WHITE}\n"
-      exit 1
+      printf "${RED} >> git pull falhou (token pode estar expirado ou URL incorreta).${WHITE}\n"
+      printf "${YELLOW} >> Deseja informar o token novamente e tentar de novo? (s/N):${WHITE}\n"
+      read -p "> " TENTAR_TOKEN
+      if [ "$TENTAR_TOKEN" != "s" ] && [ "$TENTAR_TOKEN" != "S" ]; then
+        printf "${RED} >> git pull não concluído. Verifique o token e a URL em ${APP_DIR}/.git/config${WHITE}\n"
+        printf "${RED} >> Execute este script novamente após corrigir. Encerrando.${WHITE}\n"
+        exit 1
+      fi
+      if ! validar_e_atualizar_token_rollback; then
+        printf "${RED} >> Não foi possível atualizar o token. Encerrando.${WHITE}\n"
+        exit 1
+      fi
+      printf "${WHITE} >> Tentando git pull novamente...\n"
     fi
-  fi
+  done
   printf "${GREEN} ✓ Código atualizado\n${WHITE}"
   echo
   
