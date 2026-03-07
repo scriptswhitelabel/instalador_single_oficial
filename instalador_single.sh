@@ -1769,28 +1769,45 @@ codifica_clone_base() {
   done
 }
 
-# Testa se o token tem acesso ao repositório (mesmo teste do git clone).
-# Usa só o token da URL; não pede senha (GIT_TERMINAL_PROMPT=0).
-# Usa variáveis globais: repo_url, github_token. Retorna 0 se válido, 1 se inválido.
+# Testa se o token tem acesso ao repositório (git ls-remote ou git clone).
+# Usa só o token na URL; não pede senha (GIT_TERMINAL_PROMPT=0).
+# Retorna 0 se válido, 1 se inválido. Opcional: passar segundo arg "1" para guardar stderr em ERRO_GIT_VALIDACAO.
 validar_token_git_clone() {
   local token="${1:-$github_token}"
+  local mostrar_erro="${2:-0}"
+  [ -z "$token" ] && return 1
   local url_base
   url_base=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^[^@]*@||')
   [ -z "$url_base" ] && url_base=$(echo "${repo_url}" | sed 's|^https://||')
+  [ -z "$url_base" ] && return 1
   [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
   local token_encoded
   token_encoded=$(codifica_clone_base "$token")
   local repo_url_com_token="https://${token_encoded}@${url_base}"
+  export GIT_TERMINAL_PROMPT=0
+
+  # 1) Tentar git ls-remote (leve, só testa acesso)
+  local err_file
+  err_file=$(mktemp)
+  if git ls-remote --exit-code "${repo_url_com_token}" HEAD >/dev/null 2>"$err_file"; then
+    rm -f "$err_file"
+    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
+    return 0
+  fi
+
+  # 2) Fallback: git clone (mesmo teste usado no pull)
   local test_dir
   test_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test_clone_$(date +%s)"
-  # Impede que o Git peça senha; usa apenas o token já gravado na URL
-  export GIT_TERMINAL_PROMPT=0
-  if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>&1; then
+  if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>>"$err_file"; then
     rm -rf "${test_dir}" >/dev/null 2>&1
+    rm -f "$err_file"
     unset GIT_TERMINAL_PROMPT 2>/dev/null || true
     return 0
   fi
   rm -rf "${test_dir}" >/dev/null 2>&1
+
+  [ "$mostrar_erro" = "1" ] && ERRO_GIT_VALIDACAO=$(head -3 "$err_file" 2>/dev/null | tr '\n' ' ')
+  rm -f "$err_file"
   unset GIT_TERMINAL_PROMPT 2>/dev/null || true
   return 1
 }
@@ -1816,8 +1833,8 @@ validar_e_atualizar_token_antes_atualizar() {
   echo
   printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
   echo
-  read -p "> " novo_token
-  novo_token=$(echo "$novo_token" | tr -d '[:space:]')
+  read -r -p "> " novo_token
+  novo_token=$(printf '%s' "$novo_token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
   if [ -z "$novo_token" ]; then
     printf "${RED} >> Token não informado. Atualização cancelada.${WHITE}\n"
     sleep 2
@@ -1826,9 +1843,13 @@ validar_e_atualizar_token_antes_atualizar() {
 
   printf "${WHITE} >> Validando o novo token...\n"
   echo
-  if ! validar_token_git_clone "$novo_token"; then
-    printf "${RED} >> O novo token também não é válido. Atualização cancelada.${WHITE}\n"
-    printf "${YELLOW} >> Verifique o token e tente novamente.${WHITE}\n"
+  ERRO_GIT_VALIDACAO=""
+  if ! validar_token_git_clone "$novo_token" 1; then
+    printf "${RED} >> O novo token não foi aceito. Atualização cancelada.${WHITE}\n"
+    if [ -n "${ERRO_GIT_VALIDACAO:-}" ]; then
+      printf "${YELLOW} >> Detalhe do Git: ${ERRO_GIT_VALIDACAO}${WHITE}\n"
+    fi
+    printf "${YELLOW} >> Confira: token correto, repositório ${repo_url:-?} e permissão 'repo'.${WHITE}\n"
     sleep 2
     return 1
   fi
