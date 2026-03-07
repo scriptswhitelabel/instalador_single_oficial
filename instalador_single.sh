@@ -1769,7 +1769,8 @@ codifica_clone_base() {
   done
 }
 
-# Testa se o token tem acesso ao repositório (mesmo teste do git clone)
+# Testa se o token tem acesso ao repositório (mesmo teste do git clone).
+# Usa só o token da URL; não pede senha (GIT_TERMINAL_PROMPT=0).
 # Usa variáveis globais: repo_url, github_token. Retorna 0 se válido, 1 se inválido.
 validar_token_git_clone() {
   local token="${1:-$github_token}"
@@ -1782,11 +1783,15 @@ validar_token_git_clone() {
   local repo_url_com_token="https://${token_encoded}@${url_base}"
   local test_dir
   test_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test_clone_$(date +%s)"
+  # Impede que o Git peça senha; usa apenas o token já gravado na URL
+  export GIT_TERMINAL_PROMPT=0
   if git clone --depth 1 "${repo_url_com_token}" "${test_dir}" >/dev/null 2>&1; then
     rm -rf "${test_dir}" >/dev/null 2>&1
+    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
     return 0
   fi
   rm -rf "${test_dir}" >/dev/null 2>&1
+  unset GIT_TERMINAL_PROMPT 2>/dev/null || true
   return 1
 }
 
@@ -1801,18 +1806,12 @@ validar_e_atualizar_token_antes_atualizar() {
     return 1
   fi
 
-  banner
-  printf "${WHITE} >> Validando token com teste de git clone (repositório da instância)...\n"
-  echo
-
+  # Validação silenciosa com o token já gravado (.git/config e variáveis); só pede token se falhar
   if validar_token_git_clone; then
-    printf "${GREEN} >> Token válido. Continuando a atualização...${WHITE}\n"
-    echo
-    sleep 2
     return 0
   fi
 
-  printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  banner
   printf "${RED} >> O Token não está válido (expirado ou sem acesso).${WHITE}\n"
   echo
   printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"

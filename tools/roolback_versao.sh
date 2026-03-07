@@ -186,7 +186,7 @@ definir_versoes() {
   VERSOES["6.6"]="1692f830009b4364126c763fa7702bf401280989"
   VERSOES["6.4.5"]="251c6f693b67c76468311b0ca9c41f89f8a3aca0"
   VERSOES["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
-  VERSOES["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"3f821b660ac85f0769de634fe6d172e9d4c30245
+  VERSOES["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
   VERSOES["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
   VERSOES["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
    # Adicione mais versões aqui conforme necessário
