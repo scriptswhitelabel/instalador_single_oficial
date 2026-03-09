@@ -1831,6 +1831,33 @@ validar_e_atualizar_token_antes_atualizar() {
   banner
   printf "${RED} >> O Token não está válido (expirado ou sem acesso).${WHITE}\n"
   echo
+  # Mostrar repositório atual e permitir confirmar ou trocar o link
+  printf "${WHITE} >> Repositório atual (variável de instalação):${WHITE}\n"
+  printf "${BLUE}   %s${WHITE}\n" "${repo_url:- (não definido) }"
+  echo
+  printf "${YELLOW} >> Deseja manter este repositório (s) ou digitar um novo link?${WHITE}\n"
+  printf "${YELLOW}   Digite ${GREEN}s${YELLOW} para manter, ou cole o novo link do Git:${WHITE}\n"
+  echo
+  read -r -p "> " resposta_repo
+  resposta_repo=$(printf '%s' "$resposta_repo" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r')
+  if [ -n "$resposta_repo" ] && [ "$resposta_repo" != "s" ] && [ "$resposta_repo" != "S" ]; then
+    # Usuário digitou um novo link
+    novo_repo="$resposta_repo"
+    [[ "$novo_repo" != *.git ]] && [[ "$novo_repo" =~ github\.com ]] && novo_repo="${novo_repo}.git"
+    repo_url="$novo_repo"
+    printf "${GREEN} >> Repositório atualizado para: ${repo_url}${WHITE}\n"
+    if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+      if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_USADO"; then
+        novo_repo_sed="${novo_repo//&/\\&}"
+        sed -i "s|^repo_url=.*|repo_url=${novo_repo_sed}|" "$ARQUIVO_VARIAVEIS_USADO"
+      else
+        echo "repo_url=${novo_repo}" >> "$ARQUIVO_VARIAVEIS_USADO"
+      fi
+      printf "${GREEN} >> Link do repositório salvo na variável de instalação.${WHITE}\n"
+    fi
+    echo
+  fi
+  echo
   printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
   echo
   read -r -p "> " novo_token
@@ -1841,7 +1868,7 @@ validar_e_atualizar_token_antes_atualizar() {
     return 1
   fi
 
-  printf "${WHITE} >> Validando o novo token...\n"
+  printf "${WHITE} >> Validando token e repositório...\n"
   echo
   ERRO_GIT_VALIDACAO=""
   if ! validar_token_git_clone "$novo_token" 1; then
@@ -1854,7 +1881,7 @@ validar_e_atualizar_token_antes_atualizar() {
     return 1
   fi
 
-  printf "${GREEN} >> Novo token validado. Atualizando configuração...${WHITE}\n"
+  printf "${GREEN} >> Token e repositório validados. Atualizando configuração...${WHITE}\n"
   echo
 
   local git_config="/home/deploy/${empresa}/.git/config"
@@ -1864,13 +1891,15 @@ validar_e_atualizar_token_antes_atualizar() {
   fi
 
   cp "$git_config" "${git_config}.backup.$(date +%Y%m%d_%H%M%S)"
+  local path_repo
+  path_repo=$(echo "$repo_url" | sed 's|^https://||' | sed 's|^[^@]*@||')
+  [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
   local novo_token_encoded
   novo_token_encoded=$(codifica_clone_base "$novo_token")
-  local novo_token_encoded_sed="${novo_token_encoded//&/\\&}"
-  sed -i "s|url = https://[^@]*@|url = https://${novo_token_encoded_sed}@|" "$git_config"
-  # Garantir que a URL do remote termina em .git (evita "does not appear to be a git repository")
-  sed -i '/url = https:\/\/.*@github\.com\// { /\.git$/! s|$|.git| }' "$git_config"
-  printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
+  local nova_url="https://${novo_token_encoded}@${path_repo}"
+  local nova_url_sed="${nova_url//&/\\&}"
+  sed -i "s|^[[:space:]]*url[[:space:]]*=.*|  url = ${nova_url_sed}|" "$git_config"
+  printf "${GREEN} >> Token e URL atualizados em: ${git_config}${WHITE}\n"
 
   if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
     if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_USADO"; then
