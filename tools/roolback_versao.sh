@@ -183,6 +183,7 @@ validar_e_atualizar_token_rollback() {
 # Formato: "versao:commit_hash"
 definir_versoes() {
   declare -gA VERSOES
+  VERSOES["7.1"]="8cecb519938b26ccd5418441703f3ad64a6eb15f"
   VERSOES["6.6"]="1692f830009b4364126c763fa7702bf401280989"
   VERSOES["6.4.5"]="251c6f693b67c76468311b0ca9c41f89f8a3aca0"
   VERSOES["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
