@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.0\n"
+  printf "                                INSTALADOR 8.1\n"
   printf "\n\n"
 }
 
@@ -1757,6 +1757,21 @@ EOF
   } || trata_erro "instala_git_base"
 }
 
+# Multiflow-pro: substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação
+aplicar_token_baileys_package_json() {
+  local emp="${1:-$empresa}"
+  local tok="${2:-$github_token}"
+  local repo="${3:-$repo_url}"
+  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  local pkg="/home/deploy/${emp}/backend/package.json"
+  [ ! -f "$pkg" ] && return 0
+  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
+  local tok_sed="${tok//&/\\&}"
+  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  return 0
+}
+
 # Função para codificar URL de clone
 codifica_clone_base() {
   local length="${#1}"
@@ -2267,6 +2282,7 @@ EOF
     banner
     printf "${WHITE} >> Instalando dependências do ${BLUE}backend${WHITE}...\n"
     echo
+    aplicar_token_baileys_package_json
     sudo su - deploy <<BACKENDINSTALL
   # Configura PATH para Node.js
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -3036,6 +3052,14 @@ STOPPM2
   if [ ! -f "package.json" ]; then
     echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
     exit 1
+  fi
+
+  # Multiflow-pro: substituir TOKEN_GITHUB no package.json (baileys/Hineken) antes do npm install
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+      sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
+      echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
+    fi
   fi
   
   npm prune --force > /dev/null 2>&1
