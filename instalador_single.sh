@@ -542,46 +542,49 @@ importar_backup_banco_ferramentas() {
     sleep 2
     return 0
   fi
+  local usuario_db="${empresa}"
   local senha_db="${senha_deploy}"
   [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
   if [ -z "$senha_db" ]; then
-    printf "${YELLOW} >> Informe a senha do usuário do banco (empresa/postgres):${WHITE}\n"
-    read -s -p "> " senha_db
+    printf "${YELLOW} >> Informe o usuário e a senha do banco:${WHITE}\n"
+    read -p "   Usuário: " usuario_db
+    read -s -p "   Senha: " senha_db
     echo
+    [ -z "$usuario_db" ] && printf "${RED} >> Usuário não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
     [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
   fi
   if [ "$op_tipo" = "1" ]; then
-    # Apagar banco existente, criar novo com nome da empresa, restaurar
+    # Apagar banco existente, criar novo com nome da empresa, restaurar (tudo com usuário empresa, sem postgres)
     printf "${WHITE} >> Encerrando conexões com o banco ${empresa}...${WHITE}\n"
-    sudo -u postgres psql -h localhost -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
     sleep 1
     printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
-    sudo -u postgres psql -h localhost -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
-    sudo -u postgres psql -h localhost -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL.${WHITE}\n"
       sleep 2
       return 1
     fi
     printf "${WHITE} >> Restaurando backup em ${empresa}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${empresa}" -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null || sudo -u postgres psql -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null
     if [ $? -eq 0 ]; then
       printf "${GREEN} >> Banco ${empresa} restaurado com sucesso.${WHITE}\n"
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
   else
-    # Criar novo banco (empresa_novo), manter existente, restaurar no novo
+    # Criar novo banco (empresa_novo), manter existente, restaurar no novo (sem postgres)
     local db_novo="${empresa}_novo"
     printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${empresa})...${WHITE}\n"
-    sudo -u postgres psql -h localhost -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
       sleep 2
       return 1
     fi
     printf "${WHITE} >> Restaurando backup em ${db_novo}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${empresa}" -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null || sudo -u postgres psql -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
     if [ $? -eq 0 ]; then
       printf "${GREEN} >> Banco ${db_novo} restaurado com sucesso.${WHITE}\n"
       printf "${YELLOW} >> Para usar este banco na aplicação, altere DB_NAME no .env do backend para: ${db_novo}${WHITE}\n"
