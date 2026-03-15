@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.1\n"
+  printf "                                INSTALADOR 8.2\n"
   printf "\n\n"
 }
 
@@ -294,6 +294,393 @@ instalar_whatsmeow() {
   fi
 }
 
+# Backup do Redis nativo: salva em /home/deploy/backup-${empresa}/redis
+backup_redis_ferramentas() {
+  banner
+  printf "${WHITE} >> Backup do Redis (nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  BACKUP_DIR="/home/deploy/backup-${empresa}/redis"
+  mkdir -p "$BACKUP_DIR"
+  chown deploy:deploy "$(dirname "/home/deploy/backup-${empresa}")" 2>/dev/null || true
+  chown deploy:deploy "/home/deploy/backup-${empresa}" 2>/dev/null || true
+  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
+  REDIS_DIR="/var/lib/redis"
+  REDIS_CONF="/etc/redis/redis.conf"
+  [ -f "$REDIS_CONF" ] && REDIS_DIR=$(grep "^dir " "$REDIS_CONF" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  DUMP_RDB="${REDIS_DIR}/dump.rdb"
+  AOF_FILE="${REDIS_DIR}/appendonly.aof"
+  if ! systemctl is-active --quiet redis-server 2>/dev/null; then
+    printf "${RED} >> Redis não está rodando (redis-server). Inicie o serviço e tente novamente.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  if [ -n "${senha_deploy}" ]; then
+    redis-cli -a "${senha_deploy}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
+  else
+    redis-cli BGSAVE 2>/dev/null || true
+  fi
+  sleep 2
+  if [ -f "$DUMP_RDB" ]; then
+    cp "$DUMP_RDB" "${BACKUP_DIR}/dump_${TIMESTAMP}.rdb"
+    chown deploy:deploy "${BACKUP_DIR}/dump_${TIMESTAMP}.rdb"
+    printf "${GREEN} >> Backup RDB salvo: ${BACKUP_DIR}/dump_${TIMESTAMP}.rdb${WHITE}\n"
+  else
+    printf "${YELLOW} >> Arquivo dump.rdb não encontrado em ${DUMP_RDB}. Redis pode estar vazio ou com outro dir.${WHITE}\n"
+  fi
+  if [ -f "$AOF_FILE" ]; then
+    cp "$AOF_FILE" "${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof"
+    chown deploy:deploy "${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof"
+    printf "${GREEN} >> Backup AOF salvo: ${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof${WHITE}\n"
+  fi
+  printf "${GREEN} >> Backup do Redis concluído. Pasta: ${BACKUP_DIR}${WHITE}\n"
+  echo
+  sleep 2
+}
+
+# Restaura Redis nativo a partir de backup em /home/deploy/backup-${empresa}/redis
+restaurar_redis_ferramentas() {
+  banner
+  printf "${WHITE} >> Restaurar Redis (nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  BACKUP_DIR="/home/deploy/backup-${empresa}/redis"
+  if [ ! -d "$BACKUP_DIR" ]; then
+    printf "${RED} >> Pasta de backup não encontrada: ${BACKUP_DIR}${WHITE}\n"
+    printf "${YELLOW} >> Faça um backup do Redis antes de restaurar.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  REDIS_DIR="/var/lib/redis"
+  REDIS_CONF="/etc/redis/redis.conf"
+  [ -f "$REDIS_CONF" ] && REDIS_DIR=$(grep "^dir " "$REDIS_CONF" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  DUMP_RDB="${REDIS_DIR}/dump.rdb"
+  AOF_FILE="${REDIS_DIR}/appendonly.aof"
+  shopt -s nullglob 2>/dev/null || true
+  RDB_BACKUPS=("$BACKUP_DIR"/dump_*.rdb)
+  shopt -u nullglob 2>/dev/null || true
+  if [ ${#RDB_BACKUPS[@]} -eq 0 ] || [ ! -f "${RDB_BACKUPS[0]}" ]; then
+    printf "${RED} >> Nenhum backup RDB encontrado em ${BACKUP_DIR}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backups RDB disponíveis:${WHITE}\n"
+  echo
+  local i=1
+  local escolhido=""
+  for f in "${RDB_BACKUPS[@]}"; do
+    [ -f "$f" ] || continue
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o número do backup para restaurar:${WHITE}\n"
+  read -p "> " op_rdb
+  if [ "$op_rdb" = "0" ] || [ -z "$op_rdb" ]; then
+    printf "${YELLOW} >> Restauração cancelada.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  i=1
+  for f in "${RDB_BACKUPS[@]}"; do
+    [ -f "$f" ] || continue
+    if [ "$i" = "$op_rdb" ]; then
+      escolhido="$f"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$escolhido" ] || [ ! -f "$escolhido" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${YELLOW} >> Isso irá parar o Redis, substituir os dados pelo backup e reiniciar. Continuar? (s/N):${WHITE}\n"
+  read -p "> " confirma
+  if [ "$confirma" != "s" ] && [ "$confirma" != "S" ]; then
+    printf "${YELLOW} >> Restauração cancelada.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  systemctl stop redis-server 2>/dev/null || true
+  sleep 2
+  [ -f "$DUMP_RDB" ] && mv "$DUMP_RDB" "${DUMP_RDB}.antes_restore_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+  [ -f "$AOF_FILE" ] && mv "$AOF_FILE" "${AOF_FILE}.antes_restore_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+  cp "$escolhido" "$DUMP_RDB"
+  chown redis:redis "$DUMP_RDB" 2>/dev/null || chown deploy:deploy "$DUMP_RDB" 2>/dev/null || true
+  chmod 660 "$DUMP_RDB" 2>/dev/null || true
+  printf "${GREEN} >> Arquivo RDB restaurado: $(basename "$escolhido") -> ${DUMP_RDB}${WHITE}\n"
+  AOF_BACKUPS=("$BACKUP_DIR"/appendonly_*.aof)
+  if [ -f "${AOF_BACKUPS[0]}" ]; then
+    printf "${YELLOW} >> Existem backups AOF. Deseja restaurar também um AOF? (s/N):${WHITE}\n"
+    read -p "> " rest_aof
+    if [ "$rest_aof" = "s" ] || [ "$rest_aof" = "S" ]; then
+      i=1
+      for f in "${AOF_BACKUPS[@]}"; do
+        [ -f "$f" ] || continue
+        printf "   [%s] %s\n" "$i" "$(basename "$f")"
+        ((i++))
+      done
+      printf "${YELLOW} >> Número do AOF (ou 0 para pular):${WHITE}\n"
+      read -p "> " op_aof
+      i=1
+      for f in "${AOF_BACKUPS[@]}"; do
+        [ -f "$f" ] || continue
+        if [ "$i" = "$op_aof" ]; then
+          cp "$f" "$AOF_FILE"
+          chown redis:redis "$AOF_FILE" 2>/dev/null || chown deploy:deploy "$AOF_FILE" 2>/dev/null || true
+          chmod 660 "$AOF_FILE" 2>/dev/null || true
+          printf "${GREEN} >> AOF restaurado: $(basename "$f")${WHITE}\n"
+          break
+        fi
+        ((i++))
+      done
+    fi
+  fi
+  systemctl start redis-server 2>/dev/null || true
+  sleep 2
+  if systemctl is-active --quiet redis-server 2>/dev/null; then
+    printf "${GREEN} >> Redis reiniciado com sucesso. Restauração concluída.${WHITE}\n"
+  else
+    printf "${RED} >> Redis não iniciou. Verifique: systemctl status redis-server${WHITE}\n"
+  fi
+  echo
+  sleep 2
+}
+
+# Importar/restaurar backup do banco nativo (PostgreSQL) a partir de /home/deploy/backup-${empresa}/
+importar_backup_banco_ferramentas() {
+  banner
+  printf "${WHITE} >> Importar backup do banco (PostgreSQL nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  BACKUP_BASE="/home/deploy/backup-${empresa}"
+  if [ ! -d "$BACKUP_BASE" ]; then
+    printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  # Listar arquivos .sql na pasta e subpastas (um nível)
+  BACKUPS_SQL=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && BACKUPS_SQL+=("$f")
+  done < <(find "$BACKUP_BASE" -maxdepth 2 -type f -name "*.sql" 2>/dev/null | sort -r)
+  if [ ${#BACKUPS_SQL[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum arquivo .sql encontrado em ${BACKUP_BASE}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backups disponíveis:${WHITE}\n"
+  echo
+  local i=1
+  for f in "${BACKUPS_SQL[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o número do backup para restaurar:${WHITE}\n"
+  read -p "> " op_backup
+  if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local arquivo_escolhido=""
+  i=1
+  for f in "${BACKUPS_SQL[@]}"; do
+    if [ "$i" = "$op_backup" ]; then
+      arquivo_escolhido="$f"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$arquivo_escolhido" ] || [ ! -f "$arquivo_escolhido" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "$(basename "$arquivo_escolhido")"
+  echo
+  printf "${YELLOW} >> Deseja apagar o banco existente com o mesmo nome ou criar um novo?${WHITE}\n"
+  printf "   [${BLUE}1${WHITE}] Apagar banco existente e restaurar (substitui o banco ${empresa})\n"
+  printf "   [${BLUE}2${WHITE}] Criar novo banco e restaurar (mantém o existente, cria ${empresa}_novo)\n"
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  read -p "> " op_tipo
+  if [ "$op_tipo" = "0" ] || [ -z "$op_tipo" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local senha_db="${senha_deploy}"
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  if [ -z "$senha_db" ]; then
+    printf "${YELLOW} >> Informe a senha do usuário do banco (empresa/postgres):${WHITE}\n"
+    read -s -p "> " senha_db
+    echo
+    [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  if [ "$op_tipo" = "1" ]; then
+    # Apagar banco existente, criar novo com nome da empresa, restaurar
+    printf "${WHITE} >> Encerrando conexões com o banco ${empresa}...${WHITE}\n"
+    sudo -u postgres psql -h localhost -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+    sleep 1
+    printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
+    sudo -u postgres psql -h localhost -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
+    sudo -u postgres psql -h localhost -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    printf "${WHITE} >> Restaurando backup em ${empresa}...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${empresa}" -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null || sudo -u postgres psql -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      printf "${GREEN} >> Banco ${empresa} restaurado com sucesso.${WHITE}\n"
+    else
+      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
+    fi
+  else
+    # Criar novo banco (empresa_novo), manter existente, restaurar no novo
+    local db_novo="${empresa}_novo"
+    printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${empresa})...${WHITE}\n"
+    sudo -u postgres psql -h localhost -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    printf "${WHITE} >> Restaurando backup em ${db_novo}...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${empresa}" -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null || sudo -u postgres psql -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      printf "${GREEN} >> Banco ${db_novo} restaurado com sucesso.${WHITE}\n"
+      printf "${YELLOW} >> Para usar este banco na aplicação, altere DB_NAME no .env do backend para: ${db_novo}${WHITE}\n"
+    else
+      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
+    fi
+  fi
+  echo
+  sleep 2
+}
+
+# Backup do banco nativo (PostgreSQL): lista bancos, usuário escolhe, salva em /home/deploy/backup-${empresa}/
+backup_banco_ferramentas() {
+  banner
+  printf "${WHITE} >> Backup do banco (PostgreSQL nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  BACKUP_DIR="/home/deploy/backup-${empresa}"
+  mkdir -p "$BACKUP_DIR"
+  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
+  # Listar bancos (exclui templates e postgres interno)
+  LISTA_DB=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && LISTA_DB+=("$line")
+  done < <(sudo -u postgres psql -h localhost -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
+  if [ ${#LISTA_DB[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum banco encontrado ou sem permissão para listar.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Bancos disponíveis:${WHITE}\n"
+  echo
+  local i=1
+  for db in "${LISTA_DB[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$db"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o número do banco para fazer backup:${WHITE}\n"
+  read -p "> " op_db
+  if [ "$op_db" = "0" ] || [ -z "$op_db" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local db_escolhido=""
+  i=1
+  for db in "${LISTA_DB[@]}"; do
+    if [ "$i" = "$op_db" ]; then
+      db_escolhido="$db"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$db_escolhido" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  # Tentar obter senha do usuário do banco (owner comum é o próprio nome do banco)
+  local senha_db="${senha_deploy}"
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  if [ -z "$senha_db" ]; then
+    printf "${YELLOW} >> Para dump completo, informe a senha do usuário postgres (ou do dono do banco). Enter para tentar como postgres sem senha:${WHITE}\n"
+    read -s -p "> " senha_db
+    echo
+  fi
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  ARQUIVO_BACKUP="${BACKUP_DIR}/${db_escolhido}_${TIMESTAMP}.sql"
+  printf "${WHITE} >> Gerando backup de ${db_escolhido}...${WHITE}\n"
+  if [ -n "$senha_db" ]; then
+    PGPASSWORD="${senha_db}" pg_dump -U postgres -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null || \
+    PGPASSWORD="${senha_db}" pg_dump -U "${db_escolhido}" -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
+  else
+    sudo -u postgres pg_dump -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
+  fi
+  if [ $? -eq 0 ] && [ -s "$ARQUIVO_BACKUP" ]; then
+    chown deploy:deploy "$ARQUIVO_BACKUP" 2>/dev/null || true
+    printf "${GREEN} >> Backup salvo: ${ARQUIVO_BACKUP}${WHITE}\n"
+  else
+    printf "${RED} >> Erro ao gerar backup. Verifique permissões e usuário/senha do PostgreSQL.${WHITE}\n"
+    [ -f "$ARQUIVO_BACKUP" ] && rm -f "$ARQUIVO_BACKUP"
+    sleep 2
+    return 1
+  fi
+  echo
+  sleep 2
+}
+
 # Menu de Ferramentas
 menu_ferramentas() {
   while true; do
@@ -306,6 +693,10 @@ menu_ferramentas() {
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
+    printf "   [${BLUE}7${WHITE}] Backup do Redis\n"
+    printf "   [${BLUE}8${WHITE}] Restaurar Redis\n"
+    printf "   [${BLUE}9${WHITE}] Importar backup do banco\n"
+    printf "   [${BLUE}10${WHITE}] Backup do banco\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -386,6 +777,26 @@ menu_ferramentas() {
         printf "${RED} >> Erro: Arquivo ${BACKUP_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
+      ;;
+    7)
+      backup_redis_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    8)
+      restaurar_redis_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    9)
+      importar_backup_banco_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    10)
+      backup_banco_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
       ;;
     0)
       return
