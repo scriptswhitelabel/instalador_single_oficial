@@ -555,12 +555,13 @@ importar_backup_banco_ferramentas() {
   fi
   if [ "$op_tipo" = "1" ]; then
     # Apagar banco existente, criar novo com nome da empresa, restaurar (tudo com usuário empresa, sem postgres)
+    # Conectar ao banco 'postgres' para DROP/CREATE; senão psql conecta ao banco com nome do usuário e não permite dropar.
     printf "${WHITE} >> Encerrando conexões com o banco ${empresa}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
     sleep 1
     printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL.${WHITE}\n"
       sleep 2
@@ -577,7 +578,7 @@ importar_backup_banco_ferramentas() {
     # Criar novo banco (empresa_novo), manter existente, restaurar no novo (sem postgres)
     local db_novo="${empresa}_novo"
     printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${empresa})...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
       sleep 2
@@ -693,12 +694,13 @@ importar_backup_banco_api_oficial_ferramentas() {
     fi
   fi
   if [ "$op_tipo" = "1" ]; then
+    # Conectar ao banco 'postgres' para terminate/DROP/CREATE; senão psql conecta ao banco com nome do usuário e não permite dropar.
     printf "${WHITE} >> Encerrando conexões com o banco ${db_oficial}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_oficial}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_oficial}' AND pid <> pg_backend_pid();" 2>/dev/null || true
     sleep 1
     printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "DROP DATABASE IF EXISTS ${db_oficial};" 2>/dev/null || true
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "DROP DATABASE IF EXISTS ${db_oficial};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL (porta ${db_port}).${WHITE}\n"
       sleep 2
@@ -714,7 +716,7 @@ importar_backup_banco_api_oficial_ferramentas() {
   else
     local db_novo="${db_oficial}_novo"
     printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${db_oficial})...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
       sleep 2
