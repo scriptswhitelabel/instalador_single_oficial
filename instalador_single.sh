@@ -596,6 +596,143 @@ importar_backup_banco_ferramentas() {
   sleep 2
 }
 
+# Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo): mesmo processo, banco oficialseparado
+importar_backup_banco_api_oficial_ferramentas() {
+  banner
+  printf "${WHITE} >> Importar backup do banco da API Oficial (PostgreSQL nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  BACKUP_BASE="/home/deploy/backup-${empresa}"
+  if [ ! -d "$BACKUP_BASE" ]; then
+    printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  BACKUPS_SQL=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && BACKUPS_SQL+=("$f")
+  done < <(find "$BACKUP_BASE" -maxdepth 2 -type f -name "*.sql" 2>/dev/null | sort -r)
+  if [ ${#BACKUPS_SQL[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum arquivo .sql encontrado em ${BACKUP_BASE}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backups disponíveis:${WHITE}\n"
+  echo
+  local i=1
+  for f in "${BACKUPS_SQL[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o número do backup para restaurar no banco da API Oficial:${WHITE}\n"
+  read -p "> " op_backup
+  if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local arquivo_escolhido=""
+  i=1
+  for f in "${BACKUPS_SQL[@]}"; do
+    if [ "$i" = "$op_backup" ]; then
+      arquivo_escolhido="$f"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$arquivo_escolhido" ] || [ ! -f "$arquivo_escolhido" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "$(basename "$arquivo_escolhido")"
+  echo
+  local db_oficial="oficialseparado"
+  printf "${YELLOW} >> Deseja apagar o banco da API Oficial existente ou criar um novo?${WHITE}\n"
+  printf "   [${BLUE}1${WHITE}] Apagar banco existente e restaurar (substitui o banco ${db_oficial})\n"
+  printf "   [${BLUE}2${WHITE}] Criar novo banco e restaurar (mantém o existente, cria ${db_oficial}_novo)\n"
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  read -p "> " op_tipo
+  if [ "$op_tipo" = "0" ] || [ -z "$op_tipo" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local usuario_db="${empresa}"
+  local senha_db="${senha_deploy}"
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  if [ -z "$senha_db" ]; then
+    printf "${YELLOW} >> Informe o usuário e a senha do banco:${WHITE}\n"
+    read -p "   Usuário: " usuario_db
+    read -s -p "   Senha: " senha_db
+    echo
+    [ -z "$usuario_db" ] && printf "${RED} >> Usuário não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
+    [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  local db_port="5432"
+  if ! PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 5432 -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+    if PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 7532 -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+      db_port="7532"
+      printf "${WHITE} >> Usando PostgreSQL da API Oficial (porta 7532).${WHITE}\n"
+    else
+      printf "${RED} >> Não foi possível conectar ao PostgreSQL (portas 5432 e 7532). Verifique usuário/senha e se o serviço está ativo.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  fi
+  if [ "$op_tipo" = "1" ]; then
+    printf "${WHITE} >> Encerrando conexões com o banco ${db_oficial}...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_oficial}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+    sleep 1
+    printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "DROP DATABASE IF EXISTS ${db_oficial};" 2>/dev/null || true
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" 2>/dev/null || true
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL (porta ${db_port}).${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    printf "${WHITE} >> Restaurando backup em ${db_oficial}...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d "${db_oficial}" -f "$arquivo_escolhido" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      printf "${GREEN} >> Banco da API Oficial (${db_oficial}) restaurado com sucesso.${WHITE}\n"
+    else
+      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
+    fi
+  else
+    local db_novo="${db_oficial}_novo"
+    printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${db_oficial})...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
+    if [ $? -ne 0 ]; then
+      printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    printf "${WHITE} >> Restaurando backup em ${db_novo}...${WHITE}\n"
+    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      printf "${GREEN} >> Banco ${db_novo} restaurado com sucesso.${WHITE}\n"
+      printf "${YELLOW} >> Para usar na API Oficial, altere DB_NAME no .env da API Oficial para: ${db_novo}${WHITE}\n"
+    else
+      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
+    fi
+  fi
+  echo
+  sleep 2
+}
+
 # Backup do banco nativo (PostgreSQL): usa usuário empresa e senha_deploy (sem postgres). Lista bancos, escolhe, salva em /home/deploy/backup-${empresa}/
 backup_banco_ferramentas() {
   banner
@@ -686,6 +823,71 @@ backup_banco_ferramentas() {
   sleep 2
 }
 
+# Listar bancos existentes no PostgreSQL nativo (porta 5432; se falhar, tenta 7532)
+listar_bancos_ferramentas() {
+  banner
+  printf "${WHITE} >> Listar bancos existentes (PostgreSQL nativo)...\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  local usuario_db="${empresa}"
+  local senha_db="${senha_deploy}"
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  # Tenta porta 5432 (nativo)
+  LISTA_5432=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && LISTA_5432+=("$line")
+  done < <(PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 5432 -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)
+  if [ ${#LISTA_5432[@]} -eq 0 ]; then
+    # Pode ser que precise de usuário/senha ou que só exista PostgreSQL na 7532
+    if ! PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 5432 -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+      printf "${YELLOW} >> Não foi possível conectar na porta 5432. Informe usuário e senha do banco (ou Enter para tentar porta 7532):${WHITE}\n"
+      read -p "   Usuário [${empresa}]: " input_user
+      [ -n "$input_user" ] && usuario_db="$input_user"
+      read -s -p "   Senha: " senha_db
+      echo
+      LISTA_5432=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && LISTA_5432+=("$line")
+      done < <(PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 5432 -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)
+    fi
+  fi
+  if [ ${#LISTA_5432[@]} -gt 0 ]; then
+    printf "${WHITE} >> Bancos no PostgreSQL (porta 5432 - nativo):${WHITE}\n"
+    echo
+    for db in "${LISTA_5432[@]}"; do
+      printf "   • %s\n" "$db"
+    done
+    echo
+  fi
+  # Tenta porta 7532 (Docker API Oficial)
+  LISTA_7532=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && LISTA_7532+=("$line")
+  done < <(PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p 7532 -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)
+  if [ ${#LISTA_7532[@]} -gt 0 ]; then
+    printf "${WHITE} >> Bancos no PostgreSQL (porta 7532 - Docker/API Oficial):${WHITE}\n"
+    echo
+    for db in "${LISTA_7532[@]}"; do
+      printf "   • %s\n" "$db"
+    done
+    echo
+  fi
+  if [ ${#LISTA_5432[@]} -eq 0 ] && [ ${#LISTA_7532[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum banco listado. Verifique se o PostgreSQL está ativo e usuário/senha.${WHITE}\n"
+  fi
+  printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+  read -r
+}
+
 # Menu de Ferramentas
 menu_ferramentas() {
   while true; do
@@ -702,6 +904,8 @@ menu_ferramentas() {
     printf "   [${BLUE}8${WHITE}] Restaurar Redis\n"
     printf "   [${BLUE}9${WHITE}] Importar backup do banco\n"
     printf "   [${BLUE}10${WHITE}] Backup do banco\n"
+    printf "   [${BLUE}11${WHITE}] Importar backup do banco da API Oficial\n"
+    printf "   [${BLUE}12${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -802,6 +1006,14 @@ menu_ferramentas() {
       backup_banco_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
+      ;;
+    11)
+      importar_backup_banco_api_oficial_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    12)
+      listar_bancos_ferramentas
       ;;
     0)
       return
