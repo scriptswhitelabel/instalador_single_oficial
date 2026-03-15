@@ -593,7 +593,7 @@ importar_backup_banco_ferramentas() {
   sleep 2
 }
 
-# Backup do banco nativo (PostgreSQL): lista bancos, usuário escolhe, salva em /home/deploy/backup-${empresa}/
+# Backup do banco nativo (PostgreSQL): usa usuário empresa e senha_deploy (sem postgres). Lista bancos, escolhe, salva em /home/deploy/backup-${empresa}/
 backup_banco_ferramentas() {
   banner
   printf "${WHITE} >> Backup do banco (PostgreSQL nativo)...\n"
@@ -611,13 +611,28 @@ backup_banco_ferramentas() {
   BACKUP_DIR="/home/deploy/backup-${empresa}"
   mkdir -p "$BACKUP_DIR"
   chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
-  # Listar bancos (exclui templates e postgres interno)
+  # Usuário e senha: empresa + senha_deploy (ou .env). Se falhar, pedir usuário e senha.
+  local usuario_db="${empresa}"
+  local senha_db="${senha_deploy}"
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  # Listar bancos com usuário empresa (sem postgres)
   LISTA_DB=()
   while IFS= read -r line; do
     [ -n "$line" ] && LISTA_DB+=("$line")
-  done < <(sudo -u postgres psql -h localhost -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
+  done < <(PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
   if [ ${#LISTA_DB[@]} -eq 0 ]; then
-    printf "${RED} >> Nenhum banco encontrado ou sem permissão para listar.${WHITE}\n"
+    printf "${YELLOW} >> Não foi possível listar com usuário ${usuario_db}. Informe usuário e senha do banco:${WHITE}\n"
+    read -p "   Usuário: " usuario_db
+    read -s -p "   Senha: " senha_db
+    echo
+    [ -z "$usuario_db" ] && printf "${RED} >> Usuário não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
+    LISTA_DB=()
+    while IFS= read -r line; do
+      [ -n "$line" ] && LISTA_DB+=("$line")
+    done < <(PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
+  fi
+  if [ ${#LISTA_DB[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum banco encontrado ou usuário/senha incorretos.${WHITE}\n"
     sleep 2
     return 1
   fi
@@ -651,28 +666,15 @@ backup_banco_ferramentas() {
     sleep 2
     return 1
   fi
-  # Tentar obter senha do usuário do banco (owner comum é o próprio nome do banco)
-  local senha_db="${senha_deploy}"
-  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
-  if [ -z "$senha_db" ]; then
-    printf "${YELLOW} >> Para dump completo, informe a senha do usuário postgres (ou do dono do banco). Enter para tentar como postgres sem senha:${WHITE}\n"
-    read -s -p "> " senha_db
-    echo
-  fi
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   ARQUIVO_BACKUP="${BACKUP_DIR}/${db_escolhido}_${TIMESTAMP}.sql"
   printf "${WHITE} >> Gerando backup de ${db_escolhido}...${WHITE}\n"
-  if [ -n "$senha_db" ]; then
-    PGPASSWORD="${senha_db}" pg_dump -U postgres -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null || \
-    PGPASSWORD="${senha_db}" pg_dump -U "${db_escolhido}" -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
-  else
-    sudo -u postgres pg_dump -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
-  fi
+  PGPASSWORD="${senha_db}" pg_dump -U "${usuario_db}" -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
   if [ $? -eq 0 ] && [ -s "$ARQUIVO_BACKUP" ]; then
     chown deploy:deploy "$ARQUIVO_BACKUP" 2>/dev/null || true
     printf "${GREEN} >> Backup salvo: ${ARQUIVO_BACKUP}${WHITE}\n"
   else
-    printf "${RED} >> Erro ao gerar backup. Verifique permissões e usuário/senha do PostgreSQL.${WHITE}\n"
+    printf "${RED} >> Erro ao gerar backup. Verifique usuário e senha do banco.${WHITE}\n"
     [ -f "$ARQUIVO_BACKUP" ] && rm -f "$ARQUIVO_BACKUP"
     sleep 2
     return 1
