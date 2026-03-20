@@ -932,82 +932,23 @@ restaurar_backup_banco_alta_performance_ferramentas() {
   BACKUPS_AP=()
   while IFS= read -r f; do
     [ -n "$f" ] && BACKUPS_AP+=("$f")
-  done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "backup-*.sql.gz" -o -name "backup-*.sql" \) 2>/dev/null | sort -r)
+  done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "*.sql.gz" -o -name "*.sql" \) 2>/dev/null | sort -r)
   if [ ${#BACKUPS_AP[@]} -eq 0 ]; then
     printf "${RED} >> Nenhum backup encontrado em ${BACKUP_DIR}${WHITE}\n"
     sleep 2
     return 1
   fi
 
-  DBS_COM_BACKUP=()
-  for f in "${BACKUPS_AP[@]}"; do
-    nome_tmp="$(basename "$f")"
-    base_tmp="${nome_tmp#backup-}"
-    base_tmp="${base_tmp%.sql.gz}"
-    base_tmp="${base_tmp%.sql}"
-    db_tmp="$(echo "${base_tmp}" | sed -E 's/-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$//')"
-    [ -z "${db_tmp}" ] && continue
-    ja_existe=0
-    for dbi in "${DBS_COM_BACKUP[@]}"; do
-      [ "${dbi}" = "${db_tmp}" ] && ja_existe=1 && break
-    done
-    [ "${ja_existe}" -eq 0 ] && DBS_COM_BACKUP+=("${db_tmp}")
-  done
-  if [ ${#DBS_COM_BACKUP[@]} -eq 0 ]; then
-    printf "${RED} >> Não foi possível identificar bancos pelos nomes dos backups.${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-  printf "${WHITE} >> Bancos com backup na pasta ${BACKUP_DIR}:${WHITE}\n"
+  printf "${WHITE} >> Backups encontrados em ${BACKUP_DIR}:${WHITE}\n"
   echo
   local i=1
-  for db in "${DBS_COM_BACKUP[@]}"; do
-    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$db"
-    ((i++))
-  done
-  printf "   [${BLUE}0${WHITE}] Cancelar\n"
-  echo
-  printf "${YELLOW} >> Escolha o banco que deseja restaurar:${WHITE}\n"
-  read -p "> " op_db
-  if [ "$op_db" = "0" ] || [ -z "$op_db" ]; then
-    printf "${YELLOW} >> Cancelado.${WHITE}\n"
-    sleep 2
-    return 0
-  fi
-  local db_origem=""
-  i=1
-  for db in "${DBS_COM_BACKUP[@]}"; do
-    if [ "$i" = "$op_db" ]; then
-      db_origem="$db"
-      break
-    fi
-    ((i++))
-  done
-  if [ -z "$db_origem" ]; then
-    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-
-  BACKUPS_DB_ESCOLHIDO=()
-  while IFS= read -r f; do
-    [ -n "$f" ] && BACKUPS_DB_ESCOLHIDO+=("$f")
-  done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "backup-${db_origem}-*.sql.gz" -o -name "backup-${db_origem}-*.sql" \) 2>/dev/null | sort -r)
-  if [ ${#BACKUPS_DB_ESCOLHIDO[@]} -eq 0 ]; then
-    printf "${RED} >> Nenhum backup encontrado para o banco ${db_origem}.${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-  printf "${WHITE} >> Backups disponíveis para ${db_origem}:${WHITE}\n"
-  echo
-  i=1
-  for f in "${BACKUPS_DB_ESCOLHIDO[@]}"; do
+  for f in "${BACKUPS_AP[@]}"; do
     printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
     ((i++))
   done
   printf "   [${BLUE}0${WHITE}] Cancelar\n"
   echo
-  printf "${YELLOW} >> Escolha o backup para restaurar:${WHITE}\n"
+  printf "${YELLOW} >> Escolha o backup que deseja restaurar:${WHITE}\n"
   read -p "> " op_backup
   if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
     printf "${YELLOW} >> Cancelado.${WHITE}\n"
@@ -1016,7 +957,7 @@ restaurar_backup_banco_alta_performance_ferramentas() {
   fi
   local arquivo_escolhido=""
   i=1
-  for f in "${BACKUPS_DB_ESCOLHIDO[@]}"; do
+  for f in "${BACKUPS_AP[@]}"; do
     if [ "$i" = "$op_backup" ]; then
       arquivo_escolhido="$f"
       break
@@ -1028,8 +969,25 @@ restaurar_backup_banco_alta_performance_ferramentas() {
     sleep 2
     return 1
   fi
-  local nome_arquivo
+
+  local nome_arquivo db_origem base_nome
   nome_arquivo="$(basename "$arquivo_escolhido")"
+  base_nome="${nome_arquivo%.sql.gz}"
+  base_nome="${base_nome%.sql}"
+  db_origem=""
+  if [[ "$base_nome" =~ ^backup-([A-Za-z0-9_]+)-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
+    db_origem="${BASH_REMATCH[1]}"
+  elif [[ "$base_nome" =~ backup_([A-Za-z0-9_]+)_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
+    db_origem="${BASH_REMATCH[1]}"
+  elif [[ "$base_nome" =~ backup-([A-Za-z0-9_]+)$ ]]; then
+    db_origem="${BASH_REMATCH[1]}"
+  fi
+  if [ -z "$db_origem" ]; then
+    printf "${YELLOW} >> Não foi possível detectar o banco automaticamente pelo nome do arquivo.${WHITE}\n"
+    printf "${YELLOW} >> Informe o nome do banco de destino base (ex: ${empresa}):${WHITE}\n"
+    read -p "> " db_origem
+    [ -z "$db_origem" ] && printf "${RED} >> Banco não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
   printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "${nome_arquivo}"
   printf "${WHITE} >> Banco de destino base: %s${WHITE}\n" "${db_origem}"
   echo
