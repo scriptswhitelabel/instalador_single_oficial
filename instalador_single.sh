@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.2\n"
+  printf "                                INSTALADOR 8.3\n"
   printf "\n\n"
 }
 
@@ -890,6 +890,205 @@ listar_bancos_ferramentas() {
   read -r
 }
 
+# Restaurar backup do Postgres Alta Performance (Docker) a partir de /home/deploy/backup-bd-docker
+restaurar_backup_banco_alta_performance_ferramentas() {
+  banner
+  printf "${WHITE} >> Restaurar backup do banco Alta Performance (Docker)...${WHITE}\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+  fi
+  if [ "${ALTA_PERFORMANCE}" != "1" ]; then
+    printf "${RED} >> Esta opção é apenas para instalação em modo Alta Performance.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if [ -z "${empresa}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa:${WHITE}\n"
+    read -p "> " empresa
+    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  local senha_db="${senha_deploy}"
+  if [ -z "${senha_db}" ]; then
+    printf "${YELLOW} >> Senha do banco (senha_deploy) não encontrada. Informe a senha:${WHITE}\n"
+    read -s -p "> " senha_db
+    echo
+    [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+  local BACKUP_DIR="/home/deploy/backup-bd-docker"
+  if [ ! -d "${BACKUP_DIR}" ]; then
+    printf "${RED} >> Pasta de backup não encontrada: ${BACKUP_DIR}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  local POSTGRES_CONTAINER="postgres_${empresa}"
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${POSTGRES_CONTAINER}$"; then
+    printf "${RED} >> Container ${POSTGRES_CONTAINER} não está em execução.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  BACKUPS_AP=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && BACKUPS_AP+=("$f")
+  done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "backup-*.sql.gz" -o -name "backup-*.sql" \) 2>/dev/null | sort -r)
+  if [ ${#BACKUPS_AP[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum backup encontrado em ${BACKUP_DIR}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  DBS_COM_BACKUP=()
+  for f in "${BACKUPS_AP[@]}"; do
+    nome_tmp="$(basename "$f")"
+    base_tmp="${nome_tmp#backup-}"
+    base_tmp="${base_tmp%.sql.gz}"
+    base_tmp="${base_tmp%.sql}"
+    db_tmp="$(echo "${base_tmp}" | sed -E 's/-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$//')"
+    [ -z "${db_tmp}" ] && continue
+    ja_existe=0
+    for dbi in "${DBS_COM_BACKUP[@]}"; do
+      [ "${dbi}" = "${db_tmp}" ] && ja_existe=1 && break
+    done
+    [ "${ja_existe}" -eq 0 ] && DBS_COM_BACKUP+=("${db_tmp}")
+  done
+  if [ ${#DBS_COM_BACKUP[@]} -eq 0 ]; then
+    printf "${RED} >> Não foi possível identificar bancos pelos nomes dos backups.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Bancos com backup na pasta ${BACKUP_DIR}:${WHITE}\n"
+  echo
+  local i=1
+  for db in "${DBS_COM_BACKUP[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$db"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o banco que deseja restaurar:${WHITE}\n"
+  read -p "> " op_db
+  if [ "$op_db" = "0" ] || [ -z "$op_db" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local db_origem=""
+  i=1
+  for db in "${DBS_COM_BACKUP[@]}"; do
+    if [ "$i" = "$op_db" ]; then
+      db_origem="$db"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$db_origem" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  BACKUPS_DB_ESCOLHIDO=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && BACKUPS_DB_ESCOLHIDO+=("$f")
+  done < <(find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "backup-${db_origem}-*.sql.gz" -o -name "backup-${db_origem}-*.sql" \) 2>/dev/null | sort -r)
+  if [ ${#BACKUPS_DB_ESCOLHIDO[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum backup encontrado para o banco ${db_origem}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backups disponíveis para ${db_origem}:${WHITE}\n"
+  echo
+  i=1
+  for f in "${BACKUPS_DB_ESCOLHIDO[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o backup para restaurar:${WHITE}\n"
+  read -p "> " op_backup
+  if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local arquivo_escolhido=""
+  i=1
+  for f in "${BACKUPS_DB_ESCOLHIDO[@]}"; do
+    if [ "$i" = "$op_backup" ]; then
+      arquivo_escolhido="$f"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$arquivo_escolhido" ] || [ ! -f "$arquivo_escolhido" ]; then
+    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  local nome_arquivo
+  nome_arquivo="$(basename "$arquivo_escolhido")"
+  printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "${nome_arquivo}"
+  printf "${WHITE} >> Banco de destino base: %s${WHITE}\n" "${db_origem}"
+  echo
+  printf "${YELLOW} >> Como deseja restaurar?${WHITE}\n"
+  printf "   [${BLUE}1${WHITE}] Substituir banco ${db_origem} (DROP + CREATE + RESTORE)\n"
+  printf "   [${BLUE}2${WHITE}] Restaurar em novo banco ${db_origem}_novo\n"
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  read -p "> " op_tipo
+  if [ "$op_tipo" = "0" ] || [ -z "$op_tipo" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  local db_destino="${db_origem}"
+  if [ "$op_tipo" = "2" ]; then
+    db_destino="${db_origem}_novo"
+  fi
+  if [ "$op_tipo" = "1" ]; then
+    printf "${WHITE} >> Encerrando conexões com ${db_origem}...${WHITE}\n"
+    docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_origem}' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
+    sleep 1
+    printf "${WHITE} >> Recriando banco ${db_origem}...${WHITE}\n"
+    docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "DROP DATABASE IF EXISTS ${db_origem};" >/dev/null 2>&1 || true
+    if ! docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "CREATE DATABASE ${db_origem} OWNER ${empresa};" >/dev/null 2>&1; then
+      printf "${RED} >> Erro ao criar banco ${db_origem} no container.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  else
+    printf "${WHITE} >> Criando banco ${db_destino}...${WHITE}\n"
+    if ! docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "CREATE DATABASE ${db_destino} OWNER ${empresa};" >/dev/null 2>&1; then
+      printf "${RED} >> Erro ao criar banco ${db_destino}. Pode já existir.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  fi
+  printf "${WHITE} >> Restaurando backup em ${db_destino}...${WHITE}\n"
+  if [[ "${arquivo_escolhido}" == *.sql.gz ]]; then
+    if gunzip -c "${arquivo_escolhido}" | docker exec -i "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d "${db_destino}" >/dev/null 2>&1; then
+      printf "${GREEN} >> Restauração concluída com sucesso em ${db_destino}.${WHITE}\n"
+    else
+      printf "${RED} >> Erro ao restaurar o backup compactado em ${db_destino}.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  else
+    if cat "${arquivo_escolhido}" | docker exec -i "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d "${db_destino}" >/dev/null 2>&1; then
+      printf "${GREEN} >> Restauração concluída com sucesso em ${db_destino}.${WHITE}\n"
+    else
+      printf "${RED} >> Erro ao restaurar o backup em ${db_destino}.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  fi
+  echo
+  sleep 2
+}
+
 # Menu de Ferramentas
 menu_ferramentas() {
   while true; do
@@ -908,6 +1107,7 @@ menu_ferramentas() {
     printf "   [${BLUE}10${WHITE}] Backup do banco\n"
     printf "   [${BLUE}11${WHITE}] Importar backup do banco da API Oficial\n"
     printf "   [${BLUE}12${WHITE}] Listar Bancos Existentes\n"
+    printf "   [${BLUE}13${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1016,6 +1216,11 @@ menu_ferramentas() {
       ;;
     12)
       listar_bancos_ferramentas
+      ;;
+    13)
+      restaurar_backup_banco_alta_performance_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
       ;;
     0)
       return
