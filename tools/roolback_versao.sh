@@ -179,10 +179,35 @@ validar_e_atualizar_token_rollback() {
   return 0
 }
 
+# Multiflow-pro: substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token (igual na atualização)
+aplicar_token_baileys_package_json() {
+  local emp="${1:-$empresa}"
+  local tok="${2:-}"
+  if [ -z "$tok" ]; then
+    # Preferir token validado nesta sessão (ex.: usuário digitou "novo" em validar_token_github)
+    tok="${GITHUB_TOKEN_VALIDATED:-${github_token:-}}"
+  fi
+  local repo="${3:-$repo_url}"
+  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  local pkg="/home/deploy/${emp}/backend/package.json"
+  [ ! -f "$pkg" ] && return 0
+  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
+  if [ -z "$tok" ]; then
+    printf "${YELLOW} >> Aviso: token vazio; não foi possível substituir TOKEN_GITHUB no package.json (baileys).${WHITE}\n"
+    return 0
+  fi
+  local tok_sed="${tok//&/\\&}"
+  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+  chown deploy:deploy "$pkg" 2>/dev/null || true
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  return 0
+}
+
 # Definir lista de versões disponíveis
 # Formato: "versao:commit_hash"
 definir_versoes() {
   declare -gA VERSOES
+  VERSOES["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9"
   VERSOES["7.3.1"]="43707cce9e6069e838df05dcf53816eabc4f0b35"
   VERSOES["7.1"]="8cecb519938b26ccd5418441703f3ad64a6eb15f"
   VERSOES["6.6"]="1692f830009b4364126c763fa7702bf401280989"
@@ -524,6 +549,7 @@ STOPPM2
   if [ ! -d "$BACKEND_DIR" ]; then
     printf "${YELLOW} >> Aviso: Diretório backend não encontrado. Pulando...\n${WHITE}"
   else
+    aplicar_token_baileys_package_json
     sudo su - deploy <<BACKEND
 # Configura PATH para Node.js
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -826,6 +852,7 @@ STOPPM2
   if [ ! -d "$BACKEND_DIR" ]; then
     printf "${YELLOW} >> Aviso: Diretório backend não encontrado. Pulando...\n${WHITE}"
   else
+    aplicar_token_baileys_package_json
     sudo su - deploy <<BACKEND
 # Configura PATH para Node.js
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then

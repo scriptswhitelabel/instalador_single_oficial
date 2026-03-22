@@ -2728,6 +2728,7 @@ validar_e_atualizar_token_antes_atualizar() {
 # Definir versões disponíveis para instalação
 definir_versoes_instalacao() {
   declare -gA VERSOES_INSTALACAO
+  VERSOES_INSTALACAO["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9" 
   VERSOES_INSTALACAO["7.3.1"]="43707cce9e6069e838df05dcf53816eabc4f0b35"
   VERSOES_INSTALACAO["7.1"]="8cecb519938b26ccd5418441703f3ad64a6eb15f"
   VERSOES_INSTALACAO["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
