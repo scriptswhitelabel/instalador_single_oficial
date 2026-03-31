@@ -117,26 +117,17 @@ EOF
   } || trata_erro "atualizar_codigo_apioficial"
 }
 
-# Reiniciar API Oficial no PM2
+# Reiniciar API Oficial no PM2 (su -c garante o mesmo ambiente que pm2 list na verificação)
 reiniciar_apioficial() {
   banner
   printf "${WHITE} >> Reiniciando API Oficial no PM2...\n"
   echo
   {
-    sudo su - deploy <<EOF
-    # Parar a API Oficial se estiver rodando
-    pm2 stop api_oficial 2>/dev/null || true
-    
-    # Iniciar a API Oficial
-    pm2 restart api_oficial
-    
-    # Salvar configuração do PM2
-    pm2 save
-    
-    printf "${GREEN} >> API Oficial reiniciada com sucesso!${WHITE}\n"
-    sleep 2
-EOF
+    sudo su - deploy -c "cd /home/deploy/${empresa}/api_oficial && (pm2 restart api_oficial || pm2 start dist/main.js --name api_oficial) && pm2 save"
   } || trata_erro "reiniciar_apioficial"
+  printf "${GREEN} >> API Oficial reiniciada com sucesso!${WHITE}\n"
+  echo
+  sleep 2
 }
 
 # Função principal
