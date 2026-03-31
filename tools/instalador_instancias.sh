@@ -40,6 +40,52 @@ trata_erro() {
   exit 1
 }
 
+# Ativa REDIS_URI_ACK e Bull Board no .env do backend (backend/package.json >= 7.4.1).
+# $3 opcional: valor de REDIS_URI_ACK ao acrescentar bloco em .env sem as linhas comentadas.
+descomentar_env_redis_bull_ack() {
+  local env_file="$1"
+  local pkg_json="${2:-}"
+  local redis_ack_val_append="${3:-}"
+  [ -z "$pkg_json" ] && pkg_json="$(dirname "$env_file")/package.json"
+  [ ! -f "$env_file" ] && return 0
+  [ ! -f "$pkg_json" ] && return 0
+  local ver
+  ver=$(grep -m1 '"version"' "$pkg_json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -z "$ver" ] && return 0
+  if [ "$(printf '%s\n' "$ver" "7.4.1" | sort -V | head -1)" != "7.4.1" ]; then
+    return 0
+  fi
+  if grep -q '^REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    printf "${GREEN} >> REDIS_URI_ACK / Bull Board já ativos no .env (backend ${ver}).${WHITE}\n"
+    return 0
+  fi
+  if grep -q '^# REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    sed -i 's/^# REDIS_URI_ACK=/REDIS_URI_ACK=/' "$env_file"
+    sed -i 's/^# BULL_BOARD=/BULL_BOARD=/' "$env_file"
+    sed -i 's/^# BULL_USER=/BULL_USER=/' "$env_file"
+    sed -i 's/^# BULL_PASS=/BULL_PASS=/' "$env_file"
+    printf "${GREEN} >> REDIS_URI_ACK / Bull Board ativados no .env (backend ${ver} >= 7.4.1).${WHITE}\n"
+    return 0
+  fi
+  local db_pass bull_user
+  db_pass=$(grep '^DB_PASS=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | head -1)
+  bull_user=$(grep '^MAIL_USER=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | head -1)
+  [ -z "$db_pass" ] && return 0
+  [ -z "$bull_user" ] && bull_user="admin@localhost"
+  {
+    echo ""
+    if [ -n "$redis_ack_val_append" ]; then
+      echo "REDIS_URI_ACK=${redis_ack_val_append}"
+    else
+      echo "REDIS_URI_ACK=redis://:${db_pass}@127.0.0.1:6379"
+    fi
+    echo "BULL_BOARD=true"
+    echo "BULL_USER=${bull_user}"
+    echo "BULL_PASS=${db_pass}"
+  } >> "$env_file"
+  printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
+}
+
 # Carregar variáveis base
 carregar_variaveis_base() {
   if [ -f "$ARQUIVO_VARIAVEIS_BASE" ]; then
@@ -1294,6 +1340,10 @@ DB_NAME=${nova_empresa}
 REDIS_URI=redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}
 REDIS_OPT_LIMITER_MAX=1
 REDIS_OPT_LIMITER_DURATION=3000
+# REDIS_URI_ACK=redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}
+# BULL_BOARD=true
+# BULL_USER=${email_deploy}
+# BULL_PASS=${senha_deploy}
 
 # --- RabbitMQ ---
 RABBITMQ_HOST=localhost
@@ -1363,6 +1413,8 @@ TRANSCRIBE_URL=http://localhost:4002
 MAX_BUFFER_SIZE_MB=200
 [-]EOF
 EOF
+
+    descomentar_env_redis_bull_ack "/home/deploy/${nova_empresa}/backend/.env" "/home/deploy/${nova_empresa}/backend/package.json" "redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}"
 
     sleep 2
 

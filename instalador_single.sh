@@ -3073,6 +3073,8 @@ MAX_BUFFER_SIZE_MB=200
 [-]EOF
 EOF
 
+    descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
+
     sleep 2
 
     banner
@@ -3924,15 +3926,24 @@ STOPPM2
 
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
   sleep 2
+UPDATEAPP
+
+  descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
+
+  sudo su - deploy <<RESTARTPM2
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  else
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
+  fi
   # Reiniciar apenas processos PM2 relacionados à empresa específica
-  # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
   pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
     if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
       pm2 restart "\$process_name" 2>/dev/null || true
     fi
   done
   pm2 save
-UPDATEAPP
+RESTARTPM2
 
   sudo su - root <<EOF
     if systemctl is-active --quiet nginx; then
@@ -3985,6 +3996,52 @@ EOF
 
     sleep 2
   } || trata_erro "otimiza_banco_atualizar"
+}
+
+# Ativa REDIS_URI_ACK e Bull Board no .env do backend (versão em backend/package.json >= 7.4.1).
+# $3 opcional: valor completo de REDIS_URI_ACK ao acrescentar bloco em .env antigo (ex.: instância com porta Redis dedicada).
+descomentar_env_redis_bull_ack() {
+  local env_file="$1"
+  local pkg_json="${2:-}"
+  local redis_ack_val_append="${3:-}"
+  [ -z "$pkg_json" ] && pkg_json="$(dirname "$env_file")/package.json"
+  [ ! -f "$env_file" ] && return 0
+  [ ! -f "$pkg_json" ] && return 0
+  local ver
+  ver=$(grep -m1 '"version"' "$pkg_json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -z "$ver" ] && return 0
+  if [ "$(printf '%s\n' "$ver" "7.4.1" | sort -V | head -1)" != "7.4.1" ]; then
+    return 0
+  fi
+  if grep -q '^REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    printf "${GREEN} >> REDIS_URI_ACK / Bull Board já ativos no .env (backend ${ver}).${WHITE}\n"
+    return 0
+  fi
+  if grep -q '^# REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    sed -i 's/^# REDIS_URI_ACK=/REDIS_URI_ACK=/' "$env_file"
+    sed -i 's/^# BULL_BOARD=/BULL_BOARD=/' "$env_file"
+    sed -i 's/^# BULL_USER=/BULL_USER=/' "$env_file"
+    sed -i 's/^# BULL_PASS=/BULL_PASS=/' "$env_file"
+    printf "${GREEN} >> REDIS_URI_ACK / Bull Board ativados no .env (backend ${ver} >= 7.4.1).${WHITE}\n"
+    return 0
+  fi
+  local db_pass bull_user
+  db_pass=$(grep '^DB_PASS=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | head -1)
+  bull_user=$(grep '^MAIL_USER=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | head -1)
+  [ -z "$db_pass" ] && return 0
+  [ -z "$bull_user" ] && bull_user="admin@localhost"
+  {
+    echo ""
+    if [ -n "$redis_ack_val_append" ]; then
+      echo "REDIS_URI_ACK=${redis_ack_val_append}"
+    else
+      echo "REDIS_URI_ACK=redis://:${db_pass}@127.0.0.1:6379"
+    fi
+    echo "BULL_BOARD=true"
+    echo "BULL_USER=${bull_user}"
+    echo "BULL_PASS=${db_pass}"
+  } >> "$env_file"
+  printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
 # Verificar e adicionar MAX_BUFFER_SIZE_MB no .env do backend
