@@ -844,8 +844,15 @@ STOPPM2
       echo "  - Assets salvos: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
     fi
     if [ -d "\$FRONTEND_DIR/public" ]; then
-      cp -rf "\$FRONTEND_DIR/public/"* "\$CUSTOM_DIR/public/" 2>/dev/null || true
-      echo "  - Public salvos: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+      pub_saved=0
+      for item in "\$FRONTEND_DIR/public"/*; do
+        [ -e "\$item" ] || continue
+        base=\$(basename "\$item")
+        [ "\$base" = "index.html" ] && continue
+        cp -rf "\$item" "\$CUSTOM_DIR/public/" 2>/dev/null || true
+        pub_saved=\$((pub_saved + 1))
+      done
+      echo "  - Public salvos (exceto index.html): \$pub_saved arquivos"
     fi
     printf "${GREEN} >> Pasta de personalizações criada com sucesso!${WHITE}\n"
     printf "${YELLOW} >> DICA: Edite os arquivos em \$CUSTOM_DIR para personalizar logos/favicon${WHITE}\n"
@@ -913,6 +920,8 @@ STOPPM2
   # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
   if [ -d "\$CUSTOM_DIR" ]; then
     printf "${WHITE} >> Aplicando personalizações de \$CUSTOM_DIR...\n"
+    # Splash/tela inicial vêm do repositório; index.html legado não deve sobrescrever o git reset
+    rm -f "\$CUSTOM_DIR/public/index.html" 2>/dev/null || true
 
     # Restaurar assets
     if [ -d "\$CUSTOM_DIR/assets" ] && [ "\$(ls -A \$CUSTOM_DIR/assets 2>/dev/null)" ]; then
@@ -920,10 +929,17 @@ STOPPM2
       echo "  - Assets aplicados: \$(ls \$CUSTOM_DIR/assets/ 2>/dev/null | wc -l) arquivos"
     fi
 
-    # Restaurar public
+    # Restaurar public (favicon, manifest, etc. — nunca index.html)
     if [ -d "\$CUSTOM_DIR/public" ] && [ "\$(ls -A \$CUSTOM_DIR/public 2>/dev/null)" ]; then
-      cp -rf "\$CUSTOM_DIR/public/"* "\$FRONTEND_DIR/public/" 2>/dev/null || true
-      echo "  - Public aplicados: \$(ls \$CUSTOM_DIR/public/ 2>/dev/null | wc -l) arquivos"
+      pub_applied=0
+      for item in "\$CUSTOM_DIR/public"/*; do
+        [ -e "\$item" ] || continue
+        base=\$(basename "\$item")
+        [ "\$base" = "index.html" ] && continue
+        cp -rf "\$item" "\$FRONTEND_DIR/public/" 2>/dev/null || true
+        pub_applied=\$((pub_applied + 1))
+      done
+      echo "  - Public aplicados (exceto index.html): \$pub_applied arquivos"
     fi
 
     printf "${GREEN} >> Personalizações aplicadas com sucesso!${WHITE}\n"
