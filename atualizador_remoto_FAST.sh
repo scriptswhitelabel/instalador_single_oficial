@@ -408,7 +408,7 @@ EOF
 
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
-  sudo su - deploy <<RESTARTPM2
+  sudo su - deploy <<RESTARTPM2ATUALIZACAO
 printf "${WHITE} >> Atualização Concluida, Reiniciando Instancias da empresa ${empresa} e Aplicando a Atualização... \n"
 sleep 7
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -416,13 +416,11 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
-  if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
-    pm2 restart "\$process_name" 2>/dev/null || true
-  fi
+for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
+  pm2 restart "\$_p" 2>/dev/null || true
 done
 pm2 save
-RESTARTPM2
+RESTARTPM2ATUALIZACAO
 
   sudo su - root <<EOF
     if systemctl is-active --quiet nginx; then

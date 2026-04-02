@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.3\n"
+  printf "                                INSTALADOR 8.4\n"
   printf "\n\n"
 }
 
@@ -3606,10 +3606,8 @@ EOF
   fi
   # Reiniciar apenas processos PM2 relacionados à empresa específica
   # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
-  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
-    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
-      pm2 restart "\$process_name" 2>/dev/null || true
-    fi
+  for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
+    pm2 restart "\$_p" 2>/dev/null || true
   done
 RESTARTPM2
 
@@ -3749,10 +3747,8 @@ baixa_codigo_atualizar() {
   # Parar apenas processos PM2 relacionados à empresa específica
   # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
   # Não afeta processos de outras instâncias
-  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
-    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
-      pm2 stop "\$process_name" 2>/dev/null || true
-    fi
+  for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
+    pm2 stop "\$_p" 2>/dev/null || true
   done
 STOPPM2
 
@@ -3946,20 +3942,18 @@ UPDATEAPP
 
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
-  sudo su - deploy <<RESTARTPM2
+  sudo su - deploy <<RESTARTPM2ATUALIZACAO
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
     export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
-  # Reiniciar apenas processos PM2 relacionados à empresa específica
-  pm2 list | grep "${empresa}-" | awk '{print \$2}' | while read process_name; do
-    if [ -n "\$process_name" ] && [ "\$process_name" != "name" ]; then
-      pm2 restart "\$process_name" 2>/dev/null || true
-    fi
+  # Nomes fixos (pm2 list + awk na tabela com │/cores costuma falhar)
+  for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
+    pm2 restart "\$_p" 2>/dev/null || true
   done
   pm2 save
-RESTARTPM2
+RESTARTPM2ATUALIZACAO
 
   sudo su - root <<EOF
     if systemctl is-active --quiet nginx; then
