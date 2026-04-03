@@ -207,6 +207,8 @@ aplicar_token_baileys_package_json() {
 # Formato: "versao:commit_hash"
 definir_versoes() {
   declare -gA VERSOES
+  VERSOES["7.4.3"]="18b3e4d0d80bedad45e26c290027939bd1848304"  
+  VERSOES["7.4.2"]="6df67a197ad2505ebb7c812e096b67d4603475e5"
   VERSOES["7.4.1"]="3bf099b0e3951dbfe7b11fdcb7ef42e038d2c193"
   VERSOES["7.3.9"]="f0f67928e6c4f9736b273882987313be2bb30ce6"
   VERSOES["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9"

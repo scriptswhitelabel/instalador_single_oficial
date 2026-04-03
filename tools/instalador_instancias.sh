@@ -121,11 +121,18 @@ validar_token_github() {
   fi
 }
 
-# Definir versões disponíveis para instalação (mesma do instalador_single.sh)
+# Definir versões disponíveis para instalação (alinhado a instalador_single.sh / roolback_versao.sh)
 definir_versoes_instalacao() {
   declare -gA VERSOES_INSTALACAO
+  VERSOES_INSTALACAO["7.4.1"]="3bf099b0e3951dbfe7b11fdcb7ef42e038d2c193"
+  VERSOES_INSTALACAO["7.3.9"]="f0f67928e6c4f9736b273882987313be2bb30ce6"
+  VERSOES_INSTALACAO["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9"
+  VERSOES_INSTALACAO["7.3.1"]="43707cce9e6069e838df05dcf53816eabc4f0b35"
+  VERSOES_INSTALACAO["7.1"]="8cecb519938b26ccd5418441703f3ad64a6eb15f"
+  VERSOES_INSTALACAO["6.6"]="1692f830009b4364126c763fa7702bf401280989"
   VERSOES_INSTALACAO["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
   VERSOES_INSTALACAO["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
+  VERSOES_INSTALACAO["6.4.5"]="251c6f693b67c76468311b0ca9c41f89f8a3aca0"
   VERSOES_INSTALACAO["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
   VERSOES_INSTALACAO["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
 }

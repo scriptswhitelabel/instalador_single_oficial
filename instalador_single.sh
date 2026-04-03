@@ -1541,6 +1541,13 @@ atualizar_base() {
     return
   fi
 
+  if ! selecionar_versao_atualizacao; then
+    printf "${RED} >> Atualização cancelada. Voltando ao menu principal...${WHITE}\n"
+    sleep 2
+    menu
+    return
+  fi
+
   backup_app_atualizar || trata_erro "backup_app_atualizar"
   instala_ffmpeg_base || trata_erro "instala_ffmpeg_base"
   config_cron_base || trata_erro "config_cron_base"
@@ -2726,14 +2733,20 @@ validar_e_atualizar_token_antes_atualizar() {
 }
 
 # Definir versões disponíveis para instalação
+# Manter alinhado com tools/roolback_versao.sh (definir_versoes)
 definir_versoes_instalacao() {
   declare -gA VERSOES_INSTALACAO
-  VERSOES_INSTALACAO["7.4.1"]="3bf099b0e3951dbfe7b11fdcb7ef42e038d2c193" 
-  VERSOES_INSTALACAO["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9" 
+  VERSOES_INSTALACAO["7.4.3"]="18b3e4d0d80bedad45e26c290027939bd1848304"
+  VERSOES_INSTALACAO["7.4.2"]="6df67a197ad2505ebb7c812e096b67d4603475e5" 
+  VERSOES_INSTALACAO["7.4.1"]="3bf099b0e3951dbfe7b11fdcb7ef42e038d2c193"
+  VERSOES_INSTALACAO["7.3.9"]="f0f67928e6c4f9736b273882987313be2bb30ce6"
+  VERSOES_INSTALACAO["7.3.5"]="2536883d30f6d03116f6d7b960155bd3cead23e9"
   VERSOES_INSTALACAO["7.3.1"]="43707cce9e6069e838df05dcf53816eabc4f0b35"
   VERSOES_INSTALACAO["7.1"]="8cecb519938b26ccd5418441703f3ad64a6eb15f"
+  VERSOES_INSTALACAO["6.6"]="1692f830009b4364126c763fa7702bf401280989"
   VERSOES_INSTALACAO["6.5.2"]="6607976a25f86127bd494bba20017fe6bbd9f50a"
   VERSOES_INSTALACAO["6.5"]="ab5565df5937f6113bbbb6b2ce9c526e25e525ef"
+  VERSOES_INSTALACAO["6.4.5"]="251c6f693b67c76468311b0ca9c41f89f8a3aca0"
   VERSOES_INSTALACAO["6.4.4"]="b5de35ebb4acb10694ce4e8b8d6068b31eeabef9"
   VERSOES_INSTALACAO["6.4.3"]="6aa224db151bd8cbbf695b07a8624c976e89db00"
 }
@@ -2741,7 +2754,7 @@ definir_versoes_instalacao() {
 # Mostrar lista de versões disponíveis para instalação
 mostrar_lista_versoes_instalacao() {
   printf "${WHITE}═══════════════════════════════════════════════════════════\n"
-  printf "  VERSÕES DISPONÍVEIS PARA INSTALAÇÃO\n"
+  printf "  VERSÕES DISPONÍVEIS %s\n" "${TITULO_LISTA_VERSOES:-PARA INSTALAÇÃO}"
   printf "═══════════════════════════════════════════════════════════\n${WHITE}"
   echo
   
@@ -2815,6 +2828,67 @@ selecionar_versao_instalacao() {
     echo
     sleep 2
   fi
+}
+
+# Selecionar versão para atualização (mesma lista da instalação / rollback; só multiflow-pro)
+selecionar_versao_atualizacao() {
+  banner
+  printf "${WHITE} >> Selecionando versão para atualização...\n"
+  echo
+
+  if ! echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    declare -g versao_atualizacao="Mais_Recente"
+    declare -g commit_atualizacao=""
+    printf "${GREEN} >> Atualização padrão: branch principal do repositório.${WHITE}\n"
+    echo
+    sleep 1
+    return 0
+  fi
+
+  definir_versoes_instalacao
+  TITULO_LISTA_VERSOES="PARA ATUALIZAÇÃO"
+  mostrar_lista_versoes_instalacao
+  unset TITULO_LISTA_VERSOES
+
+  local versoes_array=($(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r))
+  local total_versoes=${#versoes_array[@]}
+
+  if [ $total_versoes -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma versão disponível na lista.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  printf "${YELLOW} >> Selecione a versão desejada (0-${total_versoes}):${WHITE}\n"
+  read -p "> " ESCOLHA_ATUALIZACAO
+
+  if ! [[ "$ESCOLHA_ATUALIZACAO" =~ ^[0-9]+$ ]]; then
+    printf "${RED} >> ERRO: Entrada inválida. Digite um número.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  if [ "$ESCOLHA_ATUALIZACAO" -lt 0 ] || [ "$ESCOLHA_ATUALIZACAO" -gt $total_versoes ]; then
+    printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 0 e ${total_versoes}.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  if [ "$ESCOLHA_ATUALIZACAO" -eq 0 ]; then
+    declare -g versao_atualizacao="Mais_Recente"
+    declare -g commit_atualizacao=""
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE}\n"
+    printf "${GREEN} >> Será usada a última revisão da branch MULTI100-OFICIAL-u21${WHITE}\n"
+  else
+    local index=$((ESCOLHA_ATUALIZACAO - 1))
+    declare -g versao_atualizacao="${versoes_array[$index]}"
+    declare -g commit_atualizacao="${VERSOES_INSTALACAO[$versao_atualizacao]}"
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}${versao_atualizacao}${WHITE}\n"
+    printf "${GREEN} >> Commit: ${BLUE}${commit_atualizacao}${WHITE}\n"
+  fi
+  echo
+  sleep 2
+  return 0
 }
 
 # Clona código de repo privado
@@ -3830,9 +3904,21 @@ STOPPM2
   fi
   # ==== FIM PASTA ESTÁTICA ====
 
-  git fetch origin
-  git checkout MULTI100-OFICIAL-u21
-  git reset --hard origin/MULTI100-OFICIAL-u21
+  git fetch --all --prune
+  if [ -n "${commit_atualizacao}" ]; then
+    printf "${WHITE} >> Atualizando para commit fixo (versão pinada)...\n"
+    if ! git cat-file -e "${commit_atualizacao}^{commit}" 2>/dev/null; then
+      echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch. Verifique a lista de versões ou faça fetch completo."
+      exit 1
+    fi
+    git reset --hard
+    git clean -fd
+    _BR_ATU="atualizacao-\$(date +%Y%m%d-%H%M%S)"
+    git checkout -b "\$_BR_ATU" "${commit_atualizacao}"
+  else
+    git checkout MULTI100-OFICIAL-u21
+    git reset --hard origin/MULTI100-OFICIAL-u21
+  fi
 
   # Reaplicar porta da transcrição (git reset reverte main.py para o padrão 4002)
   if [ -d "\$APP_DIR/api_transcricao" ] && [ -f "\$APP_DIR/api_transcricao/main.py" ]; then
