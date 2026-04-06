@@ -40,6 +40,37 @@ trata_erro() {
   exit 1
 }
 
+# Alta Performance: app usa PgBouncer na 6732; REDIS_URI_ACK deve coincidir com REDIS_URI (Redis Docker, ex. 1569).
+# Também honra ALTA_PERFORMANCE=1 quando o .env ainda não reflete a porta (ex. fluxo de atualização).
+deve_sincronizar_redis_uri_ack_com_redis_uri() {
+  local env_file="$1"
+  grep -q '^DB_PORT=6732' "$env_file" 2>/dev/null && return 0
+  [ "${ALTA_PERFORMANCE:-0}" = "1" ] && return 0
+  return 1
+}
+
+sincronizar_redis_uri_ack_com_redis_uri_se_ap() {
+  local env_file="$1"
+  [ ! -f "$env_file" ] && return 0
+  deve_sincronizar_redis_uri_ack_com_redis_uri "$env_file" || return 0
+  local redis_main
+  redis_main=$(grep -m1 '^REDIS_URI=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+  [ -z "$redis_main" ] && return 0
+  if ! grep -q '^REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    return 0
+  fi
+  local tmp
+  tmp=$(mktemp)
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" == REDIS_URI_ACK=* ]]; then
+      printf 'REDIS_URI_ACK=%s\n' "$redis_main"
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+  return 0
+}
+
 # Ativa REDIS_URI_ACK e Bull Board no .env do backend (backend/package.json >= 7.4.1).
 # $3 opcional: valor de REDIS_URI_ACK ao acrescentar bloco em .env sem as linhas comentadas.
 descomentar_env_redis_bull_ack() {
@@ -55,7 +86,10 @@ descomentar_env_redis_bull_ack() {
   if [ "$(printf '%s\n' "$ver" "7.4.1" | sort -V | head -1)" != "7.4.1" ]; then
     return 0
   fi
+  local redis_main_val
+  redis_main_val=$(grep -m1 '^REDIS_URI=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r')
   if grep -q '^REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
+    sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
     printf "${GREEN} >> REDIS_URI_ACK / Bull Board já ativos no .env (backend ${ver}).${WHITE}\n"
     return 0
   fi
@@ -64,6 +98,7 @@ descomentar_env_redis_bull_ack() {
     sed -i 's/^# BULL_BOARD=/BULL_BOARD=/' "$env_file"
     sed -i 's/^# BULL_USER=/BULL_USER=/' "$env_file"
     sed -i 's/^# BULL_PASS=/BULL_PASS=/' "$env_file"
+    sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
     printf "${GREEN} >> REDIS_URI_ACK / Bull Board ativados no .env (backend ${ver} >= 7.4.1).${WHITE}\n"
     return 0
   fi
@@ -76,6 +111,8 @@ descomentar_env_redis_bull_ack() {
     echo ""
     if [ -n "$redis_ack_val_append" ]; then
       echo "REDIS_URI_ACK=${redis_ack_val_append}"
+    elif deve_sincronizar_redis_uri_ack_com_redis_uri "$env_file" && [ -n "$redis_main_val" ]; then
+      echo "REDIS_URI_ACK=${redis_main_val}"
     else
       echo "REDIS_URI_ACK=redis://:${db_pass}@127.0.0.1:6379"
     fi
@@ -83,6 +120,7 @@ descomentar_env_redis_bull_ack() {
     echo "BULL_USER=${bull_user}"
     echo "BULL_PASS=${db_pass}"
   } >> "$env_file"
+  sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
   printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
