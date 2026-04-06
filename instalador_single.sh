@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.4\n"
+  printf "                                INSTALADOR 8.5\n"
   printf "\n\n"
 }
 
@@ -890,7 +890,7 @@ listar_bancos_ferramentas() {
   read -r
 }
 
-# Restaurar backup do Postgres Alta Performance (Docker) a partir de /home/deploy/backup-bd-docker
+# Restaurar backup do Postgres Alta Performance (Docker) a partir de /home/deploy/backup-bd-docker-<empresa>
 restaurar_backup_banco_alta_performance_ferramentas() {
   banner
   printf "${WHITE} >> Restaurar backup do banco Alta Performance (Docker)...${WHITE}\n"
@@ -917,9 +917,14 @@ restaurar_backup_banco_alta_performance_ferramentas() {
     echo
     [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
   fi
-  local BACKUP_DIR="/home/deploy/backup-bd-docker"
+  local BACKUP_DIR="/home/deploy/backup-bd-docker-${empresa}"
+  local BACKUP_DIR_LEGACY="/home/deploy/backup-bd-docker"
+  if [ ! -d "${BACKUP_DIR}" ] && [ -d "${BACKUP_DIR_LEGACY}" ]; then
+    printf "${YELLOW} >> Pasta por empresa não encontrada; usando legado: ${BACKUP_DIR_LEGACY}${WHITE}\n"
+    BACKUP_DIR="${BACKUP_DIR_LEGACY}"
+  fi
   if [ ! -d "${BACKUP_DIR}" ]; then
-    printf "${RED} >> Pasta de backup não encontrada: ${BACKUP_DIR}${WHITE}\n"
+    printf "${RED} >> Pasta de backup não encontrada: /home/deploy/backup-bd-docker-${empresa}${WHITE}\n"
     sleep 2
     return 1
   fi

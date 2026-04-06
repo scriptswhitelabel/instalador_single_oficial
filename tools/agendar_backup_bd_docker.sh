@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Agendar e executar backup diário do Postgres em Docker (modo Alta Performance).
-# Um pg_dump por banco, salvo em /home/deploy/backup-bd-docker.
+# Um pg_dump por banco, salvo em /home/deploy/backup-bd-docker-<empresa> (nome da empresa no VARIAVEIS_INSTALACAO).
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -12,8 +12,6 @@ YELLOW='\033[1;33m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARQUIVO_VARIAVEIS="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-BACKUP_DIR="/home/deploy/backup-bd-docker"
-CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias"
 DB_HOST="127.0.0.1"
 DB_PORT="7532"
 CRON_SCRIPT_PATH="${SCRIPT_DIR}/agendar_backup_bd_docker.sh"
@@ -30,7 +28,7 @@ banner() {
   printf " ${WHITE}\n"
 }
 
-# Lê dias de retenção (arquivo em BACKUP_DIR ou padrão 7)
+# Lê dias de retenção (arquivo em BACKUP_DIR ou padrão 7). Usa CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias" definido antes.
 ler_retencao_dias() {
   if [ -f "${CONFIG_RETENCAO}" ]; then
     read -r ret < "${CONFIG_RETENCAO}" 2>/dev/null
@@ -45,15 +43,12 @@ ler_retencao_dias() {
 # Executa apenas o backup (chamado pelo cron ou com --backup)
 executar_backup() {
   export PATH="/usr/bin:/usr/local/bin:${PATH}"
-  mkdir -p "${BACKUP_DIR}"
-  chown deploy:deploy "${BACKUP_DIR}"
-  LOG="${BACKUP_DIR}/backup.log"
+  local LOG_FALLBACK="/tmp/backup-bd-docker-fallback.log"
 
-  RETENCAO_DIAS=$(ler_retencao_dias)
-  cd "${INSTALADOR_DIR}" || { echo "$(date): ERRO ao acessar ${INSTALADOR_DIR}" >> "${LOG}"; return 1; }
+  cd "${INSTALADOR_DIR}" || { echo "$(date): ERRO ao acessar ${INSTALADOR_DIR}" >> "${LOG_FALLBACK}"; return 1; }
 
   if [ ! -f "${ARQUIVO_VARIAVEIS}" ]; then
-    echo "$(date): VARIAVEIS_INSTALACAO não encontrado em ${ARQUIVO_VARIAVEIS}. Backup cancelado." >> "${LOG}" 2>&1
+    echo "$(date): VARIAVEIS_INSTALACAO não encontrado em ${ARQUIVO_VARIAVEIS}. Backup cancelado." >> "${LOG_FALLBACK}" 2>&1
     return 1
   fi
   # shellcheck source=/dev/null
@@ -62,13 +57,21 @@ executar_backup() {
   senha_deploy=$(echo "${senha_deploy:-}" | tr -d '\r\n' | xargs)
 
   if [ "${ALTA_PERFORMANCE}" != "1" ]; then
-    echo "$(date): Instalação não é Alta Performance. Backup cancelado." >> "${LOG}" 2>&1
+    echo "$(date): Instalação não é Alta Performance. Backup cancelado." >> "${LOG_FALLBACK}" 2>&1
     return 0
   fi
   if [ -z "${empresa}" ] || [ -z "${senha_deploy}" ]; then
-    echo "$(date): empresa ou senha_deploy vazios após ler ${ARQUIVO_VARIAVEIS}" >> "${LOG}" 2>&1
+    echo "$(date): empresa ou senha_deploy vazios após ler ${ARQUIVO_VARIAVEIS}" >> "${LOG_FALLBACK}" 2>&1
     return 1
   fi
+
+  BACKUP_DIR="/home/deploy/backup-bd-docker-${empresa}"
+  CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias"
+  mkdir -p "${BACKUP_DIR}"
+  chown deploy:deploy "${BACKUP_DIR}"
+  LOG="${BACKUP_DIR}/backup.log"
+
+  RETENCAO_DIAS=$(ler_retencao_dias)
 
   DATA=$(date +%Y-%m-%d_%H-%M-%S)
   POSTGRES_CONTAINER="postgres_${empresa}"
@@ -134,11 +137,16 @@ agendar() {
     return 1
   fi
 
+  empresa=$(echo "${empresa:-}" | tr -d '\r\n' | xargs)
+  senha_deploy=$(echo "${senha_deploy:-}" | tr -d '\r\n' | xargs)
   if [ -z "${empresa}" ] || [ -z "${senha_deploy}" ]; then
     printf "${RED} >> Variáveis empresa ou senha_deploy não encontradas em VARIAVEIS_INSTALACAO.${WHITE}\n"
     sleep 3
     return 1
   fi
+
+  BACKUP_DIR="/home/deploy/backup-bd-docker-${empresa}"
+  CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias"
 
   command -v psql >/dev/null 2>&1 || {
     printf "${WHITE} >> Instalando postgresql-client...${WHITE}\n"
