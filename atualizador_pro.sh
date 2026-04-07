@@ -791,10 +791,18 @@ baixa_codigo_atualizar() {
   sleep 2
   sudo su - deploy <<STOPPM2
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
     pm2 stop "\$_p" 2>/dev/null || true
@@ -830,10 +838,18 @@ STOPPM2
   frontend_port=${SERVER_PORT:-3000}
   sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   APP_DIR="/home/deploy/${empresa}"
@@ -974,10 +990,18 @@ UPDATEAPP
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
   sudo su - deploy <<RESTARTPM2ATUALIZACAO
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
     pm2 restart "\$_p" 2>/dev/null || true

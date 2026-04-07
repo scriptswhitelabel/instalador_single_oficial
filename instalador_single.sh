@@ -3163,17 +3163,20 @@ EOF
     echo
     aplicar_token_baileys_package_json
     sudo su - deploy <<BACKENDINSTALL
-  # Configura PATH para Node.js
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
+  else
+  # Configura PATH para Node.js (legado)
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
     export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   elif [ -f /usr/bin/node ]; then
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   else
-    # Tenta encontrar node no sistema
     NODE_DIR=\$(find /usr -type d -name "node" -o -type f -name "node" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
     if [ -n "\$NODE_DIR" ]; then
       export PATH=\$NODE_DIR:/usr/bin:\$PATH
     fi
+  fi
   fi
   
   # Verifica se node e npm estão disponíveis
@@ -3239,10 +3242,18 @@ FFMPEGFIX
     echo
     sudo su - deploy <<MIGRATEINSTALL
   # Configura PATH para Node.js
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   BACKEND_DIR="/home/deploy/${empresa}/backend"
@@ -3262,10 +3273,18 @@ MIGRATEINSTALL
     echo
     sudo su - deploy <<SEEDINSTALL
   # Configura PATH para Node.js
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   BACKEND_DIR="/home/deploy/${empresa}/backend"
@@ -3285,10 +3304,18 @@ SEEDINSTALL
     echo
     sudo su - deploy <<PM2BACKEND
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   BACKEND_DIR="/home/deploy/${empresa}/backend"
@@ -3339,10 +3366,18 @@ instala_frontend_base() {
   {
     sudo su - deploy <<FRONTENDINSTALL
   # Configura PATH para Node.js
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   FRONTEND_DIR="/home/deploy/${empresa}/frontend"
@@ -3393,10 +3428,18 @@ EOF
     echo
     sudo su - deploy <<FRONTENDBUILD
   # Configura PATH para Node.js
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   FRONTEND_DIR="/home/deploy/${empresa}/frontend"
@@ -3424,10 +3467,18 @@ FRONTENDBUILD
     echo
     sudo su - deploy <<PM2FRONTEND
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   FRONTEND_DIR="/home/deploy/${empresa}/frontend"
@@ -3680,10 +3731,18 @@ EOF
 
     sudo su - deploy <<RESTARTPM2
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   # Reiniciar apenas processos PM2 relacionados à empresa específica
   # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
@@ -3820,10 +3879,18 @@ baixa_codigo_atualizar() {
   sleep 2
   sudo su - deploy <<STOPPM2
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   # Parar apenas processos PM2 relacionados à empresa específica
   # Detecta todos os processos que começam com o nome da empresa (independente do sufixo)
@@ -3859,10 +3926,18 @@ STOPPM2
   porta_transcricao=${porta_transcricao:-4002}
   sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   APP_DIR="/home/deploy/${empresa}"
@@ -4036,10 +4111,18 @@ UPDATEAPP
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
   sudo su - deploy <<RESTARTPM2ATUALIZACAO
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   # Nomes fixos (pm2 list + awk na tabela com │/cores costuma falhar)
   for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
@@ -4504,10 +4587,18 @@ instalar_transcricao_audio_nativa() {
   
   sudo su - deploy <<RESTARTBACKEND
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   # Reiniciar apenas o backend desta instância para carregar a nova variável TRANSCRIBE_URL
@@ -4533,10 +4624,18 @@ RESTARTBACKEND
   
   sudo su - deploy <<CHECKPM2TRANSC
   # Configura PATH para Node.js e PM2
-  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
+    else
+      export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      exit 1
+    fi
   fi
   
   # Verificar se existe processo PM2 desta instância ESPECÍFICA e parar apenas se existir
@@ -4694,11 +4793,18 @@ PYTHON_SCRIPT
     local temp_script="/tmp/exec_install_transc_${empresa}.sh"
     cat > "$temp_script" <<TEMPSCRIPT
 #!/bin/bash
-# Configura PATH para Node.js e PM2
+if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+  . /root/instalador_single_oficial/tools/path_node_deploy.sh
+else
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
   export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "ERRO: npm não encontrado."
+  exit 1
+fi
 fi
 
 cd /home/deploy/${empresa}/api_transcricao || exit 1
@@ -4765,11 +4871,19 @@ TEMPSCRIPT
     fi
     
     sudo su - deploy <<INSTALLPYTHONDEP
-    # Configura PATH
+    if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+      . /root/instalador_single_oficial/tools/path_node_deploy.sh
+    else
+    # Configura PATH (legado)
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
       export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
       export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado."
+      exit 1
+    fi
     fi
     
     TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
@@ -4960,10 +5074,18 @@ INSTALLPYTHONDEP
     
     # Limpar processos PM2 iniciados como DEPLOY (o script foi executado como deploy)
     sudo su - deploy <<CLEANDEPLOYAFTER
+    if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+      . /root/instalador_single_oficial/tools/path_node_deploy.sh
+    else
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
       export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
     else
       export PATH=/usr/bin:/usr/local/bin:\$PATH
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "ERRO: npm não encontrado."
+      exit 1
+    fi
     fi
     # Limpar processos desta instância se existirem
     pm2 stop ${empresa}-transcricao 2>/dev/null || true
@@ -5119,11 +5241,18 @@ PYTHON_FIX
       
       # Iniciar o PM2 como usuário DEPLOY (consistente com backend e frontend)
       sudo su - deploy <<STARTPM2CORRECT
-      # Configura PATH para Node.js e PM2
+      if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+        . /root/instalador_single_oficial/tools/path_node_deploy.sh
+      else
       if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
         export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
       else
         export PATH=/usr/bin:/usr/local/bin:\$PATH
+      fi
+      if ! command -v npm >/dev/null 2>&1; then
+        echo "ERRO: npm não encontrado."
+        exit 1
+      fi
       fi
       
       TRANSC_DIR="/home/deploy/${empresa}/api_transcricao"
