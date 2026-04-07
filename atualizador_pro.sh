@@ -350,55 +350,41 @@ atualizar_git_config() {
       exit 1
     fi
     
-    # Carregar o token antigo do arquivo VARIAVEIS_INSTALACAO
-    ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-    
-    if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-      source "$ARQUIVO_VARIAVEIS_INSTALADOR"
-    else
-      printf "${RED}❌ ERRO: Não foi possível carregar o arquivo de variáveis do instalador.${WHITE}\n"
+    if [ -z "$empresa" ]; then
+      dummy_carregar_variaveis
+    fi
+    if [ -z "$empresa" ]; then
+      printf "${RED}❌ ERRO: Não foi possível determinar a variável 'empresa' para o caminho do repositório.${WHITE}\n"
       exit 1
     fi
-    
-    # Verificar se o token antigo existe
-    if [ -z "$github_token" ]; then
-      printf "${RED}❌ ERRO: Token de autorização (github_token) não encontrado no arquivo de variáveis.${WHITE}\n"
-      exit 1
-    fi
-    
-    TOKEN_ANTIGO="$github_token"
-    printf "${BLUE} >> Token antigo carregado do arquivo VARIAVEIS_INSTALACAO.${WHITE}\n"
     
     GIT_CONFIG_FILE="/home/deploy/${empresa}/.git/config"
+    APP_ROOT="/home/deploy/${empresa}"
+    NEW_REMOTE_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro.git"
     
-    # Verificar se o arquivo .git/config existe
     if [ ! -f "$GIT_CONFIG_FILE" ]; then
       printf "${RED}❌ ERRO: O arquivo ${GIT_CONFIG_FILE} não foi encontrado.${WHITE}\n"
       exit 1
     fi
     
-    # Fazer backup do arquivo original
     cp "$GIT_CONFIG_FILE" "${GIT_CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
     printf "${BLUE} >> Backup do arquivo .git/config criado.${WHITE}\n"
     
-    # Atualizar a URL do repositório usando o token antigo do arquivo VARIAVEIS_INSTALACAO
-    # Usar grep -F para busca literal (sem regex) do token
-    if grep -Fq "${TOKEN_ANTIGO}@github.com/scriptswhitelabel/multiflow" "$GIT_CONFIG_FILE"; then
-      # Escapar caracteres especiais do token para uso em sed
-      TOKEN_ANTIGO_ESCAPED=$(printf '%s\n' "$TOKEN_ANTIGO" | sed 's/[[\.*^$()+?{|]/\\&/g')
-      sed -i "s|url = https://${TOKEN_ANTIGO_ESCAPED}@github.com/scriptswhitelabel/multiflow|url = https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro|g" "$GIT_CONFIG_FILE"
-      printf "${GREEN}✅ URL do repositório atualizada com sucesso.${WHITE}\n"
+    # git remote set-url cobre URL HTTPS sem credenciais (https://github.com/... sem token),
+    # com token na URL ou com/sem .git — a substituição por sed falhava nesses casos.
+    if [ ! -d "${APP_ROOT}/.git" ]; then
+      printf "${RED}❌ ERRO: Repositório git não encontrado em ${APP_ROOT}.${WHITE}\n"
+      exit 1
+    fi
+    if ! git -C "${APP_ROOT}" remote get-url origin >/dev/null 2>&1; then
+      printf "${RED}❌ ERRO: Remote 'origin' não encontrado em ${APP_ROOT}.${WHITE}\n"
+      exit 1
+    fi
+    if git -C "${APP_ROOT}" remote set-url origin "${NEW_REMOTE_URL}"; then
+      printf "${GREEN}✅ Remote origin definido para multiflow-pro.${WHITE}\n"
     else
-      # Tentar padrão mais genérico caso o token específico não seja encontrado
-      if grep -q "url = https://.*@github.com/scriptswhitelabel/multiflow" "$GIT_CONFIG_FILE"; then
-        sed -i "s|url = https://.*@github.com/scriptswhitelabel/multiflow|url = https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-pro|g" "$GIT_CONFIG_FILE"
-        printf "${GREEN}✅ URL do repositório atualizada com sucesso (padrão genérico).${WHITE}\n"
-      else
-        printf "${YELLOW}⚠️  AVISO: Padrão de URL não encontrado no arquivo .git/config. Verificando manualmente...${WHITE}\n"
-        # Tentar substituir qualquer URL que contenha scriptswhitelabel/multiflow
-        sed -i "s|\(url = https://\)[^@]*\(@github.com/scriptswhitelabel/multiflow\)|\1${TOKEN_AUTH}\2-pro|g" "$GIT_CONFIG_FILE"
-        printf "${GREEN}✅ Tentativa de atualização realizada.${WHITE}\n"
-      fi
+      printf "${RED}❌ ERRO: git remote set-url falhou.${WHITE}\n"
+      exit 1
     fi
     
     echo
@@ -412,45 +398,48 @@ atualizar_git_config() {
 
 # Função para atualizar o token no arquivo VARIAVEIS_INSTALACAO
 atualizar_token_variaveis() {
-  printf "${WHITE} >> Atualizando token no arquivo VARIAVEIS_INSTALACAO...\n"
+  printf "${WHITE} >> Atualizando token e repo_url no arquivo de variáveis da instância...\n"
   echo
   
   {
     INSTALADOR_DIR="/root/instalador_single_oficial"
-    ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+    ARQUIVO_VARIAVEIS_ALVO="${ARQUIVO_VARIAVEIS_USADO:-${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO}"
+    REPO_PRO_CANONICO="https://github.com/scriptswhitelabel/multiflow-pro.git"
     
-    # Verificar se o arquivo existe
-    if [ ! -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-      printf "${RED}❌ ERRO: O arquivo ${ARQUIVO_VARIAVEIS_INSTALADOR} não foi encontrado.${WHITE}\n"
+    if [ ! -f "$ARQUIVO_VARIAVEIS_ALVO" ]; then
+      printf "${RED}❌ ERRO: O arquivo ${ARQUIVO_VARIAVEIS_ALVO} não foi encontrado.${WHITE}\n"
       exit 1
     fi
     
-    # Verificar se TOKEN_AUTH foi definido
     if [ -z "$TOKEN_AUTH" ]; then
       printf "${RED}❌ ERRO: TOKEN_AUTH não foi definido.${WHITE}\n"
       exit 1
     fi
     
-    # Fazer backup do arquivo original
-    cp "$ARQUIVO_VARIAVEIS_INSTALADOR" "${ARQUIVO_VARIAVEIS_INSTALADOR}.backup.$(date +%Y%m%d_%H%M%S)"
-    printf "${BLUE} >> Backup do arquivo VARIAVEIS_INSTALACAO criado.${WHITE}\n"
+    cp "$ARQUIVO_VARIAVEIS_ALVO" "${ARQUIVO_VARIAVEIS_ALVO}.backup.$(date +%Y%m%d_%H%M%S)"
+    printf "${BLUE} >> Backup do arquivo de variáveis criado.${WHITE}\n"
     
-    # Atualizar a linha github_token no arquivo
-    if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_INSTALADOR"; then
-      # Substituir a linha existente
-      sed -i "s|^github_token=.*|github_token=${TOKEN_AUTH}|g" "$ARQUIVO_VARIAVEIS_INSTALADOR"
-      printf "${GREEN}✅ Token atualizado no arquivo VARIAVEIS_INSTALACAO com sucesso.${WHITE}\n"
+    if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_ALVO"; then
+      sed -i "s|^github_token=.*|github_token=${TOKEN_AUTH}|g" "$ARQUIVO_VARIAVEIS_ALVO"
+      printf "${GREEN}✅ github_token atualizado em ${ARQUIVO_VARIAVEIS_ALVO}.${WHITE}\n"
     else
-      # Se não existir a linha, adicionar no final do arquivo
-      echo "github_token=${TOKEN_AUTH}" >> "$ARQUIVO_VARIAVEIS_INSTALADOR"
-      printf "${GREEN}✅ Token adicionado ao arquivo VARIAVEIS_INSTALACAO com sucesso.${WHITE}\n"
+      echo "github_token=${TOKEN_AUTH}" >> "$ARQUIVO_VARIAVEIS_ALVO"
+      printf "${GREEN}✅ github_token adicionado em ${ARQUIVO_VARIAVEIS_ALVO}.${WHITE}\n"
+    fi
+    
+    if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_ALVO"; then
+      sed -i "s|^repo_url=.*|repo_url=${REPO_PRO_CANONICO}|g" "$ARQUIVO_VARIAVEIS_ALVO"
+      printf "${GREEN}✅ repo_url atualizado para multiflow-pro em ${ARQUIVO_VARIAVEIS_ALVO}.${WHITE}\n"
+    else
+      echo "repo_url=${REPO_PRO_CANONICO}" >> "$ARQUIVO_VARIAVEIS_ALVO"
+      printf "${GREEN}✅ repo_url adicionado em ${ARQUIVO_VARIAVEIS_ALVO}.${WHITE}\n"
     fi
     
     echo
     sleep 2
     
   } || {
-    printf "${RED}❌ ERRO: Falha ao atualizar token no arquivo VARIAVEIS_INSTALACAO na etapa atualizar_token_variaveis.${WHITE}\n"
+    printf "${RED}❌ ERRO: Falha ao atualizar variáveis na etapa atualizar_token_variaveis.${WHITE}\n"
     trata_erro "atualizar_token_variaveis"
   }
 }
