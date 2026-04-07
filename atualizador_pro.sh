@@ -794,13 +794,19 @@ baixa_codigo_atualizar() {
   if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
     . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
+    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
+      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+    elif [ -d /usr/local/n/versions/node ]; then
+      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+      fi
     fi
     if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      echo "ERRO: npm não encontrado no PATH do usuário deploy."
+      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
+      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
       exit 1
     fi
   fi
@@ -841,13 +847,19 @@ STOPPM2
   if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
     . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
+    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
+      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+    elif [ -d /usr/local/n/versions/node ]; then
+      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+      fi
     fi
     if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      echo "ERRO: npm não encontrado no PATH do usuário deploy."
+      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
+      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
       exit 1
     fi
   fi
@@ -993,13 +1005,19 @@ UPDATEAPP
   if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
     . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
+    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
     if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-    else
-      export PATH=/usr/bin:/usr/local/bin:\$PATH
+      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+    elif [ -d /usr/local/n/versions/node ]; then
+      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+      fi
     fi
     if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado. Use tools/path_node_deploy.sh ou instale Node em /usr/local/n/versions/node."
+      echo "ERRO: npm não encontrado no PATH do usuário deploy."
+      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
+      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
       exit 1
     fi
   fi
