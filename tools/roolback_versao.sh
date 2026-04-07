@@ -536,11 +536,14 @@ CHECKOUT
   # 7) Parar aplicações PM2
   printf "${WHITE} [7/11] Parando instâncias PM2...\n"
   sudo su - deploy <<STOPPM2
-# Configura PATH para Node.js e PM2
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
 fi
 pm2 stop all || true
 STOPPM2
@@ -839,11 +842,14 @@ PULL
   # 4) Parar aplicações PM2
   printf "${WHITE} [4/9] Parando instâncias PM2...\n"
   sudo su - deploy <<STOPPM2
-# Configura PATH para Node.js e PM2
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
 fi
 pm2 stop all || true
 STOPPM2

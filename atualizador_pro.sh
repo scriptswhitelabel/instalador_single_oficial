@@ -444,116 +444,115 @@ atualizar_token_variaveis() {
   }
 }
 
+# Quando apt update falha (ex.: repo postgresql.org 404 em sources.list.d), NodeSource aborta.
+# Este fallback baixa o tarball oficial de nodejs.org — não depende de apt.
+instalar_node_fallback_tarball_oficial() {
+  local NODE_TARGET="${1:-20.19.4}"
+  local V="v${NODE_TARGET}"
+  local ARCH_RAW MACHINE NAME URL TMP
+  ARCH_RAW=$(uname -m)
+  case "$ARCH_RAW" in
+    x86_64) MACHINE=x64 ;;
+    aarch64) MACHINE=arm64 ;;
+    *)
+      printf '%s\n' "ERRO: arquitetura não suportada para tarball Node: ${ARCH_RAW}" >&2
+      return 1
+      ;;
+  esac
+  NAME="node-${V}-linux-${MACHINE}"
+  URL="https://nodejs.org/dist/${V}/${NAME}.tar.xz"
+  TMP="/tmp/${NAME}.tar.xz"
+  printf '%s\n' ">> Baixando ${NAME} de nodejs.org (sem apt)..."
+  curl -fsSL "$URL" -o "$TMP" || return 1
+  sudo tar -xJf "$TMP" -C /usr/local --strip-components=1 || return 1
+  rm -f "$TMP"
+  sudo mkdir -p "/usr/local/n/versions/node/${NODE_TARGET}/bin"
+  sudo ln -sf /usr/local/bin/node "/usr/local/n/versions/node/${NODE_TARGET}/bin/node"
+  sudo ln -sf /usr/local/bin/npm "/usr/local/n/versions/node/${NODE_TARGET}/bin/npm"
+  sudo ln -sf /usr/local/bin/npx "/usr/local/n/versions/node/${NODE_TARGET}/bin/npx" 2>/dev/null || true
+  sudo ln -sf /usr/local/bin/node /usr/bin/node
+  sudo ln -sf /usr/local/bin/npm /usr/bin/npm
+  sudo ln -sf /usr/local/bin/npx /usr/bin/npx 2>/dev/null || true
+  export PATH="/usr/local/bin:/usr/bin:${PATH:-}"
+  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || return 1
+  [ "$(node -v | sed 's/v//')" = "$NODE_TARGET" ] || return 1
+  printf '%s\n' ">> Node ${NODE_TARGET} instalado via tarball oficial."
+  return 0
+}
+
 # Função para verificar e instalar Node.js 20.19.4
+# Não remove Node/npm antes de instalar a nova versão (evita servidor sem node se apt/curl falhar).
+# O bloco antigo usava purge + "|| true" no NodeSource e terminava com printf de sucesso, mascarando falhas.
 verificar_e_instalar_nodejs() {
   printf "${WHITE} >> Verificando versão do Node.js instalada...\n"
   
-  # Verificar se o Node.js está instalado e qual versão
+  NODE_TARGET="20.19.4"
+  export PATH="/usr/local/bin:/usr/bin:${PATH:-}"
+  if [ -d "/usr/local/n/versions/node/${NODE_TARGET}/bin" ]; then
+    export PATH="/usr/local/n/versions/node/${NODE_TARGET}/bin:$PATH"
+  fi
+  
   if command -v node >/dev/null 2>&1; then
     NODE_VERSION=$(node -v | sed 's/v//')
     printf "${BLUE} >> Versão atual do Node.js: ${NODE_VERSION}\n"
-    
-    # Verificar se a versão é diferente de 20.19.4
-    if [ "$NODE_VERSION" != "20.19.4" ]; then
-      printf "${YELLOW} >> Versão do Node.js diferente de 20.19.4. Iniciando atualização...\n"
-      
-      {
-        echo "=== Removendo Node.js antigo (apt) ==="
-        sudo apt remove -y nodejs npm || true
-        sudo apt purge -y nodejs || true
-        sudo apt autoremove -y || true
-
-        echo "=== Limpando links antigos ==="
-        sudo rm -f /usr/bin/node || true
-        sudo rm -f /usr/bin/npm || true
-        sudo rm -f /usr/bin/npx || true
-
-        echo "=== Removendo repositórios antigos do NodeSource ==="
-        sudo rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true
-        sudo rm -f /etc/apt/sources.list.d/nodesource*.list 2>/dev/null || true
-
-        echo "=== Instalando Node.js temporário para ter npm ==="
-        # Tenta primeiro com Node.js 22.x (LTS atual), depois 20.x
-        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>&1 | grep -v "does not have a Release file" || \
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - 2>&1 | grep -v "does not have a Release file" || true
-        
-        sudo apt-get update -y 2>&1 | grep -v "does not have a Release file" | grep -v "Key is stored in legacy" || true
-        sudo apt install -y nodejs
-
-        echo "=== Instalando gerenciador 'n' ==="
-        sudo npm install -g n
-
-        echo "=== Instalando Node.js 20.19.4 ==="
-        sudo n 20.19.4
-
-        echo "=== Ajustando links globais para a versão correta ==="
-        if [ -f /usr/local/n/versions/node/20.19.4/bin/node ]; then
-          sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
-          sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
-          sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npx /usr/bin/npx 2>/dev/null || true
-        fi
-
-        # Atualiza o PATH no perfil do sistema
-        if ! grep -q "/usr/local/n/versions/node" /etc/profile 2>/dev/null; then
-          echo 'export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:$PATH' | sudo tee -a /etc/profile > /dev/null
-        fi
-
-        echo "=== Versões instaladas ==="
-        export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:$PATH
-        node -v
-        npm -v
-
-        printf "${GREEN}✅ Instalação finalizada! Node.js 20.19.4 está ativo.\n"
-        
-      } || trata_erro "verificar_e_instalar_nodejs"
-      
-    else
-      printf "${GREEN} >> Node.js já está na versão correta (20.19.4). Prosseguindo...\n"
+    if [ "$NODE_VERSION" = "$NODE_TARGET" ]; then
+      printf "${GREEN} >> Node.js já está na versão correta (${NODE_TARGET}). Prosseguindo...\n"
+      sleep 2
+      return 0
     fi
   else
-    printf "${YELLOW} >> Node.js não encontrado. Iniciando instalação...\n"
-    
-    {
-      echo "=== Removendo repositórios antigos do NodeSource ==="
-      sudo rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true
-      sudo rm -f /etc/apt/sources.list.d/nodesource*.list 2>/dev/null || true
-
-      echo "=== Instalando Node.js temporário para ter npm ==="
-      # Tenta primeiro com Node.js 22.x (LTS atual), depois 20.x
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>&1 | grep -v "does not have a Release file" || \
-      curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - 2>&1 | grep -v "does not have a Release file" || true
-      
-      sudo apt-get update -y 2>&1 | grep -v "does not have a Release file" | grep -v "Key is stored in legacy" || true
-      sudo apt install -y nodejs
-
-      echo "=== Instalando gerenciador 'n' ==="
-      sudo npm install -g n
-
-      echo "=== Instalando Node.js 20.19.4 ==="
-      sudo n 20.19.4
-
-      echo "=== Ajustando links globais para a versão correta ==="
-      if [ -f /usr/local/n/versions/node/20.19.4/bin/node ]; then
-        sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/node /usr/bin/node
-        sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npm /usr/bin/npm
-        sudo ln -sf /usr/local/n/versions/node/20.19.4/bin/npx /usr/bin/npx 2>/dev/null || true
-      fi
-
-      # Atualiza o PATH no perfil do sistema
-      if ! grep -q "/usr/local/n/versions/node" /etc/profile 2>/dev/null; then
-        echo 'export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:$PATH' | sudo tee -a /etc/profile > /dev/null
-      fi
-
-      echo "=== Versões instaladas ==="
-      export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:$PATH
-      node -v
-      npm -v
-
-      printf "${GREEN}✅ Instalação finalizada! Node.js 20.19.4 está ativo.\n"
-      
-    } || trata_erro "verificar_e_instalar_nodejs"
+    printf "${YELLOW} >> Node.js não encontrado no PATH do root (será instalado).\n"
   fi
   
+  printf "${YELLOW} >> Ajustando para Node.js ${NODE_TARGET} (mantém a instalação atual até a nova estar pronta).\n"
+  
+  (
+    set -e
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "=== npm ausente: tentando NodeSource + apt ==="
+      sudo rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true
+      sudo rm -f /etc/apt/sources.list.d/nodesource*.list 2>/dev/null || true
+      if curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - \
+        && sudo apt-get update -y \
+        && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs \
+        && command -v npm >/dev/null 2>&1; then
+        echo "=== Node + npm via apt OK ==="
+      else
+        echo "=== apt/nodesource falhou (ex.: outro .list com 404 — comum: apt.postgresql.org pgdg). Tentando tarball nodejs.org ==="
+        instalar_node_fallback_tarball_oficial "${NODE_TARGET}" || { echo "ERRO: tarball oficial também falhou."; exit 1; }
+      fi
+      command -v npm >/dev/null 2>&1 || { echo "ERRO: npm ainda ausente após instalação."; exit 1; }
+    fi
+
+    if [ "$(node -v | sed 's/v//')" != "${NODE_TARGET}" ]; then
+      echo "=== Instalando gerenciador n (global) ==="
+      sudo npm install -g n
+      echo "=== Instalando Node.js ${NODE_TARGET} via n ==="
+      sudo n "${NODE_TARGET}"
+    else
+      echo "=== Já em Node ${NODE_TARGET} (apt ou tarball), pulando n ==="
+    fi
+    
+    test -x "/usr/local/n/versions/node/${NODE_TARGET}/bin/node"
+    test -x "/usr/local/n/versions/node/${NODE_TARGET}/bin/npm"
+    
+    echo "=== Links em /usr/bin ==="
+    sudo ln -sf "/usr/local/n/versions/node/${NODE_TARGET}/bin/node" /usr/bin/node
+    sudo ln -sf "/usr/local/n/versions/node/${NODE_TARGET}/bin/npm" /usr/bin/npm
+    sudo ln -sf "/usr/local/n/versions/node/${NODE_TARGET}/bin/npx" /usr/bin/npx 2>/dev/null || true
+    
+    if ! grep -q "/usr/local/n/versions/node/${NODE_TARGET}" /etc/profile 2>/dev/null; then
+      echo "export PATH=/usr/local/n/versions/node/${NODE_TARGET}/bin:/usr/bin:\$PATH" | sudo tee -a /etc/profile > /dev/null
+    fi
+    
+    export PATH="/usr/local/n/versions/node/${NODE_TARGET}/bin:/usr/bin:$PATH"
+    echo "=== Conferência ==="
+    node -v
+    npm -v
+    [ "$(node -v | sed 's/v//')" = "${NODE_TARGET}" ] || { echo "ERRO: versão final não é ${NODE_TARGET}"; exit 1; }
+  ) || trata_erro "verificar_e_instalar_nodejs"
+  
+  printf "${GREEN}✅ Node.js ${NODE_TARGET} instalado e ativo.${WHITE}\n"
   sleep 2
 }
 
@@ -790,24 +789,14 @@ baixa_codigo_atualizar() {
   printf "${WHITE} >> Parando Instancias da empresa ${empresa}... \n"
   sleep 2
   sudo su - deploy <<STOPPM2
-  # Configura PATH para Node.js e PM2
-  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
-    . /root/instalador_single_oficial/tools/path_node_deploy.sh
-  else
-    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-    elif [ -d /usr/local/n/versions/node ]; then
-      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-      fi
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado no PATH do usuário deploy."
-      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
-      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
-      exit 1
+  # PATH para pm2 apenas (parar processos não exige npm)
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  elif [ -d /usr/local/n/versions/node ]; then
+    _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+    if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+      export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
     fi
   fi
   for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
@@ -1002,23 +991,13 @@ UPDATEAPP
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
   sudo su - deploy <<RESTARTPM2ATUALIZACAO
-  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
-    . /root/instalador_single_oficial/tools/path_node_deploy.sh
-  else
-    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-    elif [ -d /usr/local/n/versions/node ]; then
-      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-      fi
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado no PATH do usuário deploy."
-      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
-      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
-      exit 1
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  elif [ -d /usr/local/n/versions/node ]; then
+    _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+    if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+      export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
     fi
   fi
   for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
