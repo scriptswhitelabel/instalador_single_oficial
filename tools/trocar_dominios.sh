@@ -538,7 +538,7 @@ if [ -f "/home/deploy/${empresa}/api_oficial/.env" ]; then
 if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
   . /root/instalador_single_oficial/tools/path_node_deploy.sh
 fi
-cd /home/deploy/${empresa}/api_oficial && (pm2 restart api_oficial 2>/dev/null || pm2 start dist/main.js --name api_oficial) && pm2 save
+cd /home/deploy/${empresa}/api_oficial && (pm2 restart api_oficial_${empresa} 2>/dev/null || pm2 restart api_oficial 2>/dev/null || pm2 start dist/main.js --name api_oficial_${empresa}) && pm2 save
 EOF
     printf "${GREEN} >> API Oficial atualizada.${WHITE}\n"
   fi

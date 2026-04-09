@@ -5629,7 +5629,8 @@ instalar_api_oficial() {
   banner
   printf "${WHITE} >> Instalando API Oficial...\n"
   echo
-  local script_path="$(pwd)/instalador_apioficial.sh"
+  local INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local script_path="${INSTALADOR_DIR}/instalador_apioficial.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
     bash "$script_path"
@@ -5646,7 +5647,8 @@ atualizar_api_oficial() {
   banner
   printf "${WHITE} >> Atualizando API Oficial...\n"
   echo
-  local script_path="$(pwd)/atualizar_apioficial.sh"
+  local INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local script_path="${INSTALADOR_DIR}/atualizar_apioficial.sh"
   if [ -f "$script_path" ]; then
     chmod 775 "$script_path"
     bash "$script_path"

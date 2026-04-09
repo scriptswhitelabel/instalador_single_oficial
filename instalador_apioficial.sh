@@ -9,7 +9,10 @@ YELLOW='\033[1;33m'
 # Variaveis Padrão
 ARCH=$(uname -m)
 UBUNTU_VERSION=$(lsb_release -sr)
-ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALADOR_DIR="$SCRIPT_DIR"
+# Caminho absoluto do VARIAVEIS_INSTALACAO da instância escolhida (definido em selecionar_instancia_apioficial)
+ARQUIVO_VARIAVEIS=""
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 default_apioficial_port=6000
 
@@ -40,10 +43,115 @@ banner() {
   echo
 }
 
+# Detectar instâncias (mesma lógica do instalador_single.sh)
+detectar_instancias_instaladas() {
+  local instancias=()
+  local nomes_empresas=()
+  local temp_empresa=""
+
+  if [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    local empresa_original="${empresa:-}"
+    local subdominio_backend_original="${subdominio_backend:-}"
+    local subdominio_frontend_original="${subdominio_frontend:-}"
+    # shellcheck source=/dev/null
+    source "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+  fi
+
+  if [ -d "${INSTALADOR_DIR}" ]; then
+    shopt -s nullglob
+    for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+      if [ -f "$arquivo_instancia" ]; then
+        local empresa_original="${empresa:-}"
+        local subdominio_backend_original="${subdominio_backend:-}"
+        local subdominio_frontend_original="${subdominio_frontend:-}"
+        # shellcheck source=/dev/null
+        source "$arquivo_instancia" 2>/dev/null
+        temp_empresa="${empresa:-}"
+        if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+          instancias+=("$arquivo_instancia")
+          nomes_empresas+=("${temp_empresa}")
+        fi
+        empresa="${empresa_original}"
+        subdominio_backend="${subdominio_backend_original}"
+        subdominio_frontend="${subdominio_frontend_original}"
+      fi
+    done
+    shopt -u nullglob
+  fi
+
+  declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
+  declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
+}
+
+selecionar_instancia_apioficial() {
+  banner
+  printf "${WHITE} >> Em qual instância a API Oficial será instalada?\n\n"
+  detectar_instancias_instaladas
+  local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+
+  if [ "$total_instancias" -eq 0 ]; then
+    printf "${RED} >> Nenhuma instância instalada detectada. Instale o sistema principal antes.${WHITE}\n"
+    sleep 3
+    exit 1
+  elif [ "$total_instancias" -eq 1 ]; then
+    printf "${GREEN} >> Instância: ${BLUE}${NOMES_EMPRESAS_DETECTADAS[0]}${WHITE}\n\n"
+    ARQUIVO_VARIAVEIS="${INSTANCIAS_DETECTADAS[0]}"
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+    sleep 1
+    return 0
+  fi
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  INSTÂNCIAS\n"
+  printf "═══════════════════════════════════════════════════════════${WHITE}\n\n"
+  local index=1
+  for i in "${!NOMES_EMPRESAS_DETECTADAS[@]}"; do
+    local empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+    local arquivo_instancia="${INSTANCIAS_DETECTADAS[$i]}"
+    local empresa_original="${empresa:-}"
+    local subdominio_backend_original="${subdominio_backend:-}"
+    local subdominio_frontend_original="${subdominio_frontend:-}"
+    # shellcheck source=/dev/null
+    source "$arquivo_instancia" 2>/dev/null
+    local tb="${subdominio_backend:-}"
+    local tf="${subdominio_frontend:-}"
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+    printf "  [${BLUE}%s${WHITE}] %s\n" "$index" "$empresa_nome"
+    [ -n "$tb" ] && printf "      Backend:  ${YELLOW}%s${WHITE}\n" "$tb"
+    [ -n "$tf" ] && printf "      Frontend: ${YELLOW}%s${WHITE}\n" "$tf"
+    echo
+    index=$((index + 1))
+  done
+  printf "${YELLOW} >> Escolha a instância (1-%s):${WHITE}\n" "$total_instancias"
+  read -r escolha_instancia
+  if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]] || [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt "$total_instancias" ]; then
+    printf "${RED} >> Opção inválida.${WHITE}\n"
+    exit 1
+  fi
+  local indice_selecionado=$((escolha_instancia - 1))
+  ARQUIVO_VARIAVEIS="${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
+  printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n\n"
+  sleep 1
+}
+
 # Carregar variáveis
 carregar_variaveis() {
-  if [ -f $ARQUIVO_VARIAVEIS ]; then
-    source $ARQUIVO_VARIAVEIS
+  if [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
   else
     empresa="multiflow"
     nome_titulo="MultiFlow"
@@ -58,7 +166,7 @@ solicitar_dados_apioficial() {
   read -p "> " subdominio_oficial
   echo
   printf "   ${WHITE}Subdominio API Oficial: ---->> ${YELLOW}${subdominio_oficial}\n"
-  echo "subdominio_oficial=${subdominio_oficial}" >>$ARQUIVO_VARIAVEIS
+  echo "subdominio_oficial=${subdominio_oficial}" >>"$ARQUIVO_VARIAVEIS"
 }
 
 # Validação de DNS
@@ -185,7 +293,8 @@ configurar_env_apioficial() {
   echo
   {
     # Carregar variáveis necessárias
-    source $ARQUIVO_VARIAVEIS
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
     
     # Modo Alta Performance: Postgres e Redis em Docker (portas 7532 e 1569)
     if [ "${ALTA_PERFORMANCE}" = "1" ]; then
@@ -203,6 +312,13 @@ configurar_env_apioficial() {
     
     # Buscar BACKEND_URL do backend existente
     backend_url=$(grep "^BACKEND_URL=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2-)
+    if [ -z "$backend_url" ] && [ -n "$subdominio_backend" ]; then
+      backend_url="${subdominio_backend}"
+      case "$backend_url" in
+        http://*|https://*) ;;
+        *) backend_url="https://${backend_url}" ;;
+      esac
+    fi
     
     # Criar diretório da API Oficial se não existir
     mkdir -p /home/deploy/${empresa}/api_oficial
@@ -216,7 +332,7 @@ DATABASE_USER=${empresa}
 DATABASE_PASSWORD=${senha_deploy}
 DATABASE_NAME=oficialseparado
 TOKEN_ADMIN=adminpro
-URL_BACKEND_MULT100=https://${subdominio_backend}
+URL_BACKEND_MULT100=${backend_url}
 REDIS_URI=${redis_uri_apioficial}
 PORT=${default_apioficial_port}
 NAME_ADMIN=SetupAutomatizado
@@ -256,7 +372,7 @@ printf "${WHITE} >> Gerando cliente Prisma...\n"
 npx prisma generate client
 
 printf "${WHITE} >> Iniciando aplicação com PM2...\n"
-pm2 start dist/main.js --name=api_oficial
+pm2 start dist/main.js --name=api_oficial_${empresa}
 
 printf "${GREEN} >> API Oficial instalada e configurada com sucesso!${WHITE}\n"
 sleep 2
@@ -301,6 +417,7 @@ EOF
 
 # Função principal
 main() {
+  selecionar_instancia_apioficial
   carregar_variaveis
   solicitar_dados_apioficial
   verificar_dns_apioficial
