@@ -388,7 +388,9 @@ atualizar_env_backend() {
   {
     # Adicionar URL_API_OFICIAL ao .env do backend
     echo "URL_API_OFICIAL=https://${subdominio_oficial}" >> /home/deploy/${empresa}/backend/.env
-    
+    chown deploy:deploy "/home/deploy/${empresa}/backend/.env" 2>/dev/null || true
+    chmod 600 "/home/deploy/${empresa}/backend/.env" 2>/dev/null || true
+
     printf "${GREEN} >> .env do backend atualizado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "atualizar_env_backend"

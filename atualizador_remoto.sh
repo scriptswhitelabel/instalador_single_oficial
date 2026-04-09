@@ -420,6 +420,14 @@ EOF
   } || trata_erro "otimiza_banco_atualizar"
 }
 
+# Após alteração ao .env como root (mktemp+mv), garantir dono deploy (ver instalador_single.sh).
+garantir_permissoes_env_backend() {
+  local env_file="$1"
+  [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
+  chown deploy:deploy "$env_file" 2>/dev/null || true
+  chmod 600 "$env_file" 2>/dev/null || true
+}
+
 # Alta Performance: REDIS_URI_ACK = REDIS_URI (ver deve_sincronizar em instalador_single.sh).
 deve_sincronizar_redis_uri_ack_com_redis_uri() {
   local env_file="$1"
@@ -447,6 +455,7 @@ sincronizar_redis_uri_ack_com_redis_uri_se_ap() {
       printf '%s\n' "$line"
     fi
   done < "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+  garantir_permissoes_env_backend "$env_file"
   return 0
 }
 
@@ -458,6 +467,8 @@ descomentar_env_redis_bull_ack() {
   [ -z "$pkg_json" ] && pkg_json="$(dirname "$env_file")/package.json"
   [ ! -f "$env_file" ] && return 0
   [ ! -f "$pkg_json" ] && return 0
+  _mf_fix_env_owner_descomentar() { garantir_permissoes_env_backend "$env_file"; }
+  trap '_mf_fix_env_owner_descomentar' RETURN
   local ver
   ver=$(grep -m1 '"version"' "$pkg_json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
   [ -z "$ver" ] && return 0
