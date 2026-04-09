@@ -1071,6 +1071,7 @@ menu_ferramentas() {
     printf "   [${BLUE}11${WHITE}] Importar backup do banco da API Oficial\n"
     printf "   [${BLUE}12${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}13${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
+    printf "   [${BLUE}14${WHITE}] Trocar domínios (URL backend / frontend)\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1184,6 +1185,22 @@ menu_ferramentas() {
       restaurar_backup_banco_alta_performance_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
+      ;;
+    14)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      TROCAR_DOM_SCRIPT="${SCRIPT_DIR}/tools/trocar_dominios.sh"
+      if [ -f "$TROCAR_DOM_SCRIPT" ]; then
+        chmod 775 "$TROCAR_DOM_SCRIPT" 2>/dev/null || true
+        printf "${GREEN} >> Executando troca de domínios...${WHITE}\n"
+        echo
+        bash "$TROCAR_DOM_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${TROCAR_DOM_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
       ;;
     0)
       return
