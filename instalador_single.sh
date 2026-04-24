@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.5\n"
+  printf "                                INSTALADOR 8.6\n"
   printf "\n\n"
 }
 
@@ -1052,6 +1052,100 @@ restaurar_backup_banco_alta_performance_ferramentas() {
   sleep 2
 }
 
+# Ferramentas: reinstala Baileys PRO (registry Heineken) no backend e reinicia o PM2 da instância
+atualizar_baileys_pro_heineken_ferramentas() {
+  banner
+  printf "${WHITE} >> Atualizar Baileys PRO (Heineken) — tudo no diretório do sistema roda como usuário ${BLUE}deploy${WHITE} (package.json, npm i, PM2).${WHITE}\n"
+  echo
+
+  if ! selecionar_instancia_atualizar; then
+    printf "${RED} >> Operação cancelada.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+
+  if ! echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    printf "${YELLOW} >> Aviso: o repositório configurado não parece ser MultiFlow-PRO (Baileys/Heineken).${WHITE}\n"
+    printf "${YELLOW} >> Continuar mesmo assim? (s/N):${WHITE}\n"
+    read -r continuar_nf
+    continuar_nf=$(printf '%s' "${continuar_nf:-}" | tr '[:upper:]' '[:lower:]')
+    if [ "$continuar_nf" != "s" ] && [ "$continuar_nf" != "sim" ]; then
+      printf "${YELLOW} >> Cancelado.${WHITE}\n"
+      sleep 2
+      return 0
+    fi
+  fi
+
+  if ! validar_e_atualizar_token_antes_atualizar; then
+    printf "${RED} >> Token inválido ou operação cancelada.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+
+  local backend_dir="/home/deploy/${empresa}/backend"
+  if [ ! -d "$backend_dir" ]; then
+    printf "${RED} >> Pasta backend não encontrada: ${backend_dir}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  # Token no package.json (registry Baileys) também aplicado como deploy — evita arquivo com dono root antes do npm i
+  local tok_sed="${github_token//&/\\&}"
+
+  printf "${WHITE} >> Como usuário ${BLUE}deploy${WHITE}: TOKEN no package.json (se MultiFlow-PRO), rm baileys + lock, npm i e pm2 restart...${WHITE}\n"
+  echo
+
+  if ! sudo su - deploy <<BAILEYSDEPLOY
+  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+    . /root/instalador_single_oficial/tools/path_node_deploy.sh
+  else
+    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+    elif [ -d /usr/local/n/versions/node ]; then
+      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+      fi
+    fi
+  fi
+  cd "${backend_dir}" || exit 1
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
+    printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
+  fi
+  rm -rf node_modules/baileys package-lock.json
+  npm i || exit 1
+  if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
+    pm2 restart "${empresa}-backend"
+    pm2 save
+    printf "${GREEN} >> Backend ${empresa}-backend reiniciado.${WHITE}\n"
+  else
+    printf "${YELLOW} >> Processo ${empresa}-backend não encontrado no PM2. Rode manualmente após verificar: pm2 list${WHITE}\n"
+  fi
+  exit 0
+BAILEYSDEPLOY
+  then
+    printf "${RED} >> Falha na etapa como usuário deploy (npm i ou ambiente). Verifique os logs acima.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  echo
+  sleep 2
+  return 0
+}
+
 # Menu de Ferramentas
 menu_ferramentas() {
   while true; do
@@ -1072,6 +1166,7 @@ menu_ferramentas() {
     printf "   [${BLUE}12${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}13${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
     printf "   [${BLUE}14${WHITE}] Trocar domínios (URL backend / frontend)\n"
+    printf "   [${BLUE}15${WHITE}] Atualizar Baileys PRO (Heineken)\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1201,6 +1296,11 @@ menu_ferramentas() {
         printf "${RED} >> Erro: Arquivo ${TROCAR_DOM_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
+      ;;
+    15)
+      atualizar_baileys_pro_heineken_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
       ;;
     0)
       return
