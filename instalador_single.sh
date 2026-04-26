@@ -4596,10 +4596,29 @@ instalar_transcricao_audio_nativa() {
       sudo apt-get install -y ffmpeg
     fi
     
+    FFMPEG_PATH=$(command -v ffmpeg 2>/dev/null || true)
+    SKIP_HEAVY_FFMPEG_APT=false
+    if [ -n "$FFMPEG_PATH" ] && [ -f "$FFMPEG_PATH" ] && ffmpeg -version >/dev/null 2>&1; then
+      LDD_PROBE=$(ldd "$FFMPEG_PATH" 2>&1 || true)
+      if echo "$LDD_PROBE" | grep -qi 'not a dynamic executable'; then
+        SKIP_HEAVY_FFMPEG_APT=true
+      elif ! echo "$LDD_PROBE" | grep -q 'not found'; then
+        SKIP_HEAVY_FFMPEG_APT=true
+      fi
+    fi
+    
+    if [ "$SKIP_HEAVY_FFMPEG_APT" = true ]; then
+      printf "${GREEN} >> FFmpeg em ${FFMPEG_PATH} já executa (estático ou dependências satisfeitas).${WHITE}\n"
+      printf "${WHITE} >> Pulando reinstalação apt, pacotes libav em massa e PPA (evita timeout de chave GPG / savoury1 em VPS).${WHITE}\n"
+      sudo ldconfig 2>/dev/null || true
+      if ffmpeg -version >/dev/null 2>&1; then
+        printf "${GREEN} >> ✓ FFmpeg está funcionando corretamente!${WHITE}\n"
+      fi
+    else
     printf "${WHITE} >> Verificando dependências do ffmpeg instalado...${WHITE}\n"
     
     # Verificar quais bibliotecas o ffmpeg precisa usando ldd
-    FFMPEG_PATH=$(which ffmpeg)
+    FFMPEG_PATH=$(command -v ffmpeg 2>/dev/null || true)
     if [ -n "$FFMPEG_PATH" ] && [ -f "$FFMPEG_PATH" ]; then
       printf "${WHITE} >> Analisando dependências de: $FFMPEG_PATH${WHITE}\n"
       MISSING_LIBS=$(ldd "$FFMPEG_PATH" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
@@ -4657,19 +4676,8 @@ instalar_transcricao_audio_nativa() {
       libavutil-dev libswscale-dev libswresample-dev \
       2>/dev/null || true
     
-    # Adicionar PPA do ffmpeg se disponível (para versões mais recentes)
-    if ! grep -q "ppa:savoury1/ffmpeg" /etc/apt/sources.list.d/*.list 2>/dev/null; then
-      printf "${WHITE} >> Adicionando PPA do ffmpeg para versões mais recentes...${WHITE}\n"
-      sudo add-apt-repository -y ppa:savoury1/ffmpeg5 2>/dev/null || \
-      sudo add-apt-repository -y ppa:savoury1/ffmpeg6 2>/dev/null || true
-      sudo apt-get update -qq 2>/dev/null || true
-      
-      # Tentar instalar novamente após adicionar o PPA
-      sudo apt-get install -y \
-        libavdevice62 libavformat62 libavcodec62 \
-        libavdevice63 libavformat63 libavcodec63 \
-        2>/dev/null || true
-    fi
+    # PPA savoury1/ffmpeg* removido: keyservers costumam dar "retrieving gpg key timed out" em VPS.
+    # FFmpeg estático (instala_ffmpeg_base / BtbN ou build manual em /usr/bin) cobre transcrição sem apt extra.
     
     # Atualizar cache do ldconfig para que o sistema encontre as bibliotecas
     printf "${WHITE} >> Atualizando cache de bibliotecas compartilhadas...${WHITE}\n"
@@ -4687,27 +4695,41 @@ instalar_transcricao_audio_nativa() {
           printf "${YELLOW}   - $lib${WHITE}\n"
         done
         
-        # Se ainda faltam bibliotecas, pode ser que o ffmpeg foi instalado do BtbN/FFmpeg-Builds
-        # Nesse caso, precisamos instalar o ffmpeg do repositório do sistema
-        printf "${WHITE} >> O ffmpeg pode ter sido instalado de fonte externa. Reinstalando do repositório do sistema...${WHITE}\n"
-        sudo apt-get remove -y ffmpeg 2>/dev/null || true
-        sudo apt-get install -y ffmpeg 2>/dev/null || true
-        sudo apt-get install -f -y 2>/dev/null || true
-        sudo ldconfig 2>/dev/null || true
-        
-        # Verificar novamente
-        MISSING_LIBS_FINAL=$(ldd "$(which ffmpeg)" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
-        if [ -z "$MISSING_LIBS_FINAL" ]; then
-          printf "${GREEN} >> ✓ FFmpeg reinstalado e funcionando!${WHITE}\n"
+        # Se ainda faltam bibliotecas: binário estático não deve ser trocado pelo apt
+        LDD_RMCHK=$(ldd "$FFMPEG_PATH" 2>&1 || true)
+        if echo "$LDD_RMCHK" | grep -qi 'not a dynamic executable'; then
+          printf "${YELLOW} >> FFmpeg estático detectado; não removendo em favor do pacote apt.${WHITE}\n"
+          if ffmpeg -version >/dev/null 2>&1; then
+            printf "${GREEN} >> ✓ FFmpeg responde; use binário estático em /usr/bin se precisar de codecs atualizados.${WHITE}\n"
+          fi
         else
-          printf "${RED} >> ERRO: Ainda há bibliotecas faltantes após reinstalação.${WHITE}\n"
-          printf "${YELLOW} >> Bibliotecas faltantes: $MISSING_LIBS_FINAL${WHITE}\n"
+          printf "${WHITE} >> O ffmpeg pode ter sido instalado de fonte externa. Reinstalando do repositório do sistema...${WHITE}\n"
+          sudo apt-get remove -y ffmpeg 2>/dev/null || true
+          sudo apt-get install -y ffmpeg 2>/dev/null || true
+          sudo apt-get install -f -y 2>/dev/null || true
+          sudo ldconfig 2>/dev/null || true
+          
+          # Verificar novamente
+          MISSING_LIBS_FINAL=$(ldd "$(command -v ffmpeg 2>/dev/null)" 2>/dev/null | grep "not found" | awk '{print $1}' | sed 's/://' || true)
+          if [ -z "$MISSING_LIBS_FINAL" ]; then
+            printf "${GREEN} >> ✓ FFmpeg reinstalado e funcionando!${WHITE}\n"
+          else
+            printf "${RED} >> ERRO: Ainda há bibliotecas faltantes após reinstalação.${WHITE}\n"
+            printf "${YELLOW} >> Bibliotecas faltantes: $MISSING_LIBS_FINAL${WHITE}\n"
+            printf "${YELLOW} >> Dica: instale ffmpeg/ffprobe estáticos em /usr/bin (ex.: BtbN ou johnvansickle) e rode esta opção de novo.${WHITE}\n"
+          fi
         fi
       fi
     fi
     
-    # Verificação final usando ldconfig
-    if ldconfig -p | grep -q libavdevice && ldconfig -p | grep -q libavformat && ldconfig -p | grep -q libavcodec; then
+    # Verificação final: libav no ldconfig não se aplica a ffmpeg totalmente estático
+    FFMPEG_CMD=$(command -v ffmpeg 2>/dev/null || true)
+    LDD_END=$([ -n "$FFMPEG_CMD" ] && ldd "$FFMPEG_CMD" 2>&1 || true)
+    if echo "$LDD_END" | grep -qi 'not a dynamic executable'; then
+      if ffmpeg -version >/dev/null 2>&1; then
+        printf "${GREEN} >> ✓ FFmpeg estático OK (sem dependência de libav via sistema).${WHITE}\n"
+      fi
+    elif ldconfig -p 2>/dev/null | grep -q libavdevice && ldconfig -p 2>/dev/null | grep -q libavformat && ldconfig -p 2>/dev/null | grep -q libavcodec; then
       printf "${GREEN} >> ✓ Bibliotecas do ffmpeg verificadas no sistema!${WHITE}\n"
     else
       printf "${YELLOW} >> AVISO: Algumas bibliotecas podem não estar no cache do sistema.${WHITE}\n"
@@ -4718,6 +4740,8 @@ instalar_transcricao_audio_nativa() {
       printf "${GREEN} >> ✓ FFmpeg está funcionando corretamente!${WHITE}\n"
     else
       printf "${YELLOW} >> AVISO: FFmpeg pode ter problemas. Verifique manualmente.${WHITE}\n"
+    fi
+    
     fi
     
   } || {
