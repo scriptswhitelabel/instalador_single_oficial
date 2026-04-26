@@ -681,8 +681,8 @@ else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
 pm2 flush
-pm2 reset all
 pm2 restart all
+pm2 reset all
 pm2 save
 pm2 startup
 RESTARTPM2
@@ -987,8 +987,8 @@ else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
 pm2 flush
-pm2 reset all
 pm2 restart all
+pm2 reset all
 pm2 save
 pm2 startup
 RESTARTPM2

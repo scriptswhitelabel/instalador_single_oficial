@@ -344,6 +344,7 @@ fi
 pm2 flush
 pm2 restart ${empresa}-backend
 pm2 restart ${empresa}-frontend
+pm2 reset all
 pm2 save
 RESTARTPM2
 

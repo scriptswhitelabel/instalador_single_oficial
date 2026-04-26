@@ -30,6 +30,50 @@ trata_erro() {
   exit 1
 }
 
+obter_valor_env() {
+  local arquivo_env="$1"
+  local chave="$2"
+  [ -f "$arquivo_env" ] || return 1
+  local linha valor
+  linha=$(grep -m1 "^${chave}=" "$arquivo_env" 2>/dev/null || true)
+  [ -n "$linha" ] || return 1
+  valor="${linha#*=}"
+  valor="${valor%$'\r'}"
+  valor="${valor%\"}"
+  valor="${valor#\"}"
+  valor="${valor%\'}"
+  valor="${valor#\'}"
+  printf '%s' "$valor"
+  return 0
+}
+
+carregar_config_banco_backend() {
+  local backend_env="/home/deploy/${empresa}/backend/.env"
+  local db_host_default db_port_default redis_uri_default
+
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    db_host_default="127.0.0.1"
+    db_port_default="6732"
+    redis_uri_default="redis://127.0.0.1:1569"
+  else
+    db_host_default="localhost"
+    db_port_default="5432"
+    redis_uri_default="redis://:${senha_deploy}@127.0.0.1:6379"
+  fi
+
+  DB_HOST_APIOFICIAL="$(obter_valor_env "$backend_env" "DB_HOST" || true)"
+  DB_PORT_APIOFICIAL="$(obter_valor_env "$backend_env" "DB_PORT" || true)"
+  DB_USER_APIOFICIAL="$(obter_valor_env "$backend_env" "DB_USER" || true)"
+  DB_PASS_APIOFICIAL="$(obter_valor_env "$backend_env" "DB_PASS" || true)"
+  REDIS_URI_APIOFICIAL="$(obter_valor_env "$backend_env" "REDIS_URI" || true)"
+
+  DB_HOST_APIOFICIAL="${DB_HOST_APIOFICIAL:-$db_host_default}"
+  DB_PORT_APIOFICIAL="${DB_PORT_APIOFICIAL:-$db_port_default}"
+  DB_USER_APIOFICIAL="${DB_USER_APIOFICIAL:-$empresa}"
+  DB_PASS_APIOFICIAL="${DB_PASS_APIOFICIAL:-$senha_deploy}"
+  REDIS_URI_APIOFICIAL="${REDIS_URI_APIOFICIAL:-$redis_uri_default}"
+}
+
 # Banner
 banner() {
   clear
@@ -261,26 +305,35 @@ criar_banco_apioficial() {
   printf "${WHITE} >> Criando banco de dados para API Oficial...\n"
   echo
   {
+    carregar_config_banco_backend
     if [ "${ALTA_PERFORMANCE}" = "1" ]; then
-      # Postgres em Docker (Alta Performance): conectar na porta 7532
-      printf "${WHITE} >> Modo Alta Performance: conectando ao Postgres no Docker...\n"
+      # Usa credenciais do backend; em AP tenta também porta direta 7532 para DDL.
+      printf "${WHITE} >> Modo Alta Performance: conectando ao Postgres com dados do backend...\n"
       command -v psql >/dev/null 2>&1 || apt-get install -y postgresql-client >/dev/null 2>&1
-      export PGPASSWORD="${senha_deploy}"
-      if ! psql -h 127.0.0.1 -p 7532 -U "${empresa}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
-        # Banco já pode existir; verifica se está acessível
-        if ! psql -h 127.0.0.1 -p 7532 -U "${empresa}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
+      export PGPASSWORD="${DB_PASS_APIOFICIAL}"
+      if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
+        # Se estiver via PgBouncer (6732), tenta porta direta do Postgres (7532) para CREATE DATABASE.
+        if [ "${DB_PORT_APIOFICIAL}" = "6732" ]; then
+          psql -h "${DB_HOST_APIOFICIAL}" -p 7532 -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
+        fi
+        # Banco já pode existir; verifica se está acessível.
+        if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
           unset PGPASSWORD
-          trata_erro "criar_banco_apioficial (conexão com Postgres Docker)"
+          trata_erro "criar_banco_apioficial (conexão com banco do backend)"
         fi
       fi
       unset PGPASSWORD
-      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado (Postgres Docker).${WHITE}\n"
+      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso.${WHITE}\n"
     else
-      sudo -u postgres psql <<EOF
-CREATE DATABASE oficialseparado;
-\q
-EOF
-      printf "${GREEN} >> Banco de dados 'oficialseparado' criado com sucesso!${WHITE}\n"
+      export PGPASSWORD="${DB_PASS_APIOFICIAL}"
+      if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
+        if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
+          unset PGPASSWORD
+          trata_erro "criar_banco_apioficial (Postgres local)"
+        fi
+      fi
+      unset PGPASSWORD
+      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso!${WHITE}\n"
     fi
     sleep 2
   } || trata_erro "criar_banco_apioficial"
@@ -295,17 +348,7 @@ configurar_env_apioficial() {
     # Carregar variáveis necessárias
     # shellcheck source=/dev/null
     source "$ARQUIVO_VARIAVEIS"
-    
-    # Modo Alta Performance: Postgres e Redis em Docker (portas 7532 e 1569)
-    if [ "${ALTA_PERFORMANCE}" = "1" ]; then
-      db_host_apioficial="127.0.0.1"
-      db_port_apioficial="7532"
-      redis_uri_apioficial="redis://127.0.0.1:1569"
-    else
-      db_host_apioficial="localhost"
-      db_port_apioficial="5432"
-      redis_uri_apioficial="redis://:${senha_deploy}@127.0.0.1:6379"
-    fi
+    carregar_config_banco_backend
     
     # Buscar JWT_REFRESH_SECRET do backend existente
     jwt_refresh_secret_backend=$(grep "^JWT_REFRESH_SECRET=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2-)
@@ -325,15 +368,15 @@ configurar_env_apioficial() {
     
     # Criar arquivo .env
     cat > /home/deploy/${empresa}/api_oficial/.env <<EOF
-DATABASE_LINK=postgresql://${empresa}:${senha_deploy}@${db_host_apioficial}:${db_port_apioficial}/oficialseparado?schema=public
-DATABASE_URL=${db_host_apioficial}
-DATABASE_PORT=${db_port_apioficial}
-DATABASE_USER=${empresa}
-DATABASE_PASSWORD=${senha_deploy}
+DATABASE_LINK=postgresql://${DB_USER_APIOFICIAL}:${DB_PASS_APIOFICIAL}@${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL}/oficialseparado?schema=public
+DATABASE_URL=${DB_HOST_APIOFICIAL}
+DATABASE_PORT=${DB_PORT_APIOFICIAL}
+DATABASE_USER=${DB_USER_APIOFICIAL}
+DATABASE_PASSWORD=${DB_PASS_APIOFICIAL}
 DATABASE_NAME=oficialseparado
 TOKEN_ADMIN=adminpro
 URL_BACKEND_MULT100=${backend_url}
-REDIS_URI=${redis_uri_apioficial}
+REDIS_URI=${REDIS_URI_APIOFICIAL}
 PORT=${default_apioficial_port}
 NAME_ADMIN=SetupAutomatizado
 EMAIL_ADMIN=admin@multi100.com.br
