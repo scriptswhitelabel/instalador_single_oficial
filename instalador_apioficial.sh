@@ -312,7 +312,11 @@ criar_banco_apioficial() {
     else
       printf "${WHITE} >> Postgres com credenciais do .env do backend (incl. banco em Docker na porta publicada)...\n"
     fi
-    command -v psql >/dev/null 2>&1 || apt-get install -y postgresql-client >/dev/null 2>&1
+    if ! command -v psql >/dev/null 2>&1; then
+      printf "${WHITE} >> Instalando postgresql-client via apt-get (pode levar alguns minutos)...\n"
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get install -y postgresql-client || true
+    fi
     command -v psql >/dev/null 2>&1 || trata_erro "criar_banco_apioficial (instale postgresql-client ou garanta psql no PATH)"
 
     # localhost costuma resolver para ::1; Docker costuma publicar só IPv4 — força IPv4 loopback.
@@ -321,7 +325,11 @@ criar_banco_apioficial() {
       pg_host="127.0.0.1"
     fi
 
+    # Evita psql pendurado por minutos se host/porta estiverem errados ou firewall.
+    export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-15}"
     export PGPASSWORD="${DB_PASS_APIOFICIAL}"
+    printf "${WHITE} >> Conectando em ${pg_host}:${DB_PORT_APIOFICIAL} (timeout ${PGCONNECT_TIMEOUT}s)...\n"
+
     # CREATE DATABASE não deve passar por PgBouncer em modo transaction; com porta 6732 tenta DDL na 7532.
     if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
       if [ "${DB_PORT_APIOFICIAL}" = "6732" ]; then
@@ -329,10 +337,10 @@ criar_banco_apioficial() {
       fi
     fi
     if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
-      unset PGPASSWORD
+      unset PGPASSWORD PGCONNECT_TIMEOUT
       trata_erro "criar_banco_apioficial (Postgres ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} — confira porta publicada do container, usuário com CREATEDB ou banco já existente oficialseparado)"
     fi
-    unset PGPASSWORD
+    unset PGPASSWORD PGCONNECT_TIMEOUT
     printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "criar_banco_apioficial"
