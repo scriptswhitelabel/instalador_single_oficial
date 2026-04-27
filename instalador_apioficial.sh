@@ -306,35 +306,34 @@ criar_banco_apioficial() {
   echo
   {
     carregar_config_banco_backend
+    # Sempre usa DB_HOST/DB_PORT/DB_USER/DB_PASS do .env do backend (Postgres nativo, Docker com porta publicada, ou AP).
     if [ "${ALTA_PERFORMANCE}" = "1" ]; then
-      # Usa credenciais do backend; em AP tenta também porta direta 7532 para DDL.
-      printf "${WHITE} >> Modo Alta Performance: conectando ao Postgres com dados do backend...\n"
-      command -v psql >/dev/null 2>&1 || apt-get install -y postgresql-client >/dev/null 2>&1
-      export PGPASSWORD="${DB_PASS_APIOFICIAL}"
-      if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
-        # Se estiver via PgBouncer (6732), tenta porta direta do Postgres (7532) para CREATE DATABASE.
-        if [ "${DB_PORT_APIOFICIAL}" = "6732" ]; then
-          psql -h "${DB_HOST_APIOFICIAL}" -p 7532 -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
-        fi
-        # Banco já pode existir; verifica se está acessível.
-        if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
-          unset PGPASSWORD
-          trata_erro "criar_banco_apioficial (conexão com banco do backend)"
-        fi
-      fi
-      unset PGPASSWORD
-      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso.${WHITE}\n"
+      printf "${WHITE} >> Modo Alta Performance: Postgres com credenciais do backend...\n"
     else
-      export PGPASSWORD="${DB_PASS_APIOFICIAL}"
-      if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
-        if ! psql -h "${DB_HOST_APIOFICIAL}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
-          unset PGPASSWORD
-          trata_erro "criar_banco_apioficial (Postgres local)"
-        fi
-      fi
-      unset PGPASSWORD
-      printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso!${WHITE}\n"
+      printf "${WHITE} >> Postgres com credenciais do .env do backend (incl. banco em Docker na porta publicada)...\n"
     fi
+    command -v psql >/dev/null 2>&1 || apt-get install -y postgresql-client >/dev/null 2>&1
+    command -v psql >/dev/null 2>&1 || trata_erro "criar_banco_apioficial (instale postgresql-client ou garanta psql no PATH)"
+
+    # localhost costuma resolver para ::1; Docker costuma publicar só IPv4 — força IPv4 loopback.
+    local pg_host="${DB_HOST_APIOFICIAL}"
+    if [ -z "$pg_host" ] || [ "$pg_host" = "localhost" ]; then
+      pg_host="127.0.0.1"
+    fi
+
+    export PGPASSWORD="${DB_PASS_APIOFICIAL}"
+    # CREATE DATABASE não deve passar por PgBouncer em modo transaction; com porta 6732 tenta DDL na 7532.
+    if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
+      if [ "${DB_PORT_APIOFICIAL}" = "6732" ]; then
+        psql -h "${pg_host}" -p 7532 -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
+      fi
+    fi
+    if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
+      unset PGPASSWORD
+      trata_erro "criar_banco_apioficial (Postgres ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} — confira porta publicada do container, usuário com CREATEDB ou banco já existente oficialseparado)"
+    fi
+    unset PGPASSWORD
+    printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "criar_banco_apioficial"
 }
