@@ -428,18 +428,10 @@ garantir_permissoes_env_backend() {
   chmod 600 "$env_file" 2>/dev/null || true
 }
 
-# Alta Performance: REDIS_URI_ACK = REDIS_URI (ver deve_sincronizar em instalador_single.sh).
-deve_sincronizar_redis_uri_ack_com_redis_uri() {
-  local env_file="$1"
-  grep -q '^DB_PORT=6732' "$env_file" 2>/dev/null && return 0
-  [ "${ALTA_PERFORMANCE:-0}" = "1" ] && return 0
-  return 1
-}
-
-sincronizar_redis_uri_ack_com_redis_uri_se_ap() {
+# Iguala REDIS_URI_ACK ao valor de REDIS_URI (só ao descomentar ou acrescentar ACK; ACK já ativo não é alterado).
+copiar_redis_uri_para_redis_uri_ack() {
   local env_file="$1"
   [ ! -f "$env_file" ] && return 0
-  deve_sincronizar_redis_uri_ack_com_redis_uri "$env_file" || return 0
   local redis_main
   redis_main=$(grep -m1 '^REDIS_URI=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r')
   [ -z "$redis_main" ] && return 0
@@ -460,6 +452,7 @@ sincronizar_redis_uri_ack_com_redis_uri_se_ap() {
 }
 
 # Ativa REDIS_URI_ACK e Bull Board no .env do backend (backend/package.json >= 7.4.1).
+# $3 opcional: valor explícito de REDIS_URI_ACK ao acrescentar bloco; caso contrário copia só de REDIS_URI.
 descomentar_env_redis_bull_ack() {
   local env_file="$1"
   local pkg_json="${2:-}"
@@ -478,7 +471,6 @@ descomentar_env_redis_bull_ack() {
   local redis_main_val
   redis_main_val=$(grep -m1 '^REDIS_URI=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r')
   if grep -q '^REDIS_URI_ACK=' "$env_file" 2>/dev/null; then
-    sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
     printf "${GREEN} >> REDIS_URI_ACK / Bull Board já ativos no .env (backend ${ver}).${WHITE}\n"
     return 0
   fi
@@ -487,7 +479,7 @@ descomentar_env_redis_bull_ack() {
     sed -i 's/^# BULL_BOARD=/BULL_BOARD=/' "$env_file"
     sed -i 's/^# BULL_USER=/BULL_USER=/' "$env_file"
     sed -i 's/^# BULL_PASS=/BULL_PASS=/' "$env_file"
-    sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
+    copiar_redis_uri_para_redis_uri_ack "$env_file"
     printf "${GREEN} >> REDIS_URI_ACK / Bull Board ativados no .env (backend ${ver} >= 7.4.1).${WHITE}\n"
     return 0
   fi
@@ -496,20 +488,23 @@ descomentar_env_redis_bull_ack() {
   bull_user=$(grep '^MAIL_USER=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | head -1)
   [ -z "$db_pass" ] && return 0
   [ -z "$bull_user" ] && bull_user="admin@localhost"
+  if [ -z "$redis_ack_val_append" ] && [ -z "$redis_main_val" ]; then
+    printf "${YELLOW} >> AVISO: REDIS_URI vazio no .env; REDIS_URI_ACK não foi gravado — defina manualmente se necessário.${WHITE}\n"
+  fi
   {
     echo ""
     if [ -n "$redis_ack_val_append" ]; then
       echo "REDIS_URI_ACK=${redis_ack_val_append}"
-    elif deve_sincronizar_redis_uri_ack_com_redis_uri "$env_file" && [ -n "$redis_main_val" ]; then
+    elif [ -n "$redis_main_val" ]; then
       echo "REDIS_URI_ACK=${redis_main_val}"
-    else
-      echo "REDIS_URI_ACK=redis://:${db_pass}@127.0.0.1:6379"
     fi
     echo "BULL_BOARD=true"
     echo "BULL_USER=${bull_user}"
     echo "BULL_PASS=${db_pass}"
   } >> "$env_file"
-  sincronizar_redis_uri_ack_com_redis_uri_se_ap "$env_file"
+  if [ -z "$redis_ack_val_append" ]; then
+    copiar_redis_uri_para_redis_uri_ack "$env_file"
+  fi
   printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
