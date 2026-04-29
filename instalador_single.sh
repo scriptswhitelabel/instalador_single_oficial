@@ -3261,6 +3261,9 @@ TRANSCRIBE_URL=http://localhost:4002
 
 # Buffer Size Configuration
 MAX_BUFFER_SIZE_MB=200
+
+# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente.
+WHATSAPP_WEB_VERSION=2.3000.1038235667
 [-]EOF
 EOF
 
@@ -4058,6 +4061,7 @@ STOPPM2
   otimiza_banco_atualizar
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_whatsapp_web_version
 
   # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
   if [ -z "${empresa}" ]; then
@@ -4452,6 +4456,32 @@ verificar_e_adicionar_max_buffer() {
     printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB adicionada com sucesso!${WHITE}\n"
   else
     printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB já existe no .env do backend.${WHITE}\n"
+  fi
+  garantir_permissoes_env_backend "$ENV_FILE"
+}
+
+# Verificar e adicionar WHATSAPP_WEB_VERSION no .env do backend (Baileys)
+verificar_e_adicionar_whatsapp_web_version() {
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de WHATSAPP_WEB_VERSION.\n${WHITE}"
+    return 0
+  fi
+
+  if ! grep -q '^WHATSAPP_WEB_VERSION=' "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando WHATSAPP_WEB_VERSION ao .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$ENV_FILE"
+    echo "WHATSAPP_WEB_VERSION=2.3000.1038235667" >> "$ENV_FILE"
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION adicionada ao .env do backend.${WHITE}\n"
+  else
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION já definida no .env do backend (não alterado).${WHITE}\n"
   fi
   garantir_permissoes_env_backend "$ENV_FILE"
 }

@@ -57,6 +57,21 @@ trata_erro() {
   exit 1
 }
 
+# Garante WHATSAPP_WEB_VERSION no .env do backend se a linha ainda não existir (não sobrescreve valor manual).
+garantir_whatsapp_web_version_env_backend() {
+  local env_file="$1"
+  [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
+  if grep -q '^WHATSAPP_WEB_VERSION=' "$env_file" 2>/dev/null; then
+    return 0
+  fi
+  printf "${WHITE} >> Incluindo WHATSAPP_WEB_VERSION no .env do backend (padrão do instalador)...\n${WHITE}"
+  echo "" >> "$env_file"
+  echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$env_file"
+  echo "WHATSAPP_WEB_VERSION=2.3000.1038235667" >> "$env_file"
+  chown deploy:deploy "$env_file" 2>/dev/null || true
+  chmod 600 "$env_file" 2>/dev/null || true
+}
+
 # Codificar token para URL (caracteres especiais em %XX)
 codifica_clone_base() {
   local length="${#1}"
@@ -606,6 +621,7 @@ MIGRATE
       printf "${GREEN} ✓ Migração do banco concluída\n${WHITE}"
     fi
   fi
+  garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
   echo
   
   # 9) Reinstalar dependências e build do Frontend
@@ -912,6 +928,7 @@ MIGRATE
       printf "${GREEN} ✓ Migração do banco concluída\n${WHITE}"
     fi
   fi
+  garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
   echo
   
   # 6) Reinstalar dependências e build do Frontend

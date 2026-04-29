@@ -305,6 +305,32 @@ garantir_permissoes_env_backend() {
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 
+# Verificar e adicionar WHATSAPP_WEB_VERSION no .env do backend (Baileys)
+verificar_e_adicionar_whatsapp_web_version() {
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de WHATSAPP_WEB_VERSION.\n${WHITE}"
+    return 0
+  fi
+
+  if ! grep -q '^WHATSAPP_WEB_VERSION=' "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando WHATSAPP_WEB_VERSION ao .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$ENV_FILE"
+    echo "WHATSAPP_WEB_VERSION=2.3000.1038235667" >> "$ENV_FILE"
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION adicionada ao .env do backend.${WHITE}\n"
+  else
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION já definida no .env do backend (não alterado).${WHITE}\n"
+  fi
+  garantir_permissoes_env_backend "$ENV_FILE"
+}
+
 # Iguala REDIS_URI_ACK ao valor de REDIS_URI (só ao descomentar ou acrescentar ACK; ACK já ativo não é alterado).
 copiar_redis_uri_para_redis_uri_ack() {
   local env_file="$1"
@@ -404,6 +430,7 @@ baixa_codigo_atualizar() {
   # otimiza_banco_atualizar
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_whatsapp_web_version
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
