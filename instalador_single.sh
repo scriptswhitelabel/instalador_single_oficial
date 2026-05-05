@@ -1326,6 +1326,7 @@ menu() {
     printf "   [${BLUE}5${WHITE}] Atualizar API Oficial\n"
     printf "   [${BLUE}6${WHITE}] Migrar para Multiflow-PRO\n"
     printf "   [${BLUE}7${WHITE}] Instalação Alta Performance (Redis, Postgres, PgBouncer)\n"
+    printf "   [${BLUE}8${WHITE}] Atualização FAST\n"
     printf "   [${BLUE}10${WHITE}] Ferramentas\n"
     printf "   [${BLUE}0${WHITE}] Sair\n"
     echo
@@ -1351,6 +1352,9 @@ menu() {
       ;;
     7)
       exec_instalador_alta_performance
+      ;;
+    8)
+      atualizar_base_fast
       ;;
     10)
       menu_ferramentas
@@ -5828,6 +5832,26 @@ migrar_multiflow_pro() {
     sleep 2
   fi
   printf "${GREEN} >> Processo de migração para Multiflow-PRO finalizado. Voltando ao menu...${WHITE}\n"
+  sleep 2
+}
+
+# Atualização FAST (sem reinstalar node_modules/Baileys)
+atualizar_base_fast() {
+  banner
+  printf "${YELLOW} >> Essa atualisação não reinstala a pasta node_modules, nem a Baylkes utiliza para casos que elas não tem alteraçes.${WHITE}\n"
+  echo
+
+  local script_path="$(pwd)/atualizador_remoto_FAST.sh"
+  if [ -f "$script_path" ]; then
+    chmod 775 "$script_path"
+    bash "$script_path"
+  else
+    printf "${RED} >> Script não encontrado em: $script_path${WHITE}\n"
+    printf "${RED} >> Certifique-se de que o arquivo atualizador_remoto_FAST.sh está no mesmo diretório do instalador.${WHITE}\n"
+    sleep 2
+  fi
+
+  printf "${GREEN} >> Processo de atualização FAST finalizado. Voltando ao menu...${WHITE}\n"
   sleep 2
 }
 
