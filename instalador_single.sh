@@ -4004,6 +4004,9 @@ ativar_tela_atualizacao_frontend() {
   local cor_primaria="${REACT_APP_PRIMARY_COLOR:-${PRIMARY_COLOR:-#2563eb}}"
   local cor_secundaria="${REACT_APP_SECONDARY_COLOR:-${SECONDARY_COLOR:-#1e3a8a}}"
   local nome_empresa="${nome_titulo:-${empresa}}"
+  local logo_fallback_text
+  logo_fallback_text=$(printf '%s' "${nome_empresa}" | awk '{a=toupper(substr($1,1,1)); b=toupper(substr($2,1,1)); if (b=="") b=toupper(substr($1,2,1)); printf "%s%s", a,b}')
+  [ -z "${logo_fallback_text}" ] && logo_fallback_text="MF"
 
   rm -rf "${backup_dir}"
   if [ -d "${build_dir}" ]; then
@@ -4064,7 +4067,7 @@ EOF
   if [ -n "${logo_url}" ]; then
     sed -i "s|__LOGO_BLOCK__|<img class=\"logo\" src=\"${logo_url}\" alt=\"Logo ${nome_empresa}\" />|g" "${build_dir}/index.html"
   else
-    sed -i "s|__LOGO_BLOCK__|<div class=\"logo-fallback\">MF</div>|g" "${build_dir}/index.html"
+    sed -i "s|__LOGO_BLOCK__|<div class=\"logo-fallback\">${logo_fallback_text}</div>|g" "${build_dir}/index.html"
   fi
 
   chown -R deploy:deploy "${build_dir}"
