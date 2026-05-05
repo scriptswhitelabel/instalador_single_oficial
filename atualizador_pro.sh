@@ -781,13 +781,23 @@ ativar_tela_atualizacao_frontend() {
     <h1>Sistema em atualizacao</h1>
     <p>Estamos aplicando melhorias no <strong>${nome_empresa}</strong>.<br />Volte em instantes para continuar usando normalmente.</p>
     <div class="bar"><span></span></div>
-    <div class="counter">Tempo de atualizacao: <strong id="seconds">0s</strong></div>
+    <div class="counter">Tempo estimado restante: <strong id="countdown">10:00</strong></div>
   </div>
   <script>
-    let seconds = 0;
+    let remainingSeconds = 10 * 60;
+    const countdownEl = document.getElementById('countdown');
+    const formatTime = (value) => {
+      const minutes = Math.floor(value / 60);
+      const seconds = value % 60;
+      return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+    };
+
+    countdownEl.textContent = formatTime(remainingSeconds);
     setInterval(() => {
-      seconds += 1;
-      document.getElementById('seconds').textContent = seconds + 's';
+      if (remainingSeconds > 0) {
+        remainingSeconds -= 1;
+      }
+      countdownEl.textContent = formatTime(remainingSeconds);
     }, 1000);
   </script>
 </body>
