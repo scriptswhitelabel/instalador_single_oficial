@@ -776,7 +776,20 @@ baixa_codigo_atualizar() {
   fi
   
   rm -rf .build_nova
-  BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
+  build_ok=0
+  for mem in 4096 3072 2048; do
+    printf "${WHITE} >> Build do frontend com --max-old-space-size=${mem}...\n"
+    if BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=${mem} --openssl-legacy-provider" npm run build; then
+      build_ok=1
+      break
+    fi
+    printf "${YELLOW} >> Tentativa com ${mem} MB falhou. Tentando próximo limite...${WHITE}\n"
+    sleep 2
+  done
+  if [ "$build_ok" -ne 1 ]; then
+    echo "ERRO: Falha no build do frontend mesmo após fallback de memória (4096/3072/2048)."
+    exit 1
+  fi
   sleep 2
 UPDATEAPP
   then
