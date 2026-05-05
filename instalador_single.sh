@@ -4045,20 +4045,33 @@ ativar_tela_atualizacao_frontend() {
     <div class="counter">Tempo estimado restante: <strong id="countdown">10:00</strong></div>
   </div>
   <script>
-    let remainingSeconds = 10 * 60;
     const countdownEl = document.getElementById('countdown');
+    const totalSeconds = 10 * 60;
+    const storageKey = 'mf_update_countdown_end_' + window.location.host;
+    const now = Date.now();
+    let endAt = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+    if (!endAt || endAt <= now) {
+      endAt = now + (totalSeconds * 1000);
+      localStorage.setItem(storageKey, String(endAt));
+    }
+
     const formatTime = (value) => {
       const minutes = Math.floor(value / 60);
       const seconds = value % 60;
       return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
     };
-    countdownEl.textContent = formatTime(remainingSeconds);
-    setInterval(() => {
-      if (remainingSeconds > 0) {
-        remainingSeconds -= 1;
-      }
+
+    const tick = () => {
+      const remainingSeconds = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
       countdownEl.textContent = formatTime(remainingSeconds);
-    }, 1000);
+      if (remainingSeconds <= 0) {
+        localStorage.removeItem(storageKey);
+      }
+    };
+
+    tick();
+    setInterval(tick, 1000);
   </script>
 </body>
 </html>
