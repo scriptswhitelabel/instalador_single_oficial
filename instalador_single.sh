@@ -5838,7 +5838,7 @@ migrar_multiflow_pro() {
 # Atualização FAST (sem reinstalar node_modules/Baileys)
 atualizar_base_fast() {
   banner
-  printf "${YELLOW} >> Essa atualisação não reinstala a pasta node_modules, nem a Baylkes utiliza para casos que elas não tem alteraçes.${WHITE}\n"
+  printf "${YELLOW} >> Essa atualização não realiza a reinstalação da pasta node_modules, nem afeta o Baileys, pois esses componentes só precisam ser atualizados quando há alterações específicas neles.${WHITE}\n"
   echo
 
   local script_path="$(pwd)/atualizador_remoto_FAST.sh"
