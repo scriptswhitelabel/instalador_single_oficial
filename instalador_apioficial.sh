@@ -72,6 +72,12 @@ carregar_config_banco_backend() {
   DB_USER_APIOFICIAL="${DB_USER_APIOFICIAL:-$empresa}"
   DB_PASS_APIOFICIAL="${DB_PASS_APIOFICIAL:-$senha_deploy}"
   REDIS_URI_APIOFICIAL="${REDIS_URI_APIOFICIAL:-$redis_uri_default}"
+
+  # Alta Performance: backend usa PgBouncer (6732); API Oficial fala no Postgres publicado (7532).
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    DB_HOST_APIOFICIAL="127.0.0.1"
+    DB_PORT_APIOFICIAL="7532"
+  fi
 }
 
 # Banner
@@ -308,7 +314,7 @@ criar_banco_apioficial() {
     carregar_config_banco_backend
     # Sempre usa DB_HOST/DB_PORT/DB_USER/DB_PASS do .env do backend (Postgres nativo, Docker com porta publicada, ou AP).
     if [ "${ALTA_PERFORMANCE}" = "1" ]; then
-      printf "${WHITE} >> Modo Alta Performance: Postgres com credenciais do backend...\n"
+      printf "${WHITE} >> Modo Alta Performance: Postgres Docker em ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} (credenciais do backend)...\n"
     else
       printf "${WHITE} >> Postgres com credenciais do .env do backend (incl. banco em Docker na porta publicada)...\n"
     fi
@@ -330,12 +336,7 @@ criar_banco_apioficial() {
     export PGPASSWORD="${DB_PASS_APIOFICIAL}"
     printf "${WHITE} >> Conectando em ${pg_host}:${DB_PORT_APIOFICIAL} (timeout ${PGCONNECT_TIMEOUT}s)...\n"
 
-    # CREATE DATABASE não deve passar por PgBouncer em modo transaction; com porta 6732 tenta DDL na 7532.
-    if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null; then
-      if [ "${DB_PORT_APIOFICIAL}" = "6732" ]; then
-        psql -h "${pg_host}" -p 7532 -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
-      fi
-    fi
+    psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
     if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
       unset PGPASSWORD PGCONNECT_TIMEOUT
       trata_erro "criar_banco_apioficial (Postgres ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} — confira porta publicada do container, usuário com CREATEDB ou banco já existente oficialseparado)"

@@ -3475,6 +3475,9 @@ SEEDINSTALL
   pm2 start dist/server.js --name ${empresa}-backend
 PM2BACKEND
 
+    # Garantia extra: sed/comandos como root na etapa anterior não devem deixar .env como root (PM2 roda como deploy).
+    garantir_permissoes_env_backend "/home/deploy/${empresa}/backend/.env"
+
     sleep 2
   } || trata_erro "instala_backend_base"
 }
