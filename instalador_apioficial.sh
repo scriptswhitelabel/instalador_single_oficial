@@ -404,6 +404,9 @@ JWT_REFRESH_SECRET=${jwt_refresh_secret_backend}
 URL_API_OFICIAL=https://${subdominio_oficial}
 EOF
 
+    chown deploy:deploy "/home/deploy/${empresa}/api_oficial/.env" 2>/dev/null || true
+    chmod 600 "/home/deploy/${empresa}/api_oficial/.env" 2>/dev/null || true
+
     printf "${GREEN} >> Arquivo .env da API Oficial configurado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "configurar_env_apioficial"
