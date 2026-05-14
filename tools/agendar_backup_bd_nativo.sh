@@ -1,0 +1,259 @@
+#!/bin/bash
+
+# Agendar e executar backup diário do Postgres nativo (instalação padrão).
+# Um pg_dump por banco, salvo em /home/deploy/backup-<empresa> (nome da empresa no VARIAVEIS_INSTALACAO).
+
+GREEN='\033[1;32m'
+BLUE='\033[1;34m'
+WHITE='\033[1;37m'
+RED='\033[1;31m'
+YELLOW='\033[1;33m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ARQUIVO_VARIAVEIS="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+DB_HOST="127.0.0.1"
+DB_PORT="5432"
+CRON_SCRIPT_PATH="${SCRIPT_DIR}/agendar_backup_bd_nativo.sh"
+
+if [ "$EUID" -ne 0 ]; then
+  echo
+  printf "${WHITE} >> Este script precisa ser executado como root.${WHITE}\n"
+  exit 1
+fi
+
+banner() {
+  printf " ${BLUE}\n"
+  printf "  Backup Banco Nativo (PostgreSQL)\n"
+  printf " ${WHITE}\n"
+}
+
+# Lê dias de retenção (arquivo em BACKUP_DIR ou padrão 7). Usa CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias" definido antes.
+ler_retencao_dias() {
+  if [ -f "${CONFIG_RETENCAO}" ]; then
+    read -r ret < "${CONFIG_RETENCAO}" 2>/dev/null
+    if [[ "${ret}" =~ ^[0-9]+$ ]] && [ "${ret}" -ge 1 ]; then
+      echo "${ret}"
+      return
+    fi
+  fi
+  echo "7"
+}
+
+resolver_credenciais_banco() {
+  local usuario_db="${empresa}"
+  local senha_db="${senha_deploy}"
+
+  if [ -z "${senha_db}" ] && [ -f "/home/deploy/${empresa}/backend/.env" ]; then
+    senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  fi
+
+  echo "${usuario_db}|${senha_db}"
+}
+
+postgres_nativo_ativo() {
+  systemctl is-active --quiet postgresql 2>/dev/null
+}
+
+# Executa apenas o backup (chamado pelo cron ou com --backup)
+executar_backup() {
+  export PATH="/usr/bin:/usr/local/bin:${PATH}"
+  local LOG_FALLBACK="/tmp/backup-bd-nativo-fallback.log"
+
+  cd "${INSTALADOR_DIR}" || { echo "$(date): ERRO ao acessar ${INSTALADOR_DIR}" >> "${LOG_FALLBACK}"; return 1; }
+
+  if [ ! -f "${ARQUIVO_VARIAVEIS}" ]; then
+    echo "$(date): VARIAVEIS_INSTALACAO não encontrado em ${ARQUIVO_VARIAVEIS}. Backup cancelado." >> "${LOG_FALLBACK}" 2>&1
+    return 1
+  fi
+  # shellcheck source=/dev/null
+  source "${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  empresa=$(echo "${empresa:-}" | tr -d '\r\n' | xargs)
+  senha_deploy=$(echo "${senha_deploy:-}" | tr -d '\r\n' | xargs)
+
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    echo "$(date): Instalação em Alta Performance. Backup nativo cancelado." >> "${LOG_FALLBACK}" 2>&1
+    return 0
+  fi
+  if [ -z "${empresa}" ]; then
+    echo "$(date): empresa vazia após ler ${ARQUIVO_VARIAVEIS}" >> "${LOG_FALLBACK}" 2>&1
+    return 1
+  fi
+
+  BACKUP_DIR="/home/deploy/backup-${empresa}"
+  CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias"
+  mkdir -p "${BACKUP_DIR}"
+  chown deploy:deploy "${BACKUP_DIR}"
+  LOG="${BACKUP_DIR}/backup.log"
+
+  if ! postgres_nativo_ativo; then
+    echo "$(date): Serviço PostgreSQL nativo não está ativo. Backup cancelado." >> "${LOG}" 2>&1
+    return 1
+  fi
+
+  local credenciais
+  credenciais=$(resolver_credenciais_banco)
+  local usuario_db="${credenciais%%|*}"
+  local senha_db="${credenciais#*|}"
+  if [ -z "${usuario_db}" ] || [ -z "${senha_db}" ]; then
+    echo "$(date): usuário ou senha do banco vazios após ler ${ARQUIVO_VARIAVEIS}" >> "${LOG}" 2>&1
+    return 1
+  fi
+
+  RETENCAO_DIAS=$(ler_retencao_dias)
+  DATA=$(date +%Y-%m-%d_%H-%M-%S)
+
+  BANCOS=$(PGPASSWORD="${senha_db}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${usuario_db}" -d postgres -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "${LOG}")
+  if [ -z "${BANCOS}" ]; then
+    echo "$(date): Nenhum banco listado ou falha de conexão no Postgres nativo ${DB_HOST}:${DB_PORT} (ver erros acima)" >> "${LOG}" 2>&1
+    return 1
+  fi
+
+  for DB in ${BANCOS}; do
+    DB_CLEAN=$(echo "${DB}" | tr -d '\r\n')
+    [ -z "${DB_CLEAN}" ] && continue
+    ARQUIVO="${BACKUP_DIR}/backup-${DB_CLEAN}-${DATA}.sql.gz"
+    TMP_SQL=$(mktemp)
+    if PGPASSWORD="${senha_db}" pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${usuario_db}" -d "${DB_CLEAN}" -F p > "${TMP_SQL}" 2>> "${LOG}"; then
+      if [ -s "${TMP_SQL}" ]; then
+        gzip -c "${TMP_SQL}" > "${ARQUIVO}"
+        chown deploy:deploy "${ARQUIVO}"
+        echo "$(date): OK ${DB_CLEAN} -> ${ARQUIVO} ($(stat -c%s "${ARQUIVO}" 2>/dev/null || echo 0) bytes)" >> "${LOG}" 2>&1
+      else
+        gzip -c "${TMP_SQL}" > "${ARQUIVO}"
+        chown deploy:deploy "${ARQUIVO}"
+        echo "$(date): AVISO ${DB_CLEAN} - pg_dump retornou 0 bytes (arquivo vazio salvo para diagnóstico)" >> "${LOG}" 2>&1
+      fi
+    else
+      echo "$(date): ERRO ao fazer dump de ${DB_CLEAN} (ver mensagens acima no log)" >> "${LOG}" 2>&1
+    fi
+    rm -f "${TMP_SQL}"
+  done
+
+  find "${BACKUP_DIR}" -maxdepth 1 -name "backup-*.sql.gz" -mtime +${RETENCAO_DIAS} -delete 2>/dev/null
+  return 0
+}
+
+# Agendar no cron e configurar ambiente
+agendar() {
+  banner
+  printf "${WHITE} >> Backup diário do banco nativo (PostgreSQL)${WHITE}\n"
+  echo
+
+  if [ ! -f "${ARQUIVO_VARIAVEIS}" ]; then
+    printf "${RED} >> Arquivo ${ARQUIVO_VARIAVEIS} não encontrado.${WHITE}\n"
+    printf "${YELLOW} >> Execute primeiro uma instalação nativa.${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  # shellcheck source=/dev/null
+  source "${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    printf "${RED} >> Esta opção é apenas para instalação nativa (PostgreSQL no sistema).${WHITE}\n"
+    printf "${YELLOW} >> No seu VARIAVEIS_INSTALACAO, ALTA_PERFORMANCE está definido como 1.${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  empresa=$(echo "${empresa:-}" | tr -d '\r\n' | xargs)
+  senha_deploy=$(echo "${senha_deploy:-}" | tr -d '\r\n' | xargs)
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> Variável empresa não encontrada em VARIAVEIS_INSTALACAO.${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  local credenciais
+  credenciais=$(resolver_credenciais_banco)
+  local usuario_db="${credenciais%%|*}"
+  local senha_db="${credenciais#*|}"
+  if [ -z "${senha_db}" ]; then
+    printf "${RED} >> Senha do banco não encontrada (senha_deploy ou DB_PASS no .env).${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  BACKUP_DIR="/home/deploy/backup-${empresa}"
+  CONFIG_RETENCAO="${BACKUP_DIR}/.retencao_dias"
+
+  command -v psql >/dev/null 2>&1 || {
+    printf "${WHITE} >> Instalando postgresql-client...${WHITE}\n"
+    apt-get update -qq && apt-get install -y postgresql-client >/dev/null 2>&1
+  }
+  command -v psql >/dev/null 2>&1 || {
+    printf "${RED} >> Não foi possível instalar postgresql-client.${WHITE}\n"
+    sleep 3
+    return 1
+  }
+
+  if ! postgres_nativo_ativo; then
+    printf "${RED} >> Serviço PostgreSQL nativo não está ativo.${WHITE}\n"
+    printf "${YELLOW} >> Verifique com: systemctl status postgresql${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  mkdir -p "${BACKUP_DIR}"
+  chown deploy:deploy "${BACKUP_DIR}"
+  printf "${GREEN} >> Pasta de backup: ${BACKUP_DIR}${WHITE}\n"
+
+  export PGPASSWORD="${senha_db}"
+  if ! psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${usuario_db}" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+    unset PGPASSWORD
+    printf "${RED} >> Não foi possível conectar ao Postgres em ${DB_HOST}:${DB_PORT}.${WHITE}\n"
+    printf "${YELLOW} >> Verifique usuário, senha e se o PostgreSQL nativo está rodando.${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+  unset PGPASSWORD
+  printf "${GREEN} >> Conexão com Postgres nativo OK.${WHITE}\n"
+  echo
+
+  RETENCAO_ATUAL=$(ler_retencao_dias)
+  printf "${WHITE} >> Quantos dias deseja reter os backups? (padrão ${RETENCAO_ATUAL}):${WHITE}\n"
+  read -p "> " retenciao_digitado
+  retenciao_digitado=${retenciao_digitado:-$RETENCAO_ATUAL}
+  if [[ "${retenciao_digitado}" =~ ^[0-9]+$ ]] && [ "${retenciao_digitado}" -ge 1 ]; then
+    RETENCAO_DIAS=${retenciao_digitado}
+    mkdir -p "${BACKUP_DIR}"
+    echo "${RETENCAO_DIAS}" > "${CONFIG_RETENCAO}"
+    chown deploy:deploy "${CONFIG_RETENCAO}" 2>/dev/null
+    printf "${GREEN} >> Retenção configurada: ${RETENCAO_DIAS} dias.${WHITE}\n"
+  else
+    RETENCAO_DIAS=${RETENCAO_ATUAL}
+    printf "${YELLOW} >> Valor inválido. Usando retenção atual: ${RETENCAO_DIAS} dias.${WHITE}\n"
+  fi
+  echo
+
+  CRON_LINHA="0 2 * * * ${CRON_SCRIPT_PATH} --backup >> ${BACKUP_DIR}/backup.log 2>&1"
+  if crontab -l 2>/dev/null | grep -q "agendar_backup_bd_nativo.sh --backup"; then
+    printf "${YELLOW} >> Backup diário já está agendado no cron (2h da manhã).${WHITE}\n"
+  else
+    (crontab -l 2>/dev/null; echo "${CRON_LINHA}") | crontab -
+    printf "${GREEN} >> Backup diário agendado no cron (todos os dias às 2h).${WHITE}\n"
+  fi
+  printf "${WHITE} >> Arquivos: um .sql.gz por banco em ${BACKUP_DIR}${WHITE}\n"
+  printf "${WHITE} >> Retenção: ${RETENCAO_DIAS} dias (arquivo ${CONFIG_RETENCAO})${WHITE}\n"
+  echo
+  printf "${WHITE} >> Deseja executar o backup agora? (S/N):${WHITE}\n"
+  read -p "> " exec_now
+  exec_now=$(echo "${exec_now}" | tr '[:upper:]' '[:lower:]')
+  if [ "${exec_now}" = "s" ]; then
+    printf "${WHITE} >> Executando backup...${WHITE}\n"
+    executar_backup
+    printf "${GREEN} >> Backup concluído. Verifique ${BACKUP_DIR}${WHITE}\n"
+  fi
+  echo
+  sleep 2
+  return 0
+}
+
+case "${1:-}" in
+  --backup)
+    executar_backup
+    ;;
+  *)
+    agendar
+    ;;
+esac

@@ -1158,15 +1158,16 @@ menu_ferramentas() {
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
-    printf "   [${BLUE}7${WHITE}] Backup do Redis\n"
-    printf "   [${BLUE}8${WHITE}] Restaurar Redis\n"
-    printf "   [${BLUE}9${WHITE}] Importar backup do banco\n"
-    printf "   [${BLUE}10${WHITE}] Backup do banco\n"
-    printf "   [${BLUE}11${WHITE}] Importar backup do banco da API Oficial\n"
-    printf "   [${BLUE}12${WHITE}] Listar Bancos Existentes\n"
-    printf "   [${BLUE}13${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
-    printf "   [${BLUE}14${WHITE}] Trocar domínios (URL backend / frontend)\n"
-    printf "   [${BLUE}15${WHITE}] Atualizar Baileys PRO (Heineken)\n"
+    printf "   [${BLUE}7${WHITE}] Agendar Backup Diário do Banco Nativo\n"
+    printf "   [${BLUE}8${WHITE}] Backup do Redis\n"
+    printf "   [${BLUE}9${WHITE}] Restaurar Redis\n"
+    printf "   [${BLUE}10${WHITE}] Importar backup do banco\n"
+    printf "   [${BLUE}11${WHITE}] Backup do banco\n"
+    printf "   [${BLUE}12${WHITE}] Importar backup do banco da API Oficial\n"
+    printf "   [${BLUE}13${WHITE}] Listar Bancos Existentes\n"
+    printf "   [${BLUE}14${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
+    printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
+    printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1249,39 +1250,53 @@ menu_ferramentas() {
       fi
       ;;
     7)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      BACKUP_SCRIPT="${SCRIPT_DIR}/tools/agendar_backup_bd_nativo.sh"
+      if [ -f "$BACKUP_SCRIPT" ]; then
+        chmod 775 "$BACKUP_SCRIPT"
+        bash "$BACKUP_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${BACKUP_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    8)
       backup_redis_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    8)
+    9)
       restaurar_redis_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    9)
+    10)
       importar_backup_banco_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    10)
+    11)
       backup_banco_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    11)
+    12)
       importar_backup_banco_api_oficial_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    12)
+    13)
       listar_bancos_ferramentas
       ;;
-    13)
+    14)
       restaurar_backup_banco_alta_performance_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
-    14)
+    15)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       TROCAR_DOM_SCRIPT="${SCRIPT_DIR}/tools/trocar_dominios.sh"
       if [ -f "$TROCAR_DOM_SCRIPT" ]; then
@@ -1297,7 +1312,7 @@ menu_ferramentas() {
         sleep 3
       fi
       ;;
-    15)
+    16)
       atualizar_baileys_pro_heineken_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
