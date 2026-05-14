@@ -1903,11 +1903,11 @@ EOF
 
     sleep 2
 
-    sudo su - deploy <<'RESTARTPM2'
+    sudo su - deploy <<RESTARTPM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
   else
-    export PATH=/usr/bin:/usr/local/bin:$PATH
+    export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   pm2 restart ${nova_empresa}-backend ${nova_empresa}-frontend
 RESTARTPM2

@@ -53,7 +53,7 @@ detectar_instancias_instaladas() {
   local temp_subdominio_frontend=""
   
   # Verificar instalação base (arquivo VARIAVEIS_INSTALACAO)
-  INSTALADOR_DIR="/root/instalador_single_oficial"
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
   if [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ]; then
     # Salvar variáveis atuais
@@ -728,9 +728,11 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-pm2 restart all
-pm2 reset all
-pm2 flush
+for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao" "api_oficial_${empresa}"; do
+  pm2 restart "\$_p" 2>/dev/null || true
+  pm2 reset "\$_p" 2>/dev/null || true
+  pm2 flush "\$_p" 2>/dev/null || true
+done
 pm2 save
 RESTARTPM2ATUALIZACAO
 

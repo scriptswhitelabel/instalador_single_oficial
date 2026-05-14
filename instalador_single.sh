@@ -1170,6 +1170,7 @@ menu_ferramentas() {
     printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
     printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
     printf "   [${BLUE}17${WHITE}] Otimizar Postgres Nativo\n"
+    printf "   [${BLUE}18${WHITE}] Aplicar certificado SSL no Nginx\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1330,6 +1331,20 @@ menu_ferramentas() {
         read -r
       else
         printf "${RED} >> Erro: Arquivo ${OTIMIZAR_PG_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    18)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      SSL_NGINX_SCRIPT="${SCRIPT_DIR}/tools/aplicar_certificado_ssl_nginx.sh"
+      if [ -f "$SSL_NGINX_SCRIPT" ]; then
+        chmod 775 "$SSL_NGINX_SCRIPT"
+        bash "$SSL_NGINX_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${SSL_NGINX_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
       ;;
