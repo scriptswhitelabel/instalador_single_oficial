@@ -213,6 +213,19 @@ main() {
   local conf_dir=""
   local opcao=""
 
+  if [ "${1:-}" = "--perfil" ] && [ -n "${2:-}" ]; then
+    opcao="$2"
+    if ! validar_instalacao_nativa; then
+      return 1
+    fi
+    pg_main_dir=$(detectar_pg_main_dir) || {
+      printf "${RED} >> Não foi possível localizar /etc/postgresql/<versão>/main.${WHITE}\n"
+      return 1
+    }
+    aplicar_perfil "${opcao}" "${pg_main_dir}"
+    return $?
+  fi
+
   banner
   printf "${WHITE} >> Esta ferramenta adiciona melhorias ao PostgreSQL nativo para melhor desempenho.${WHITE}\n"
   printf "${WHITE} >> Será criado (ou atualizado) um arquivo em conf.d do PostgreSQL, com backup da versão anterior.${WHITE}\n"

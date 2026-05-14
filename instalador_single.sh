@@ -119,6 +119,7 @@ salvar_variaveis() {
   # Registro se a instalação foi em modo Alta Performance (Redis, Postgres e PgBouncer via Docker)
   echo "# Instalação em modo Alta Performance (1=sim, 0=não)" >>$ARQUIVO_VARIAVEIS
   echo "ALTA_PERFORMANCE=${ALTA_PERFORMANCE:-0}" >>$ARQUIVO_VARIAVEIS
+  echo "perfil_otimizacao_vps=${perfil_otimizacao_vps:-0}" >>$ARQUIVO_VARIAVEIS
 }
 
 # Carregar variáveis
@@ -1402,6 +1403,7 @@ menu() {
 
 # Etapa de instalação
 instalacao_base() {
+  carregar_variaveis
   carregar_etapa
   if [ "$etapa" == "0" ]; then
     questoes_dns_base || trata_erro "questoes_dns_base"
@@ -1410,6 +1412,7 @@ instalacao_base() {
     define_proxy_base || trata_erro "define_proxy_base"
     define_portas_base || trata_erro "define_portas_base"
     confirma_dados_instalacao_base || trata_erro "confirma_dados_instalacao_base"
+    questoes_otimizacao_nativa || trata_erro "questoes_otimizacao_nativa"
     salvar_variaveis || trata_erro "salvar_variaveis"
     salvar_etapa 1
   fi
@@ -1443,6 +1446,7 @@ instalacao_base() {
       salvar_etapa 8
     else
       instala_postgres_base || trata_erro "instala_postgres_base"
+      aplicar_otimizacao_postgres_instalacao || trata_erro "aplicar_otimizacao_postgres_instalacao"
       salvar_etapa 8
     fi
   fi
@@ -1466,6 +1470,7 @@ instalacao_base() {
   if [ "$etapa" -le "11" ]; then
     if [ "${proxy}" == "nginx" ]; then
       instala_nginx_base || trata_erro "instala_nginx_base"
+      otimizar_nginx_instalacao || trata_erro "otimizar_nginx_instalacao"
       salvar_etapa 12
     elif [ "${proxy}" == "traefik" ]; then
       instala_traefik_base || trata_erro "instala_traefik_base"
@@ -2018,6 +2023,49 @@ confirma_dados_instalacao_base() {
   fi
 }
 
+# Define otimização do PostgreSQL nativo e do Nginx (instalação padrão)
+questoes_otimizacao_nativa() {
+  perfil_otimizacao_vps="0"
+
+  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+    return 0
+  fi
+
+  banner
+  printf "${WHITE} >> Deseja aplicar a otimização do PostgreSQL nativo conforme o perfil da VPS?${WHITE}\n"
+  if [ "${proxy}" = "nginx" ]; then
+    printf "${WHITE} >> Com Nginx selecionado, o bloco events do nginx.conf também será ajustado após a instalação do Nginx.${WHITE}\n"
+  fi
+  echo
+  printf "${WHITE} >> Escolha o perfil do servidor:${WHITE}\n"
+  echo
+  printf "   [${BLUE}1${WHITE}] VPS com 4 Core x 8 GB RAM\n"
+  printf "   [${BLUE}2${WHITE}] VPS com 6 Core x 16 GB RAM\n"
+  printf "   [${BLUE}3${WHITE}] VPS com 8 Core x 32 GB RAM\n"
+  printf "   [${BLUE}0${WHITE}] Não otimizar\n"
+  echo
+  read -p "> " opcao_otimizacao
+  echo
+
+  case "${opcao_otimizacao}" in
+  1|2|3)
+    perfil_otimizacao_vps="${opcao_otimizacao}"
+    printf "${GREEN} >> Otimização agendada para o perfil ${perfil_otimizacao_vps} após a instalação do PostgreSQL nativo.${WHITE}\n"
+  ;;
+  0)
+    perfil_otimizacao_vps="0"
+    printf "${YELLOW} >> Otimização não será aplicada nesta instalação.${WHITE}\n"
+  ;;
+  *)
+    printf "${RED} >> Opção inválida. A otimização não será aplicada.${WHITE}\n"
+    perfil_otimizacao_vps="0"
+  ;;
+  esac
+
+  echo
+  sleep 2
+}
+
 # Atualiza sistema operacional
 atualiza_vps_base() {
   banner
@@ -2218,6 +2266,66 @@ instala_postgres_base() {
 EOF
     sleep 2
   } || trata_erro "instala_postgres_base"
+}
+
+# Aplica tuning do PostgreSQL nativo escolhido na instalação
+aplicar_otimizacao_postgres_instalacao() {
+  if [ "${ALTA_PERFORMANCE}" = "1" ] || [ "${perfil_otimizacao_vps:-0}" = "0" ]; then
+    return 0
+  fi
+
+  banner
+  printf "${WHITE} >> Otimizando PostgreSQL nativo...\n"
+  echo
+
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  OTIMIZAR_PG_SCRIPT="${SCRIPT_DIR}/tools/otimizar_postgres_nativo.sh"
+  if [ ! -f "$OTIMIZAR_PG_SCRIPT" ]; then
+    printf "${RED} >> Erro: Arquivo ${OTIMIZAR_PG_SCRIPT} não encontrado!${WHITE}\n"
+    return 1
+  fi
+
+  chmod 775 "$OTIMIZAR_PG_SCRIPT"
+  bash "$OTIMIZAR_PG_SCRIPT" --perfil "${perfil_otimizacao_vps}" || return 1
+  sleep 2
+}
+
+# Ajusta worker_connections e multi_accept no nginx.conf
+otimizar_nginx_instalacao() {
+  if [ "${perfil_otimizacao_vps:-0}" = "0" ] || [ "${proxy}" != "nginx" ]; then
+    return 0
+  fi
+
+  banner
+  printf "${WHITE} >> Otimizando Nginx\n"
+  echo
+  {
+    NGINX_CONF="/etc/nginx/nginx.conf"
+    if [ ! -f "${NGINX_CONF}" ]; then
+      printf "${RED} >> Arquivo ${NGINX_CONF} não encontrado.${WHITE}\n"
+      return 1
+    fi
+
+    BACKUP_FILE="${NGINX_CONF}.bak.$(date +%Y%m%d_%H%M%S)"
+    cp -a "${NGINX_CONF}" "${BACKUP_FILE}"
+    printf "${YELLOW} >> Backup da configuração anterior: ${BACKUP_FILE}${WHITE}\n"
+
+    perl -0777 -i -pe 's/\bevents\s*\{.*?\}/events {\n\tworker_connections 10768;\n\tmulti_accept on;\n}/s' "${NGINX_CONF}"
+
+    if ! nginx -t >/dev/null 2>&1; then
+      printf "${RED} >> Configuração do Nginx inválida após o ajuste. Restaurando backup...${WHITE}\n"
+      cp -a "${BACKUP_FILE}" "${NGINX_CONF}"
+      return 1
+    fi
+
+    if systemctl restart nginx 2>/dev/null || service nginx restart; then
+      sleep 2
+      printf "${GREEN} >> Nginx reiniciado com sucesso.${WHITE}\n"
+    else
+      printf "${RED} >> Falha ao reiniciar o Nginx.${WHITE}\n"
+      return 1
+    fi
+  } || trata_erro "otimizar_nginx_instalacao"
 }
 
 # Instala NodeJS
