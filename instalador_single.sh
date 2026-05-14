@@ -1168,6 +1168,7 @@ menu_ferramentas() {
     printf "   [${BLUE}14${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
     printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
     printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
+    printf "   [${BLUE}17${WHITE}] Otimizar Postgres Nativo\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1316,6 +1317,20 @@ menu_ferramentas() {
       atualizar_baileys_pro_heineken_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
+      ;;
+    17)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      OTIMIZAR_PG_SCRIPT="${SCRIPT_DIR}/tools/otimizar_postgres_nativo.sh"
+      if [ -f "$OTIMIZAR_PG_SCRIPT" ]; then
+        chmod 775 "$OTIMIZAR_PG_SCRIPT"
+        bash "$OTIMIZAR_PG_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${OTIMIZAR_PG_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
       ;;
     0)
       return
