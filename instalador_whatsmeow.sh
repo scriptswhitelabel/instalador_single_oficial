@@ -175,8 +175,19 @@ verificar_dns_whatsmeow() {
     echo "O domínio ${domain} (resolvido para ${resolved_ip}) não está apontando para o IP público atual (${ip_atual})."
     echo
     printf "${RED} >> Verifique o apontamento de DNS do subdomínio: ${subdominio_whatsmeow}${WHITE}\n"
-    sleep 5
-    exit 1
+    echo
+    printf "${WHITE} >> Deseja continuar a instalação mesmo assim? (S/N): ${WHITE}\n"
+    echo
+    read -p "> " continuar_dns
+    continuar_dns=$(echo "${continuar_dns}" | tr '[:lower:]' '[:upper:]')
+    echo
+    if [ "${continuar_dns}" != "S" ]; then
+      printf "${GREEN} >> Instalação cancelada.${WHITE}\n"
+      sleep 2
+      exit 0
+    fi
+    printf "${YELLOW} >> Continuando a instalação mesmo com DNS não configurado corretamente...${WHITE}\n"
+    sleep 2
   else
     echo "Subdomínio ${domain} está apontando corretamente para o IP público da VPS."
     sleep 2
