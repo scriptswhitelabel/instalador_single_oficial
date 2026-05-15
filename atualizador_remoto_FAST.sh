@@ -220,11 +220,10 @@ backup_app_atualizar() {
     printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
     exit 1
   fi
-  
-  source /home/deploy/${empresa}/backend/.env
+
   {
     printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+    db_password=$(grep -m1 '^DB_PASS=' "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | sed 's/^"//;s/"$//')
     [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
     backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
     PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
@@ -276,6 +275,19 @@ garantir_permissoes_env_backend() {
   [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
   chown deploy:deploy "$env_file" 2>/dev/null || true
   chmod 600 "$env_file" 2>/dev/null || true
+}
+
+# Exporta apenas chaves necessárias do frontend/.env (sem source — evita "command not found" com linhas inválidas).
+exportar_vars_frontend_env_seguro() {
+  local fe_env="/home/deploy/${empresa}/frontend/.env"
+  [ ! -f "$fe_env" ] && return 0
+  export REACT_APP_LOGO_URL="$(grep -m1 '^REACT_APP_LOGO_URL=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export REACT_APP_LOGO="$(grep -m1 '^REACT_APP_LOGO=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export LOGO_URL="$(grep -m1 '^LOGO_URL=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export REACT_APP_PRIMARY_COLOR="$(grep -m1 '^REACT_APP_PRIMARY_COLOR=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export PRIMARY_COLOR="$(grep -m1 '^PRIMARY_COLOR=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export REACT_APP_SECONDARY_COLOR="$(grep -m1 '^REACT_APP_SECONDARY_COLOR=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
+  export SECONDARY_COLOR="$(grep -m1 '^SECONDARY_COLOR=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
 }
 
 # Verificar e adicionar MAX_BUFFER_SIZE_MB no .env do backend
@@ -646,8 +658,9 @@ baixa_codigo_atualizar() {
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
 
-  source /home/deploy/${empresa}/frontend/.env
-  frontend_port=${SERVER_PORT:-3000}
+  exportar_vars_frontend_env_seguro
+  frontend_port=$(grep -m1 '^SERVER_PORT=' "/home/deploy/${empresa}/frontend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+  frontend_port=${frontend_port:-3000}
   ativar_tela_atualizacao_frontend
   if ! sudo su - deploy <<EOF
 set -e
@@ -660,6 +673,8 @@ cd /home/deploy/${empresa}
 # git reset --hard origin/MULTI100-OFICIAL-u21
 
 git reset --hard
+printf "${WHITE} >> Removendo arquivos/pastas não rastreados que bloqueiam o git pull (git clean -fd)...${WHITE}\n"
+git clean -fd
 git pull
 
 cd /home/deploy/${empresa}/backend
