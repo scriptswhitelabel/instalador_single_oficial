@@ -668,14 +668,27 @@ printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
 
-# git fetch origin
-# git checkout MULTI100-OFICIAL-u21
-# git reset --hard origin/MULTI100-OFICIAL-u21
-
+# fetch + limpeza; em seguida alinhar à branch oficial em origin (evita "no tracking information" após rollback)
+git fetch --all --prune 2>/dev/null || git fetch origin 2>/dev/null || true
 git reset --hard
-printf "${WHITE} >> Removendo arquivos/pastas não rastreados que bloqueiam o git pull (git clean -fd)...${WHITE}\n"
+printf "${WHITE} >> Removendo arquivos/pastas não rastreados que bloqueiam a atualização (git clean -fd)...${WHITE}\n"
 git clean -fd
-git pull
+
+DEPLOY_BRANCH=""
+if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+  DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
+elif git show-ref --verify --quiet refs/remotes/origin/main; then
+  DEPLOY_BRANCH="main"
+elif git show-ref --verify --quiet refs/remotes/origin/master; then
+  DEPLOY_BRANCH="master"
+fi
+if [ -z "\$DEPLOY_BRANCH" ]; then
+  echo "ERRO: Nenhuma branch remota conhecida em origin (MULTI100-OFICIAL-u21, main ou master). Verifique o clone e o remote."
+  exit 1
+fi
+printf "${WHITE} >> Sincronizando código com origin/\$DEPLOY_BRANCH (ignora branch local sem upstream, ex.: rollback)...${WHITE}\n"
+git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
+git reset --hard "origin/\$DEPLOY_BRANCH"
 
 cd /home/deploy/${empresa}/backend
 # npm prune --force > /dev/null 2>&1
