@@ -1202,10 +1202,9 @@ instalar_portainer_ferramentas() {
 menu_ferramentas() {
   while true; do
     banner
-    printf "${WHITE} Selecione abaixo a ferramenta desejada (números iguais aos de antes):\n"
+    printf "${WHITE} Selecione abaixo a ferramenta desejada:\n"
     echo
     printf "  ${BLUE}━━ Instalações e integrações ━━${WHITE}\n"
-    printf "   [${BLUE}1${WHITE}] Instalador RabbitMQ\n"
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
@@ -1243,21 +1242,6 @@ menu_ferramentas() {
     echo
     read -p "> " option_tools
     case "${option_tools}" in
-    1)
-      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-      RABBIT_SCRIPT="${SCRIPT_DIR}/tools/instalador_rabbit.sh"
-      if [ -f "$RABBIT_SCRIPT" ]; then
-        printf "${GREEN} >> Executando Instalador RabbitMQ...${WHITE}\n"
-        echo
-        bash "$RABBIT_SCRIPT"
-        echo
-        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
-        read -r
-      else
-        printf "${RED} >> Erro: Arquivo ${RABBIT_SCRIPT} não encontrado!${WHITE}\n"
-        sleep 3
-      fi
-      ;;
     2)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       PUSH_SCRIPT="${SCRIPT_DIR}/tools/instalar_push.sh"
