@@ -1202,28 +1202,43 @@ instalar_portainer_ferramentas() {
 menu_ferramentas() {
   while true; do
     banner
-    printf "${WHITE} Selecione abaixo a ferramenta desejada: \n"
+    printf "${WHITE} Selecione abaixo a ferramenta desejada (números iguais aos de antes):\n"
     echo
+    printf "  ${BLUE}━━ Instalações e integrações ━━${WHITE}\n"
     printf "   [${BLUE}1${WHITE}] Instalador RabbitMQ\n"
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
-    printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
+    echo
+    printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
+    printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
+    echo
+    printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
     printf "   [${BLUE}7${WHITE}] Agendar Backup Diário do Banco Nativo\n"
+    echo
+    printf "  ${BLUE}━━ Redis ━━${WHITE}\n"
     printf "   [${BLUE}8${WHITE}] Backup do Redis\n"
     printf "   [${BLUE}9${WHITE}] Restaurar Redis\n"
+    echo
+    printf "  ${BLUE}━━ Banco de dados (PostgreSQL) ━━${WHITE}\n"
     printf "   [${BLUE}10${WHITE}] Importar backup do banco\n"
     printf "   [${BLUE}11${WHITE}] Backup do banco\n"
     printf "   [${BLUE}12${WHITE}] Importar backup do banco da API Oficial\n"
     printf "   [${BLUE}13${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}14${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
+    echo
+    printf "  ${BLUE}━━ Domínio, SSL e Docker ━━${WHITE}\n"
     printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
+    printf "   [${BLUE}18${WHITE}] Aplicar certificado SSL no Nginx\n"
+    printf "   [${BLUE}20${WHITE}] Domínio + porta + SSL no Nginx (proxy reverso)\n"
+    printf "   [${BLUE}19${WHITE}] Instalar Portainer (Docker)\n"
+    echo
+    printf "  ${BLUE}━━ Performance e dependências ━━${WHITE}\n"
     printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
     printf "   [${BLUE}17${WHITE}] Otimizar Postgres Nativo\n"
-    printf "   [${BLUE}18${WHITE}] Aplicar certificado SSL no Nginx\n"
-    printf "   [${BLUE}19${WHITE}] Instalar Portainer (Docker)\n"
-    printf "   [${BLUE}20${WHITE}] Domínio + porta + SSL no Nginx (proxy reverso)\n"
+    echo
+    printf "  ${BLUE}━━ Menu ━━${WHITE}\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
