@@ -1147,6 +1147,57 @@ BAILEYSDEPLOY
   return 0
 }
 
+# Ferramentas: Portainer CE (painel Docker) — comandos conforme doc. oficial (9443 HTTPS, 8000 Edge)
+instalar_portainer_ferramentas() {
+  printf "${WHITE} >> Verificando se o Portainer já está instalado...${WHITE}\n"
+  if ! command -v docker >/dev/null 2>&1; then
+    printf "${RED} >> Docker não encontrado. Instale o Docker antes de continuar.${WHITE}\n"
+    return 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    printf "${RED} >> Docker não está em execução ou sem permissão. Ex.: ${WHITE}systemctl start docker${RED}.${WHITE}\n"
+    return 1
+  fi
+
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx portainer; then
+      printf "${GREEN} >> Este servidor já possui o Portainer rodando (container Docker 'portainer').${WHITE}\n"
+      printf "${WHITE} >> Não é necessário instalar novamente.${WHITE}\n"
+    else
+      printf "${YELLOW} >> Já existe o container 'portainer' neste servidor, mas ele não está em execução.${WHITE}\n"
+      printf "${WHITE} >> Para iniciar manualmente: ${BLUE}docker start portainer${WHITE}\n"
+      echo
+      return 0
+    fi
+  else
+    printf "${WHITE} >> Portainer não encontrado. Instalando via Docker...${WHITE}\n"
+    docker volume inspect portainer_data >/dev/null 2>&1 || docker volume create portainer_data || {
+      printf "${RED} >> Falha ao criar o volume portainer_data.${WHITE}\n"
+      return 1
+    }
+    if ! docker run -d -p 8000:8000 -p 9443:9443 --name portainer --restart=always \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v portainer_data:/data \
+      portainer/portainer-ce:latest; then
+      printf "${RED} >> Falha ao subir o container Portainer.${WHITE}\n"
+      return 1
+    fi
+    printf "${GREEN} >> Portainer instalado e em execução.${WHITE}\n"
+  fi
+
+  local ip_acesso
+  ip_acesso=$(curl -s --max-time 8 http://checkip.amazonaws.com | tr -d '\r')
+  if [ -z "${ip_acesso}" ]; then
+    ip_acesso=$(hostname -I 2>/dev/null | awk '{print $1}')
+  fi
+  echo
+  printf "${GREEN} >> Link de acesso ao Portainer:${WHITE}\n"
+  printf "   ${BLUE}https://${ip_acesso}:9443${WHITE}\n"
+  printf "${WHITE}   (Agentes Edge usam a porta ${BLUE}8000${WHITE}: ${BLUE}http://${ip_acesso}:8000${WHITE})\n"
+  echo
+  return 0
+}
+
 # Menu de Ferramentas
 menu_ferramentas() {
   while true; do
@@ -1171,6 +1222,8 @@ menu_ferramentas() {
     printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
     printf "   [${BLUE}17${WHITE}] Otimizar Postgres Nativo\n"
     printf "   [${BLUE}18${WHITE}] Aplicar certificado SSL no Nginx\n"
+    printf "   [${BLUE}19${WHITE}] Instalar Portainer (Docker)\n"
+    printf "   [${BLUE}20${WHITE}] Domínio + porta + SSL no Nginx (proxy reverso)\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
     echo
     read -p "> " option_tools
@@ -1345,6 +1398,27 @@ menu_ferramentas() {
         read -r
       else
         printf "${RED} >> Erro: Arquivo ${SSL_NGINX_SCRIPT} não encontrado!${WHITE}\n"
+        sleep 3
+      fi
+      ;;
+    19)
+      instalar_portainer_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    20)
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      NG_DOM_SSL_SCRIPT="${SCRIPT_DIR}/tools/nginx_dominio_porta_ssl.sh"
+      if [ -f "$NG_DOM_SSL_SCRIPT" ]; then
+        chmod 775 "$NG_DOM_SSL_SCRIPT" 2>/dev/null || true
+        printf "${GREEN} >> Domínio, porta local e SSL (Nginx)...${WHITE}\n"
+        echo
+        bash "$NG_DOM_SSL_SCRIPT"
+        echo
+        printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+        read -r
+      else
+        printf "${RED} >> Erro: Arquivo ${NG_DOM_SSL_SCRIPT} não encontrado!${WHITE}\n"
         sleep 3
       fi
       ;;
