@@ -871,21 +871,35 @@ importar_backup_banco_ferramentas() {
   return 0
 }
 
-# Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo): mesmo processo, banco oficialseparado
+# Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo)
 importar_backup_banco_api_oficial_ferramentas() {
   banner
   printf "${WHITE} >> Importar backup do banco da API Oficial (PostgreSQL nativo)...\n"
   echo
-  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
+
+  if ! selecionar_instancia_atualizar "importar o backup da API Oficial"; then
+    sleep 2
+    return 1
   fi
-  if [ -z "${empresa}" ]; then
-    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
-    read -p "> " empresa
-    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+
+  local db_oficial=""
+  if [ -f "/home/deploy/${empresa}/api_oficial/.env" ]; then
+    db_oficial=$(grep -m1 '^DATABASE_NAME=' "/home/deploy/${empresa}/api_oficial/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
   fi
+  if [ -z "$db_oficial" ] && [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    db_oficial=$(grep -m1 '^apioficial_db_name=' "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  fi
+  if [ -z "$db_oficial" ]; then
+    if [[ "${ARQUIVO_VARIAVEIS_USADO:-}" == *VARIAVEIS_INSTALACAO_INSTANCIA_* ]]; then
+      db_oficial="oficial${empresa}"
+    else
+      db_oficial="oficialseparado"
+    fi
+  fi
+
+  printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE} | Banco API Oficial: ${YELLOW}${db_oficial}${WHITE}\n"
+  echo
+
   BACKUP_BASE="/home/deploy/backup-${empresa}"
   if [ ! -d "$BACKUP_BASE" ]; then
     printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
@@ -933,11 +947,6 @@ importar_backup_banco_api_oficial_ferramentas() {
   fi
   printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "$(basename "$arquivo_escolhido")"
   echo
-  local db_oficial=""
-  if [ -f "/home/deploy/${empresa}/api_oficial/.env" ]; then
-    db_oficial=$(grep -m1 '^DATABASE_NAME=' "/home/deploy/${empresa}/api_oficial/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
-  fi
-  [ -z "$db_oficial" ] && db_oficial="oficialseparado"
   printf "${YELLOW} >> Deseja apagar o banco da API Oficial existente ou criar um novo?${WHITE}\n"
   printf "   [${BLUE}1${WHITE}] Apagar banco existente e restaurar (substitui o banco ${db_oficial})\n"
   printf "   [${BLUE}2${WHITE}] Criar novo banco e restaurar (mantém o existente, cria ${db_oficial}_novo)\n"
@@ -1957,6 +1966,8 @@ detectar_instancias_instaladas() {
 # $1 = texto da ação no menu (ex.: "atualizar", "importar o backup do banco")
 selecionar_instancia_atualizar() {
   local rotulo_acao="${1:-atualizar}"
+  local mostrar_api_oficial=0
+  [[ "$rotulo_acao" == *"API Oficial"* ]] && mostrar_api_oficial=1
   banner
   printf "${WHITE} >> Detectando instâncias instaladas...\n"
   echo
@@ -2015,6 +2026,22 @@ selecionar_instancia_atualizar() {
       fi
       if [ -n "${temp_subdominio_frontend}" ]; then
         printf "      Frontend: ${YELLOW}${temp_subdominio_frontend}${WHITE}\n"
+      fi
+      if [ "$mostrar_api_oficial" -eq 1 ]; then
+        local temp_db_of="" temp_sub_of=""
+        if [ -f "/home/deploy/${empresa_nome}/api_oficial/.env" ]; then
+          temp_db_of=$(grep -m1 '^DATABASE_NAME=' "/home/deploy/${empresa_nome}/api_oficial/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+          temp_sub_of=$(grep -m1 '^URL_API_OFICIAL=' "/home/deploy/${empresa_nome}/api_oficial/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+        fi
+        if [ -n "$temp_db_of" ]; then
+          printf "      API Oficial — banco: ${YELLOW}${temp_db_of}${WHITE}"
+          [ -n "$temp_sub_of" ] && printf " | ${YELLOW}${temp_sub_of}${WHITE}"
+          echo
+        elif [ -d "/home/deploy/${empresa_nome}/api_oficial" ]; then
+          printf "      API Oficial: ${YELLOW}pasta instalada (DATABASE_NAME não definido)${WHITE}\n"
+        else
+          printf "      API Oficial: ${RED}não instalada nesta instância${WHITE}\n"
+        fi
       fi
       echo
       ((index++))
