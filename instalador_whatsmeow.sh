@@ -856,28 +856,41 @@ DOCKERCOMPOSE
   } || trata_erro "configurar_docker_compose"
 }
 
+whatsmeow_set_env_backend() {
+  local arquivo_env="$1"
+  local chave="$2"
+  local valor="$3"
+  if grep -q "^${chave}=" "$arquivo_env" 2>/dev/null; then
+    sed -i "s|^${chave}=.*|${chave}=${valor}|" "$arquivo_env"
+  else
+    echo "${chave}=${valor}" >>"$arquivo_env"
+  fi
+}
+
 # Atualizar .env do backend
 atualizar_env_backend() {
   banner
   printf "${WHITE} >> Atualizando .env do backend com configurações do WhatsMeow...\n"
   echo
   {
-    # Carregar variáveis necessárias
-    source $ARQUIVO_VARIAVEIS
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
     
-    # Limpar subdomínio (remover https:// se presente)
     subdominio_limpo=$(echo "${subdominio_whatsmeow}" | sed 's|https\?://||')
-    
-    # Adicionar variáveis do WhatsMeow ao .env do backend
-    cat >> /home/deploy/${empresa}/backend/.env <<EOF
+    local backend_env="/home/deploy/${empresa}/backend/.env"
+    [ ! -f "$backend_env" ] && printf "${RED} >> ERRO: ${backend_env} não encontrado.${WHITE}\n" && exit 1
 
-# WhatsMeow Configuration
-WUZAPI_URL=https://${subdominio_limpo}
-WUZAPI_ADMIN_TOKEN=${senha_deploy}
-WUZAPI_TOKEN=${senha_deploy}
-EOF
+    if ! grep -q '^# WhatsMeow Configuration' "$backend_env" 2>/dev/null; then
+      echo "" >>"$backend_env"
+      echo "# WhatsMeow Configuration" >>"$backend_env"
+    fi
+    whatsmeow_set_env_backend "$backend_env" "WUZAPI_URL" "https://${subdominio_limpo}"
+    whatsmeow_set_env_backend "$backend_env" "WUZAPI_ADMIN_TOKEN" "${senha_deploy}"
+    whatsmeow_set_env_backend "$backend_env" "WUZAPI_TOKEN" "${senha_deploy}"
+    chown deploy:deploy "$backend_env" 2>/dev/null || true
+    chmod 600 "$backend_env" 2>/dev/null || true
     
-    printf "${GREEN} >> .env do backend atualizado com sucesso!${WHITE}\n"
+    printf "${GREEN} >> .env do backend (${empresa}) atualizado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "atualizar_env_backend"
 }
@@ -1129,35 +1142,63 @@ EOF
   } || trata_erro "reiniciar_servicos"
 }
 
-# Reiniciar PM2 do backend da empresa (para aplicar configuração WhatsMeow)
+# Reiniciar PM2 do backend da instância (aplica WUZAPI_* no .env)
 reiniciar_pm2_backend() {
   banner
-  printf "${WHITE} >> Reiniciando backend da empresa para aplicar a instalação do WhatsMeow...\n"
+  printf "${WHITE} >> Reiniciando backend ${BLUE}${empresa}${WHITE} para aplicar o WhatsMeow...\n"
   echo
   {
-    # Carregar variáveis necessárias
-    source $ARQUIVO_VARIAVEIS
-    
-    # Verificar se PM2 está instalado
-    if command -v pm2 >/dev/null 2>&1; then
-      # Reiniciar apenas o backend desta empresa (nome: ${empresa}-backend)
-      sudo -u deploy bash <<RESTARTBACKEND
-        export PATH="\$HOME/.nvm/versions/node/*/bin:/usr/local/bin:/usr/bin:\$PATH"
-        if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
-          pm2 restart ${empresa}-backend
-          pm2 save
-          printf "${GREEN} >> Backend ${empresa}-backend reiniciado com sucesso!${WHITE}\n"
-        else
-          printf "${YELLOW}⚠️  Processo ${empresa}-backend não encontrado no PM2.${WHITE}\n"
-          printf "${WHITE}   Reinicie o backend manualmente para aplicar as configurações do WhatsMeow.${WHITE}\n"
-        fi
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+    local pm2_name="${empresa}-backend"
+    local _path_node="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
+    [ ! -f "$_path_node" ] && _path_node="/root/instalador_single_oficial/tools/path_node_deploy.sh"
+
+    local rc=0
+    sudo su - deploy <<RESTARTBACKEND || rc=$?
+set -e
+if [ -f "${_path_node}" ]; then
+  # shellcheck source=/dev/null
+  . "${_path_node}"
+else
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  fi
+fi
+
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo "ERRO: pm2 não encontrado para o usuário deploy."
+  exit 1
+fi
+
+echo ">> PM2 — processos:"
+pm2 list 2>/dev/null || true
+
+if pm2 describe "${pm2_name}" >/dev/null 2>&1; then
+  pm2 restart "${pm2_name}"
+  pm2 save
+  echo "OK: ${pm2_name} reiniciado."
+elif pm2 jlist 2>/dev/null | grep -qF "\"name\":\"${pm2_name}\""; then
+  pm2 restart "${pm2_name}"
+  pm2 save
+  echo "OK: ${pm2_name} reiniciado."
+else
+  echo "AVISO: processo ${pm2_name} não encontrado no PM2."
+  pm2 list 2>/dev/null || true
+  exit 2
+fi
 RESTARTBACKEND
-      sleep 2
+
+    if [ "$rc" -eq 0 ]; then
+      printf "${GREEN} >> Backend ${pm2_name} reiniciado — variáveis WUZAPI aplicadas.${WHITE}\n"
+    elif [ "$rc" -eq 2 ]; then
+      printf "${YELLOW}⚠️  ${pm2_name} não encontrado no PM2.${WHITE}\n"
+      printf "${WHITE}   Execute como deploy: pm2 restart ${pm2_name}${WHITE}\n"
     else
-      printf "${YELLOW}⚠️  PM2 não está instalado ou não está no PATH.${WHITE}\n"
-      printf "${WHITE}   Reinicie o backend manualmente para aplicar as configurações do WhatsMeow.${WHITE}\n"
-      sleep 2
+      trata_erro "reiniciar_pm2_backend"
     fi
+    sleep 2
   } || trata_erro "reiniciar_pm2_backend"
 }
 
