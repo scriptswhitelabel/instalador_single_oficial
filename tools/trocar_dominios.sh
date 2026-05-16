@@ -171,6 +171,31 @@ set_env_key() {
   mv "$tmp" "$file"
 }
 
+# Corrige configs antigas com upstream "backend" / "oficial" genéricos (conflito multi-instância)
+normalizar_upstreams_nginx_existentes() {
+  local conf emp_base upstream_old upstream_new
+  for conf in /etc/nginx/sites-available/*-backend; do
+    [ -f "$conf" ] || continue
+    emp_base=$(basename "$conf" -backend)
+    if grep -qE '^upstream[[:space:]]+backend[[:space:]]*\{' "$conf" 2>/dev/null; then
+      upstream_new="backend_${emp_base}"
+      sed -i -E "s/^upstream[[:space:]]+backend[[:space:]]*\{/upstream ${upstream_new} {/" "$conf"
+      sed -i -E "s|proxy_pass[[:space:]]+http://backend;|proxy_pass http://${upstream_new};|g" "$conf"
+      printf "${YELLOW} >> Upstream backend renomeado para ${upstream_new} em %s${WHITE}\n" "$conf"
+    fi
+  done
+  for conf in /etc/nginx/sites-available/*-oficial; do
+    [ -f "$conf" ] || continue
+    emp_base=$(basename "$conf" -oficial)
+    if grep -qE '^upstream[[:space:]]+oficial[[:space:]]*\{' "$conf" 2>/dev/null; then
+      upstream_new="oficial_${emp_base}"
+      sed -i -E "s/^upstream[[:space:]]+oficial[[:space:]]*\{/upstream ${upstream_new} {/" "$conf"
+      sed -i -E "s|proxy_pass[[:space:]]+http://oficial;|proxy_pass http://${upstream_new};|g" "$conf"
+      printf "${YELLOW} >> Upstream oficial renomeado para ${upstream_new} em %s${WHITE}\n" "$conf"
+    fi
+  done
+}
+
 detectar_proxy() {
   if [ -f "/etc/nginx/sites-available/${empresa}-backend" ] || [ -f "/etc/nginx/sites-available/${empresa}-frontend" ]; then
     echo "nginx"
@@ -188,6 +213,7 @@ aplicar_nginx_principal() {
   local be_hostname="$2"
   local fe_port="${frontend_port:-3000}"
   local be_port="${backend_port:-8080}"
+  local upstream_be="backend_${empresa}"
 
   cat > "/etc/nginx/sites-available/${empresa}-frontend" << EOF
 server {
@@ -207,14 +233,14 @@ server {
 EOF
 
   cat > "/etc/nginx/sites-available/${empresa}-backend" << EOF
-upstream backend {
+upstream ${upstream_be} {
         server 127.0.0.1:${be_port};
         keepalive 32;
     }
 server {
   server_name ${be_hostname};
   location / {
-    proxy_pass http://backend;
+    proxy_pass http://${upstream_be};
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -231,7 +257,11 @@ EOF
   [ ! -L "/etc/nginx/sites-enabled/${empresa}-frontend" ] && ln -sf "/etc/nginx/sites-available/${empresa}-frontend" "/etc/nginx/sites-enabled/${empresa}-frontend"
   [ ! -L "/etc/nginx/sites-enabled/${empresa}-backend" ] && ln -sf "/etc/nginx/sites-available/${empresa}-backend" "/etc/nginx/sites-enabled/${empresa}-backend"
 
-  nginx -t && systemctl reload nginx
+  if ! nginx -t; then
+    printf "${RED} >> nginx -t falhou. Verifique outros sites em /etc/nginx/sites-enabled/.${WHITE}\n"
+    return 1
+  fi
+  systemctl reload nginx
 }
 
 certbot_dominio() {
@@ -353,15 +383,16 @@ PM2R
 nginx_apioficial() {
   local host_of="$1"
   local port_of="${2:-$DEFAULT_API_OFICIAL_PORT}"
+  local upstream_of="oficial_${empresa}"
   cat > "/etc/nginx/sites-available/${empresa}-oficial" << EOF
-upstream oficial {
+upstream ${upstream_of} {
         server 127.0.0.1:${port_of};
         keepalive 32;
     }
 server {
   server_name ${host_of};
   location / {
-    proxy_pass http://oficial;
+    proxy_pass http://${upstream_of};
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -375,7 +406,11 @@ server {
 }
 EOF
   [ ! -L "/etc/nginx/sites-enabled/${empresa}-oficial" ] && ln -sf "/etc/nginx/sites-available/${empresa}-oficial" "/etc/nginx/sites-enabled/${empresa}-oficial"
-  nginx -t && systemctl reload nginx
+  if ! nginx -t; then
+    printf "${RED} >> nginx -t falhou após configurar API Oficial.${WHITE}\n"
+    return 1
+  fi
+  systemctl reload nginx
 }
 
 nginx_whatsmeow() {
@@ -403,7 +438,11 @@ server {
 }
 EOF
   [ ! -L "/etc/nginx/sites-enabled/${empresa}-whatsmeow" ] && ln -sf "/etc/nginx/sites-available/${empresa}-whatsmeow" "/etc/nginx/sites-enabled/${empresa}-whatsmeow"
-  nginx -t && systemctl reload nginx
+  if ! nginx -t; then
+    printf "${RED} >> nginx -t falhou após configurar WhatsMeow.${WHITE}\n"
+    return 1
+  fi
+  systemctl reload nginx
 }
 
 # --- fluxo principal ---
@@ -479,7 +518,11 @@ PROXY=$(detectar_proxy)
 printf "\n${WHITE} >> Proxy detectado: ${BLUE}%s${WHITE}\n" "$PROXY"
 
 if [ "$PROXY" = "nginx" ]; then
-  aplicar_nginx_principal "$fe_host" "$be_host"
+  normalizar_upstreams_nginx_existentes
+  if ! aplicar_nginx_principal "$fe_host" "$be_host"; then
+    printf "${RED} >> Nginx não foi recarregado. Corrija upstream duplicado (use upstream backend_%s) e tente novamente.${WHITE}\n" "$empresa"
+    exit 1
+  fi
   printf "\n${WHITE} >> Certbot (backend)...\n"
   certbot_dominio "$be_host"
   printf "\n${WHITE} >> Certbot (frontend)...\n"

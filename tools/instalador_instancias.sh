@@ -127,7 +127,7 @@ descomentar_env_redis_bull_ack() {
   printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
-# Preserva dados digitados na sessão (Facebook, título, etc.) — carregar_variaveis_base não pode apagá-los
+# Preserva dados digitados na sessão (Facebook, título, versão, etc.) — source em VARIAVEIS_* não pode apagá-los
 __instancia_dados_guardados=0
 guardar_dados_instancia_sessao() {
   __inst_fb_id="${facebook_app_id:-}"
@@ -135,6 +135,8 @@ guardar_dados_instancia_sessao() {
   __inst_nome_titulo="${nome_titulo:-}"
   __inst_numero_suporte="${numero_suporte:-}"
   __inst_senha_master="${senha_master:-}"
+  __inst_versao_instalacao="${versao_instalacao:-}"
+  __inst_commit_instalacao="${commit_instalacao:-}"
   __instancia_dados_guardados=1
 }
 
@@ -145,6 +147,8 @@ restaurar_dados_instancia_sessao() {
   nome_titulo="${__inst_nome_titulo}"
   numero_suporte="${__inst_numero_suporte}"
   senha_master="${__inst_senha_master}"
+  versao_instalacao="${__inst_versao_instalacao}"
+  commit_instalacao="${__inst_commit_instalacao}"
 }
 
 # Carregar variáveis base (instalação principal)
@@ -332,6 +336,7 @@ selecionar_versao_instalacao() {
     echo
     sleep 2
   fi
+  guardar_dados_instancia_sessao
 }
 
 # Verificar conflitos com instalação base e outras instâncias
@@ -436,6 +441,8 @@ verificar_conflitos() {
     conflitos_encontrados=1
   fi
   
+  restaurar_dados_instancia_sessao
+
   if [ $conflitos_encontrados -eq 1 ]; then
     printf "${RED} >> Erros de conflito encontrados. Por favor, corrija os dados e tente novamente.${WHITE}\n"
     echo
@@ -1214,10 +1221,20 @@ baixa_codigo_instancia() {
   printf "${WHITE} >> Fazendo download do código para ${nova_empresa}...\n"
   echo
   {
+    restaurar_dados_instancia_sessao
+
     # Garantir que o array de versões está definido
     if [ -z "${VERSOES_INSTALACAO[6.4.3]}" ]; then
       definir_versoes_instalacao
     fi
+
+    printf "${WHITE} >> Versão escolhida para instalação: ${BLUE}${versao_instalacao:-não definida}${WHITE}"
+    if [ -n "${commit_instalacao}" ]; then
+      printf " ${WHITE}(commit: ${commit_instalacao})${WHITE}\n"
+    else
+      echo
+    fi
+    echo
     
     # Verificar se as variáveis de versão estão definidas
     if [ -z "${versao_instalacao}" ]; then
@@ -1337,16 +1354,9 @@ FETCHCOMMIT
       
       # Verificar se o commit existe
       printf "${WHITE} >> Verificando se o commit ${commit_instalacao} existe...\n"
-      sudo su - deploy <<VERIFYCOMMIT
-cd ${dest_dir}
-if git cat-file -e "${commit_instalacao}^{commit}" 2>/dev/null; then
-  exit 0
-else
-  exit 1
-fi
-VERIFYCOMMIT
+      commit_existe=$(sudo su - deploy -c "cd ${dest_dir} && git cat-file -e '${commit_instalacao}^{commit}' 2>/dev/null && echo 1" || echo "")
       
-      if [ $? -eq 0 ]; then
+      if [ "${commit_existe}" = "1" ]; then
         BRANCH_INSTALACAO="instalacao-${versao_instalacao}-$(date +%Y%m%d-%H%M%S)"
         printf "${WHITE} >> Fazendo checkout para commit ${commit_instalacao}...\n"
         sudo su - deploy <<CHECKOUTCOMMIT
