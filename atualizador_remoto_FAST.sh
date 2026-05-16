@@ -223,11 +223,16 @@ backup_app_atualizar() {
 
   {
     printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    db_password=$(grep -m1 '^DB_PASS=' "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | sed 's/^"//;s/"$//')
-    [ ! -d "/home/deploy/backups" ] && mkdir -p "/home/deploy/backups"
-    backup_file="/home/deploy/backups/${empresa}_$(date +%d-%m-%Y_%Hh).sql"
-    PGPASSWORD="${db_password}" pg_dump -U ${empresa} -h localhost ${empresa} >"${backup_file}"
-    printf "${GREEN} >> Backup do banco de dados ${empresa} concluído. Arquivo de backup: ${backup_file}\n"
+    MF_BACKUP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_backup_banco_empresa.sh"
+    [ -f "$MF_BACKUP_SCRIPT" ] || MF_BACKUP_SCRIPT="/root/instalador_single_oficial/tools/mf_backup_banco_empresa.sh"
+    # shellcheck source=/dev/null
+    source "$MF_BACKUP_SCRIPT"
+    if mf_backup_banco_empresa "${empresa}"; then
+      printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO}\n"
+    else
+      printf "${RED} >> Falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
+      exit 1
+    fi
     sleep 2
   } || trata_erro "backup_app_atualizar"
 
