@@ -295,307 +295,580 @@ instalar_whatsmeow() {
   fi
 }
 
-# Backup do Redis nativo: salva em /home/deploy/backup-${empresa}/redis
-backup_redis_ferramentas() {
-  banner
-  printf "${WHITE} >> Backup do Redis (nativo)...\n"
-  echo
-  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
-  fi
-  if [ -z "${empresa}" ]; then
-    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
-    read -p "> " empresa
-    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
-  fi
-  BACKUP_DIR="/home/deploy/backup-${empresa}/redis"
-  mkdir -p "$BACKUP_DIR"
-  chown deploy:deploy "$(dirname "/home/deploy/backup-${empresa}")" 2>/dev/null || true
-  chown deploy:deploy "/home/deploy/backup-${empresa}" 2>/dev/null || true
-  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
-  REDIS_DIR="/var/lib/redis"
-  REDIS_CONF="/etc/redis/redis.conf"
-  [ -f "$REDIS_CONF" ] && REDIS_DIR=$(grep "^dir " "$REDIS_CONF" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
-  DUMP_RDB="${REDIS_DIR}/dump.rdb"
-  AOF_FILE="${REDIS_DIR}/appendonly.aof"
-  if ! systemctl is-active --quiet redis-server 2>/dev/null; then
-    printf "${RED} >> Redis não está rodando (redis-server). Inicie o serviço e tente novamente.${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-  if [ -n "${senha_deploy}" ]; then
-    redis-cli -a "${senha_deploy}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
-  else
-    redis-cli BGSAVE 2>/dev/null || true
-  fi
-  sleep 2
-  if [ -f "$DUMP_RDB" ]; then
-    cp "$DUMP_RDB" "${BACKUP_DIR}/dump_${TIMESTAMP}.rdb"
-    chown deploy:deploy "${BACKUP_DIR}/dump_${TIMESTAMP}.rdb"
-    printf "${GREEN} >> Backup RDB salvo: ${BACKUP_DIR}/dump_${TIMESTAMP}.rdb${WHITE}\n"
-  else
-    printf "${YELLOW} >> Arquivo dump.rdb não encontrado em ${DUMP_RDB}. Redis pode estar vazio ou com outro dir.${WHITE}\n"
-  fi
-  if [ -f "$AOF_FILE" ]; then
-    cp "$AOF_FILE" "${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof"
-    chown deploy:deploy "${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof"
-    printf "${GREEN} >> Backup AOF salvo: ${BACKUP_DIR}/appendonly_${TIMESTAMP}.aof${WHITE}\n"
-  fi
-  printf "${GREEN} >> Backup do Redis concluído. Pasta: ${BACKUP_DIR}${WHITE}\n"
-  echo
-  sleep 2
+# --- Redis: Docker (instâncias) e nativo ---
+ferramentas_redis_dir_backup_instancia() {
+  printf '/home/deploy/backup-%s/redis' "${empresa}"
 }
 
-# Restaura Redis nativo a partir de backup em /home/deploy/backup-${empresa}/redis
+ferramentas_carregar_redis_instancia() {
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  REDIS_SENHA="${senha_deploy:-}"
+  REDIS_PORT="6379"
+  REDIS_URI_RAW=""
+  REDIS_CONTAINER_PADRAO="redis_${empresa}"
+  if [ -f "$env_file" ]; then
+    REDIS_URI_RAW=$(grep -m1 '^REDIS_URI=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | head -1)
+  fi
+  if [ -n "$REDIS_URI_RAW" ]; then
+    if [[ "$REDIS_URI_RAW" =~ redis://:([^@]+)@[^:]+:([0-9]+) ]]; then
+      REDIS_SENHA="${BASH_REMATCH[1]}"
+      REDIS_PORT="${BASH_REMATCH[2]}"
+    elif [[ "$REDIS_URI_RAW" =~ redis://[^/@]+:([0-9]+) ]]; then
+      REDIS_PORT="${BASH_REMATCH[1]}"
+    fi
+  fi
+}
+
+ferramentas_listar_containers_redis_docker() {
+  FERRAMENTAS_REDIS_CONTAINERS=()
+  local name img
+  while IFS=$'\t' read -r name img; do
+    [ -z "$name" ] && continue
+    if echo "$name $img" | grep -qi redis; then
+      FERRAMENTAS_REDIS_CONTAINERS+=("$name")
+    fi
+  done < <(docker ps --format '{{.Names}}\t{{.Image}}' 2>/dev/null)
+}
+
+ferramentas_redis_cli_docker() {
+  local container="$1"
+  shift
+  if [ -n "${REDIS_SENHA}" ]; then
+    docker exec "$container" redis-cli -a "${REDIS_SENHA}" "$@" 2>/dev/null
+  else
+    docker exec "$container" redis-cli "$@" 2>/dev/null
+  fi
+}
+
+ferramentas_escolher_container_redis_docker() {
+  local prompt_msg="${1:-Escolha o container Redis}"
+  ferramentas_listar_containers_redis_docker
+  if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -eq 0 ]; then
+    return 1
+  fi
+  if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -eq 1 ]; then
+    FERRAMENTAS_REDIS_CONTAINER="${FERRAMENTAS_REDIS_CONTAINERS[0]}"
+    printf "${GREEN} >> Container Redis: ${FERRAMENTAS_REDIS_CONTAINER}${WHITE}\n"
+    return 0
+  fi
+  local labels=()
+  local c
+  for c in "${FERRAMENTAS_REDIS_CONTAINERS[@]}"; do
+    if [ "$c" = "${REDIS_CONTAINER_PADRAO}" ]; then
+      labels+=("${c} (sugerido para ${empresa})")
+    else
+      labels+=("$c")
+    fi
+  done
+  if ferramentas_escolher_item_lista "$prompt_msg" "${labels[@]}"; then
+    FERRAMENTAS_REDIS_CONTAINER="${FERRAMENTAS_ESCOLHA%% *}"
+    return 0
+  fi
+  return 1
+}
+
+ferramentas_backup_redis_docker() {
+  local container="$1"
+  local backup_dir="$2"
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  printf "${WHITE} >> Gerando snapshot no container ${container}...${WHITE}\n"
+  ferramentas_redis_cli_docker "$container" BGSAVE >/dev/null || true
+  sleep 3
+  if docker cp "${container}:/data/dump.rdb" "${backup_dir}/dump_${ts}.rdb" 2>/dev/null; then
+    chown deploy:deploy "${backup_dir}/dump_${ts}.rdb" 2>/dev/null || true
+    printf "${GREEN} >> Backup RDB: ${backup_dir}/dump_${ts}.rdb${WHITE}\n"
+  else
+    printf "${RED} >> Falha ao copiar dump.rdb do container ${container}.${WHITE}\n"
+    return 1
+  fi
+  if docker cp "${container}:/data/appendonly.aof" "${backup_dir}/appendonly_${ts}.aof" 2>/dev/null; then
+    chown deploy:deploy "${backup_dir}/appendonly_${ts}.aof" 2>/dev/null || true
+    printf "${GREEN} >> Backup AOF: ${backup_dir}/appendonly_${ts}.aof${WHITE}\n"
+  fi
+  return 0
+}
+
+ferramentas_restaurar_redis_docker() {
+  local container="$1"
+  local arquivo_rdb="$2"
+  local vol
+  printf "${YELLOW} >> Parando container ${container}...${WHITE}\n"
+  docker stop "$container" >/dev/null 2>&1 || true
+  sleep 2
+  vol=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null)
+  if [ -n "$vol" ]; then
+    docker run --rm -v "${vol}:/data" -v "$(dirname "$arquivo_rdb"):/backup:ro" alpine \
+      sh -c "cp /backup/$(basename "$arquivo_rdb") /data/dump.rdb && rm -f /data/appendonly.aof /data/appendonly.aof.* 2>/dev/null; chmod 644 /data/dump.rdb" 2>/dev/null \
+      || docker cp "$arquivo_rdb" "${container}:/data/dump.rdb" 2>/dev/null
+  else
+    docker cp "$arquivo_rdb" "${container}:/data/dump.rdb" 2>/dev/null
+  fi
+  printf "${WHITE} >> Iniciando container ${container}...${WHITE}\n"
+  docker start "$container" >/dev/null 2>&1
+  sleep 3
+  if docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    if ferramentas_redis_cli_docker "$container" PING | grep -q PONG; then
+      printf "${GREEN} >> Redis no container ${container} respondeu PING. Restauração concluída.${WHITE}\n"
+      return 0
+    fi
+    printf "${GREEN} >> Container ${container} em execução. Verifique os dados na aplicação.${WHITE}\n"
+    return 0
+  fi
+  printf "${RED} >> Container ${container} não subiu. Verifique: docker logs ${container}${WHITE}\n"
+  return 1
+}
+
+# Backup Redis: pasta da instância (/home/deploy/backup-<empresa>/redis); Docker ou nativo.
+backup_redis_ferramentas() {
+  banner
+  printf "${WHITE} >> Backup do Redis...\n"
+  echo
+
+  if ! selecionar_instancia_atualizar "fazer backup do Redis"; then
+    sleep 2
+    return 1
+  fi
+
+  ferramentas_carregar_redis_instancia
+  local backup_dir
+  backup_dir=$(ferramentas_redis_dir_backup_instancia)
+  mkdir -p "$backup_dir"
+  chown deploy:deploy "$(dirname "$backup_dir")" 2>/dev/null || true
+  chown deploy:deploy "$(dirname "$(dirname "$backup_dir")")" 2>/dev/null || true
+  chown deploy:deploy "$backup_dir" 2>/dev/null || true
+
+  printf "${WHITE} >> Pasta de destino: ${backup_dir}${WHITE}\n"
+  echo
+
+  if command -v docker >/dev/null 2>&1; then
+    ferramentas_listar_containers_redis_docker
+    if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -gt 0 ]; then
+      if ! ferramentas_escolher_container_redis_docker "Container Redis para backup:"; then
+        printf "${YELLOW} >> Cancelado.${WHITE}\n"
+        sleep 2
+        return 0
+      fi
+      ferramentas_backup_redis_docker "${FERRAMENTAS_REDIS_CONTAINER}" "$backup_dir" || return 1
+      printf "${GREEN} >> Backup concluído em ${backup_dir}${WHITE}\n"
+      echo
+      sleep 2
+      return 0
+    fi
+  fi
+
+  # Fallback: Redis nativo (systemd)
+  local redis_dir="/var/lib/redis"
+  local redis_conf="/etc/redis/redis.conf"
+  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  local dump_rdb="${redis_dir}/dump.rdb"
+  local aof_file="${redis_dir}/appendonly.aof"
+  if ! systemctl is-active --quiet redis-server 2>/dev/null; then
+    printf "${RED} >> Nenhum container Redis em execução e redis-server nativo inativo.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Usando Redis nativo (redis-server)...${WHITE}\n"
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  if [ -n "${REDIS_SENHA}" ]; then
+    redis-cli -a "${REDIS_SENHA}" -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
+  else
+    redis-cli -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
+  fi
+  sleep 2
+  if [ -f "$dump_rdb" ]; then
+    cp "$dump_rdb" "${backup_dir}/dump_${ts}.rdb"
+    chown deploy:deploy "${backup_dir}/dump_${ts}.rdb" 2>/dev/null || true
+    printf "${GREEN} >> Backup RDB: ${backup_dir}/dump_${ts}.rdb${WHITE}\n"
+  else
+    printf "${YELLOW} >> dump.rdb não encontrado em ${dump_rdb}.${WHITE}\n"
+  fi
+  if [ -f "$aof_file" ]; then
+    cp "$aof_file" "${backup_dir}/appendonly_${ts}.aof"
+    chown deploy:deploy "${backup_dir}/appendonly_${ts}.aof" 2>/dev/null || true
+    printf "${GREEN} >> Backup AOF: ${backup_dir}/appendonly_${ts}.aof${WHITE}\n"
+  fi
+  echo
+  sleep 2
+  return 0
+}
+
+# Restaura Redis: backups em /home/deploy/backup-<empresa>/redis → container Docker escolhido (ou nativo).
 restaurar_redis_ferramentas() {
   banner
-  printf "${WHITE} >> Restaurar Redis (nativo)...\n"
+  printf "${WHITE} >> Restaurar Redis...\n"
   echo
-  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
-  fi
-  if [ -z "${empresa}" ]; then
-    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
-    read -p "> " empresa
-    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
-  fi
-  BACKUP_DIR="/home/deploy/backup-${empresa}/redis"
-  if [ ! -d "$BACKUP_DIR" ]; then
-    printf "${RED} >> Pasta de backup não encontrada: ${BACKUP_DIR}${WHITE}\n"
-    printf "${YELLOW} >> Faça um backup do Redis antes de restaurar.${WHITE}\n"
+
+  if ! selecionar_instancia_atualizar "restaurar o Redis"; then
     sleep 2
     return 1
   fi
-  REDIS_DIR="/var/lib/redis"
-  REDIS_CONF="/etc/redis/redis.conf"
-  [ -f "$REDIS_CONF" ] && REDIS_DIR=$(grep "^dir " "$REDIS_CONF" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
-  DUMP_RDB="${REDIS_DIR}/dump.rdb"
-  AOF_FILE="${REDIS_DIR}/appendonly.aof"
+
+  ferramentas_carregar_redis_instancia
+  local backup_dir
+  backup_dir=$(ferramentas_redis_dir_backup_instancia)
+  if [ ! -d "$backup_dir" ]; then
+    printf "${RED} >> Pasta não encontrada: ${backup_dir}${WHITE}\n"
+    printf "${YELLOW} >> Coloque os arquivos .rdb nesta pasta ou faça backup pela opção 8.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
   shopt -s nullglob 2>/dev/null || true
-  RDB_BACKUPS=("$BACKUP_DIR"/dump_*.rdb)
+  local rdb_backups=("$backup_dir"/dump_*.rdb "$backup_dir"/*.rdb)
   shopt -u nullglob 2>/dev/null || true
-  if [ ${#RDB_BACKUPS[@]} -eq 0 ] || [ ! -f "${RDB_BACKUPS[0]}" ]; then
-    printf "${RED} >> Nenhum backup RDB encontrado em ${BACKUP_DIR}${WHITE}\n"
+  local rdb_unicos=()
+  local f seen
+  for f in "${rdb_backups[@]}"; do
+    [ -f "$f" ] || continue
+    seen=0
+    for x in "${rdb_unicos[@]}"; do
+      [ "$x" = "$f" ] && seen=1 && break
+    done
+    [ "$seen" -eq 0 ] && rdb_unicos+=("$f")
+  done
+  if [ ${#rdb_unicos[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum arquivo .rdb em ${backup_dir}${WHITE}\n"
     sleep 2
     return 1
   fi
-  printf "${WHITE} >> Backups RDB disponíveis:${WHITE}\n"
-  echo
-  local i=1
-  local escolhido=""
-  for f in "${RDB_BACKUPS[@]}"; do
-    [ -f "$f" ] || continue
-    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
-    ((i++))
+
+  local labels=()
+  for f in "${rdb_unicos[@]}"; do
+    labels+=("$(basename "$f")")
   done
-  printf "   [${BLUE}0${WHITE}] Cancelar\n"
-  echo
-  printf "${YELLOW} >> Escolha o número do backup para restaurar:${WHITE}\n"
-  read -p "> " op_rdb
-  if [ "$op_rdb" = "0" ] || [ -z "$op_rdb" ]; then
-    printf "${YELLOW} >> Restauração cancelada.${WHITE}\n"
+  if ! ferramentas_escolher_item_lista "Arquivo de backup (.rdb) da instância ${empresa}:" "${labels[@]}"; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
     sleep 2
     return 0
   fi
-  i=1
-  for f in "${RDB_BACKUPS[@]}"; do
-    [ -f "$f" ] || continue
-    if [ "$i" = "$op_rdb" ]; then
-      escolhido="$f"
+  local arquivo_rdb=""
+  for f in "${rdb_unicos[@]}"; do
+    if [ "$(basename "$f")" = "${FERRAMENTAS_ESCOLHA}" ]; then
+      arquivo_rdb="$f"
       break
     fi
-    ((i++))
   done
-  if [ -z "$escolhido" ] || [ ! -f "$escolhido" ]; then
-    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+  if [ -z "$arquivo_rdb" ] || [ ! -f "$arquivo_rdb" ]; then
+    printf "${RED} >> Arquivo não encontrado.${WHITE}\n"
     sleep 2
     return 1
   fi
-  printf "${YELLOW} >> Isso irá parar o Redis, substituir os dados pelo backup e reiniciar. Continuar? (s/N):${WHITE}\n"
-  read -p "> " confirma
-  if [ "$confirma" != "s" ] && [ "$confirma" != "S" ]; then
-    printf "${YELLOW} >> Restauração cancelada.${WHITE}\n"
+
+  printf "${GREEN} >> Backup selecionado: $(basename "$arquivo_rdb")${WHITE}\n"
+  echo
+
+  if command -v docker >/dev/null 2>&1; then
+    ferramentas_listar_containers_redis_docker
+    if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -gt 0 ]; then
+      if ! ferramentas_escolher_container_redis_docker "Container Redis de DESTINO (dados serão substituídos):"; then
+        printf "${YELLOW} >> Cancelado.${WHITE}\n"
+        sleep 2
+        return 0
+      fi
+      printf "${YELLOW} >> ATENÇÃO: o Redis no container '${FERRAMENTAS_REDIS_CONTAINER}' será substituído pelo backup. Continuar? (s/N):${WHITE}\n"
+      read -p "> " confirma
+      if [ "$confirma" != "s" ] && [ "$confirma" != "S" ]; then
+        printf "${YELLOW} >> Cancelado.${WHITE}\n"
+        sleep 2
+        return 0
+      fi
+      ferramentas_restaurar_redis_docker "${FERRAMENTAS_REDIS_CONTAINER}" "$arquivo_rdb"
+      echo
+      sleep 2
+      return 0
+    fi
+  fi
+
+  # Fallback: nativo
+  local redis_dir="/var/lib/redis"
+  local redis_conf="/etc/redis/redis.conf"
+  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  local dump_rdb="${redis_dir}/dump.rdb"
+  local aof_file="${redis_dir}/appendonly.aof"
+  printf "${YELLOW} >> Nenhum container Redis em execução. Restaurar no Redis nativo? (s/N):${WHITE}\n"
+  read -p "> " conf_nat
+  if [ "$conf_nat" != "s" ] && [ "$conf_nat" != "S" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
     sleep 2
     return 0
   fi
   systemctl stop redis-server 2>/dev/null || true
   sleep 2
-  [ -f "$DUMP_RDB" ] && mv "$DUMP_RDB" "${DUMP_RDB}.antes_restore_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-  [ -f "$AOF_FILE" ] && mv "$AOF_FILE" "${AOF_FILE}.antes_restore_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-  cp "$escolhido" "$DUMP_RDB"
-  chown redis:redis "$DUMP_RDB" 2>/dev/null || chown deploy:deploy "$DUMP_RDB" 2>/dev/null || true
-  chmod 660 "$DUMP_RDB" 2>/dev/null || true
-  printf "${GREEN} >> Arquivo RDB restaurado: $(basename "$escolhido") -> ${DUMP_RDB}${WHITE}\n"
-  AOF_BACKUPS=("$BACKUP_DIR"/appendonly_*.aof)
-  if [ -f "${AOF_BACKUPS[0]}" ]; then
-    printf "${YELLOW} >> Existem backups AOF. Deseja restaurar também um AOF? (s/N):${WHITE}\n"
-    read -p "> " rest_aof
-    if [ "$rest_aof" = "s" ] || [ "$rest_aof" = "S" ]; then
-      i=1
-      for f in "${AOF_BACKUPS[@]}"; do
-        [ -f "$f" ] || continue
-        printf "   [%s] %s\n" "$i" "$(basename "$f")"
-        ((i++))
-      done
-      printf "${YELLOW} >> Número do AOF (ou 0 para pular):${WHITE}\n"
-      read -p "> " op_aof
-      i=1
-      for f in "${AOF_BACKUPS[@]}"; do
-        [ -f "$f" ] || continue
-        if [ "$i" = "$op_aof" ]; then
-          cp "$f" "$AOF_FILE"
-          chown redis:redis "$AOF_FILE" 2>/dev/null || chown deploy:deploy "$AOF_FILE" 2>/dev/null || true
-          chmod 660 "$AOF_FILE" 2>/dev/null || true
-          printf "${GREEN} >> AOF restaurado: $(basename "$f")${WHITE}\n"
-          break
-        fi
-        ((i++))
-      done
-    fi
-  fi
+  cp "$arquivo_rdb" "$dump_rdb"
+  chown redis:redis "$dump_rdb" 2>/dev/null || true
+  chmod 660 "$dump_rdb" 2>/dev/null || true
+  [ -f "$aof_file" ] && mv "$aof_file" "${aof_file}.bak_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
   systemctl start redis-server 2>/dev/null || true
   sleep 2
   if systemctl is-active --quiet redis-server 2>/dev/null; then
-    printf "${GREEN} >> Redis reiniciado com sucesso. Restauração concluída.${WHITE}\n"
+    printf "${GREEN} >> Redis nativo reiniciado. Restauração concluída.${WHITE}\n"
   else
-    printf "${RED} >> Redis não iniciou. Verifique: systemctl status redis-server${WHITE}\n"
+    printf "${RED} >> Redis nativo não iniciou.${WHITE}\n"
   fi
   echo
   sleep 2
+  return 0
 }
 
-# Importar/restaurar backup do banco nativo (PostgreSQL) a partir de /home/deploy/backup-${empresa}/
+# Carrega credenciais PostgreSQL nativo do .env da instância (empresa já definida).
+# Define: PG_USUARIO, PG_SENHA, PG_HOST, PG_PORT, PG_DB_NAME
+ferramentas_carregar_credenciais_pg_instancia() {
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  PG_USUARIO="${empresa}"
+  PG_SENHA="${senha_deploy:-}"
+  PG_HOST="127.0.0.1"
+  PG_PORT="5432"
+  PG_DB_NAME="${empresa}"
+  if [ -f "$env_file" ]; then
+    PG_USUARIO=$(grep -m1 '^DB_USER=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    PG_SENHA=$(grep -m1 '^DB_PASS=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d '"' | head -1)
+    PG_HOST=$(grep -m1 '^DB_HOST=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | head -1)
+    PG_PORT=$(grep -m1 '^DB_PORT=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | head -1)
+    PG_DB_NAME=$(grep -m1 '^DB_NAME=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | head -1)
+  fi
+  [ -z "$PG_USUARIO" ] && PG_USUARIO="${empresa}"
+  [ -z "$PG_DB_NAME" ] && PG_DB_NAME="${empresa}"
+  [ -z "$PG_HOST" ] || [ "$PG_HOST" = "localhost" ] && PG_HOST="127.0.0.1"
+  [ -z "$PG_PORT" ] && PG_PORT="5432"
+}
+
+# Preenche FERRAMENTAS_LISTA_DB com bancos do cluster (PostgreSQL nativo).
+ferramentas_listar_bancos_pg_nativo() {
+  FERRAMENTAS_LISTA_DB=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && FERRAMENTAS_LISTA_DB+=("$line")
+  done < <(PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres -t -A -c \
+    "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
+}
+
+# Escolhe item numerado; retorna 0 e define FERRAMENTAS_ESCOLHA, ou 1 se cancelar/inválido.
+ferramentas_escolher_item_lista() {
+  local prompt_msg="$1"
+  shift
+  local -a itens=("$@")
+  local total=${#itens[@]}
+  local i op
+  if [ "$total" -eq 0 ]; then
+    return 1
+  fi
+  printf "${WHITE} >> %s${WHITE}\n" "$prompt_msg"
+  echo
+  i=1
+  for item in "${itens[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$item"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  read -p "> " op
+  if [ "$op" = "0" ] || [ -z "$op" ]; then
+    return 1
+  fi
+  if ! [[ "$op" =~ ^[0-9]+$ ]] || [ "$op" -lt 1 ] || [ "$op" -gt "$total" ]; then
+    return 1
+  fi
+  FERRAMENTAS_ESCOLHA="${itens[$((op - 1))]}"
+  return 0
+}
+
+# DROP + CREATE + restore em banco alvo (PostgreSQL nativo).
+ferramentas_restaurar_sql_em_banco() {
+  local db_alvo="$1"
+  local arquivo_sql="$2"
+  local owner_db="${PG_USUARIO}"
+  printf "${WHITE} >> Encerrando conexões com o banco ${db_alvo}...${WHITE}\n"
+  PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+    -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_alvo}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+  sleep 1
+  printf "${WHITE} >> Recriando banco ${db_alvo}...${WHITE}\n"
+  PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+    -c "DROP DATABASE IF EXISTS \"${db_alvo}\";" 2>/dev/null || true
+  if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+    -c "CREATE DATABASE \"${db_alvo}\" OWNER \"${owner_db}\";" 2>/dev/null; then
+    if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+      -c "CREATE DATABASE \"${db_alvo}\";" 2>/dev/null; then
+      printf "${RED} >> Erro ao criar o banco ${db_alvo}. Verifique usuário/senha e permissões.${WHITE}\n"
+      return 1
+    fi
+  fi
+  printf "${WHITE} >> Restaurando backup em ${db_alvo}...${WHITE}\n"
+  if PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d "${db_alvo}" -f "$arquivo_sql"; then
+    printf "${GREEN} >> Banco ${db_alvo} restaurado com sucesso.${WHITE}\n"
+    return 0
+  fi
+  printf "${YELLOW} >> Restauração finalizada (verifique mensagens acima).${WHITE}\n"
+  return 0
+}
+
+# Importar/restaurar backup do banco nativo (PostgreSQL): instância, lista de bancos, substituir ou criar novo.
 importar_backup_banco_ferramentas() {
   banner
   printf "${WHITE} >> Importar backup do banco (PostgreSQL nativo)...\n"
   echo
-  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
-  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
-  fi
-  if [ -z "${empresa}" ]; then
-    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
-    read -p "> " empresa
-    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
-  fi
-  BACKUP_BASE="/home/deploy/backup-${empresa}"
-  if [ ! -d "$BACKUP_BASE" ]; then
-    printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
+
+  if ! selecionar_instancia_atualizar "importar o backup do banco"; then
     sleep 2
     return 1
   fi
-  # Listar arquivos .sql na pasta e subpastas (um nível)
+
+  if [ "${ALTA_PERFORMANCE:-0}" = "1" ]; then
+    printf "${YELLOW} >> AVISO: Esta instância está em modo Alta Performance (Postgres em Docker).${WHITE}\n"
+    printf "${YELLOW} >> Use a opção 14 para backup/restore do banco Docker, ou importe com Postgres nativo na porta 5432.${WHITE}\n"
+    echo
+  fi
+
+  ferramentas_carregar_credenciais_pg_instancia
+  if [ -z "${PG_SENHA}" ]; then
+    printf "${YELLOW} >> Informe usuário e senha do PostgreSQL:${WHITE}\n"
+    read -p "   Usuário [${PG_USUARIO}]: " input_user
+    [ -n "$input_user" ] && PG_USUARIO="$input_user"
+    read -s -p "   Senha: " PG_SENHA
+    echo
+    [ -z "${PG_SENHA}" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  fi
+
+  if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+    printf "${RED} >> Não foi possível conectar ao PostgreSQL em ${PG_HOST}:${PG_PORT} com o usuário ${PG_USUARIO}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  ferramentas_listar_bancos_pg_nativo
+  if [ ${#FERRAMENTAS_LISTA_DB[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum banco listado ou credenciais incorretas.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  printf "${WHITE} >> Bancos no PostgreSQL (${PG_HOST}:${PG_PORT}):${WHITE}\n"
+  echo
+  local db
+  for db in "${FERRAMENTAS_LISTA_DB[@]}"; do
+    if [ "$db" = "${PG_DB_NAME}" ]; then
+      printf "   ${GREEN}* ${db}${WHITE} ${YELLOW}(DB_NAME da instância ${empresa})${WHITE}\n"
+    else
+      printf "   - ${db}\n"
+    fi
+  done
+  echo
+
+  BACKUP_BASE="/home/deploy/backup-${empresa}"
+  if [ ! -d "$BACKUP_BASE" ]; then
+    mkdir -p "$BACKUP_BASE"
+    chown deploy:deploy "$BACKUP_BASE" 2>/dev/null || true
+    printf "${YELLOW} >> Pasta criada: ${BACKUP_BASE} — coloque o arquivo .sql e execute novamente.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
   BACKUPS_SQL=()
   while IFS= read -r f; do
     [ -n "$f" ] && BACKUPS_SQL+=("$f")
   done < <(find "$BACKUP_BASE" -maxdepth 2 -type f -name "*.sql" 2>/dev/null | sort -r)
   if [ ${#BACKUPS_SQL[@]} -eq 0 ]; then
-    printf "${RED} >> Nenhum arquivo .sql encontrado em ${BACKUP_BASE}${WHITE}\n"
+    printf "${RED} >> Nenhum arquivo .sql em ${BACKUP_BASE}${WHITE}\n"
     sleep 2
     return 1
   fi
-  printf "${WHITE} >> Backups disponíveis:${WHITE}\n"
-  echo
-  local i=1
+
+  BACKUP_LABELS=()
+  local f
   for f in "${BACKUPS_SQL[@]}"; do
-    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
-    ((i++))
+    BACKUP_LABELS+=("$(basename "$f")")
   done
-  printf "   [${BLUE}0${WHITE}] Cancelar\n"
-  echo
-  printf "${YELLOW} >> Escolha o número do backup para restaurar:${WHITE}\n"
-  read -p "> " op_backup
-  if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
+  if ! ferramentas_escolher_item_lista "Escolha o arquivo de backup (.sql):" "${BACKUP_LABELS[@]}"; then
     printf "${YELLOW} >> Cancelado.${WHITE}\n"
     sleep 2
     return 0
   fi
   local arquivo_escolhido=""
-  i=1
   for f in "${BACKUPS_SQL[@]}"; do
-    if [ "$i" = "$op_backup" ]; then
+    if [ "$(basename "$f")" = "${FERRAMENTAS_ESCOLHA}" ]; then
       arquivo_escolhido="$f"
       break
     fi
-    ((i++))
   done
   if [ -z "$arquivo_escolhido" ] || [ ! -f "$arquivo_escolhido" ]; then
-    printf "${RED} >> Opção inválida. Cancelado.${WHITE}\n"
+    printf "${RED} >> Arquivo não encontrado. Cancelado.${WHITE}\n"
     sleep 2
     return 1
   fi
-  printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "$(basename "$arquivo_escolhido")"
+  printf "${GREEN} >> Backup: ${FERRAMENTAS_ESCOLHA}${WHITE}\n"
   echo
-  printf "${YELLOW} >> Deseja apagar o banco existente com o mesmo nome ou criar um novo?${WHITE}\n"
-  printf "   [${BLUE}1${WHITE}] Apagar banco existente e restaurar (substitui o banco ${empresa})\n"
-  printf "   [${BLUE}2${WHITE}] Criar novo banco e restaurar (mantém o existente, cria ${empresa}_novo)\n"
+
+  printf "${YELLOW} >> Como deseja restaurar?${WHITE}\n"
+  printf "   [${BLUE}1${WHITE}] Substituir um banco existente (lista os bancos e você escolhe qual apagar/recriar)\n"
+  printf "   [${BLUE}2${WHITE}] Criar um banco novo e restaurar nele (mantém os demais)\n"
   printf "   [${BLUE}0${WHITE}] Cancelar\n"
   echo
-  read -p "> " op_tipo
-  if [ "$op_tipo" = "0" ] || [ -z "$op_tipo" ]; then
+  read -p "> " op_modo
+  if [ "$op_modo" = "0" ] || [ -z "$op_modo" ]; then
     printf "${YELLOW} >> Cancelado.${WHITE}\n"
     sleep 2
     return 0
   fi
-  local usuario_db="${empresa}"
-  local senha_db="${senha_deploy}"
-  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
-  if [ -z "$senha_db" ]; then
-    printf "${YELLOW} >> Informe o usuário e a senha do banco:${WHITE}\n"
-    read -p "   Usuário: " usuario_db
-    read -s -p "   Senha: " senha_db
-    echo
-    [ -z "$usuario_db" ] && printf "${RED} >> Usuário não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
-    [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
-  fi
-  if [ "$op_tipo" = "1" ]; then
-    # Apagar banco existente, criar novo com nome da empresa, restaurar (tudo com usuário empresa, sem postgres)
-    # Conectar ao banco 'postgres' para DROP/CREATE; senão psql conecta ao banco com nome do usuário e não permite dropar.
-    printf "${WHITE} >> Encerrando conexões com o banco ${empresa}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${empresa}' AND pid <> pg_backend_pid();" 2>/dev/null || true
-    sleep 1
-    printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "DROP DATABASE IF EXISTS ${empresa};" 2>/dev/null || true
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "CREATE DATABASE ${empresa} OWNER ${empresa};" 2>/dev/null || true
-    if [ $? -ne 0 ]; then
-      printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL.${WHITE}\n"
+
+  local db_destino=""
+
+  if [ "$op_modo" = "1" ]; then
+    if ! ferramentas_escolher_item_lista "Escolha o banco que será SUBSTITUÍDO (DROP + CREATE + restore):" "${FERRAMENTAS_LISTA_DB[@]}"; then
+      printf "${RED} >> Opção inválida ou cancelada.${WHITE}\n"
       sleep 2
       return 1
     fi
-    printf "${WHITE} >> Restaurando backup em ${empresa}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d "${empresa}" -f "$arquivo_escolhido" 2>/dev/null
-    if [ $? -eq 0 ]; then
-      printf "${GREEN} >> Banco ${empresa} restaurado com sucesso.${WHITE}\n"
+    db_destino="${FERRAMENTAS_ESCOLHA}"
+    printf "${YELLOW} >> ATENÇÃO: o banco '${db_destino}' será apagado e recriado. Continuar? (s/N):${WHITE}\n"
+    read -p "> " confirma
+    confirma=$(echo "$confirma" | tr '[:upper:]' '[:lower:]')
+    if [ "$confirma" != "s" ]; then
+      printf "${YELLOW} >> Cancelado.${WHITE}\n"
+      sleep 2
+      return 0
+    fi
+    ferramentas_restaurar_sql_em_banco "$db_destino" "$arquivo_escolhido" || return 1
+    if [ "$db_destino" != "${PG_DB_NAME}" ]; then
+      printf "${YELLOW} >> O .env da instância ${empresa} usa DB_NAME=${PG_DB_NAME}. Ajuste se a aplicação deve usar ${db_destino}.${WHITE}\n"
+    fi
+  elif [ "$op_modo" = "2" ]; then
+    printf "${YELLOW} >> Nome do novo banco [padrão: ${PG_DB_NAME}]:${WHITE}\n"
+    read -p "> " nome_novo_banco
+    nome_novo_banco=$(echo "$nome_novo_banco" | tr -d ' ')
+    db_destino="${nome_novo_banco:-${PG_DB_NAME}}"
+    if printf '%s\n' "${FERRAMENTAS_LISTA_DB[@]}" | grep -qx "$db_destino"; then
+      printf "${RED} >> O banco '${db_destino}' já existe. Use a opção 1 para substituir ou escolha outro nome.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+    printf "${WHITE} >> Criando banco ${db_destino}...${WHITE}\n"
+    if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+      -c "CREATE DATABASE \"${db_destino}\" OWNER \"${PG_USUARIO}\";" 2>/dev/null; then
+      if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
+        -c "CREATE DATABASE \"${db_destino}\";" 2>/dev/null; then
+        printf "${RED} >> Erro ao criar banco ${db_destino}.${WHITE}\n"
+        sleep 2
+        return 1
+      fi
+    fi
+    printf "${WHITE} >> Restaurando backup em ${db_destino}...${WHITE}\n"
+    if PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d "${db_destino}" -f "$arquivo_escolhido"; then
+      printf "${GREEN} >> Banco ${db_destino} restaurado com sucesso.${WHITE}\n"
     else
-      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
+      printf "${YELLOW} >> Restauração finalizada (verifique mensagens acima).${WHITE}\n"
+    fi
+    if [ "$db_destino" != "${PG_DB_NAME}" ]; then
+      printf "${YELLOW} >> Atualize DB_NAME no .env do backend (${empresa}) para: ${db_destino}${WHITE}\n"
     fi
   else
-    # Criar novo banco (empresa_novo), manter existente, restaurar no novo (sem postgres)
-    local db_novo="${empresa}_novo"
-    printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${empresa})...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d postgres -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
-    if [ $? -ne 0 ]; then
-      printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
-      sleep 2
-      return 1
-    fi
-    printf "${WHITE} >> Restaurando backup em ${db_novo}...${WHITE}\n"
-    PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
-    if [ $? -eq 0 ]; then
-      printf "${GREEN} >> Banco ${db_novo} restaurado com sucesso.${WHITE}\n"
-      printf "${YELLOW} >> Para usar este banco na aplicação, altere DB_NAME no .env do backend para: ${db_novo}${WHITE}\n"
-    else
-      printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
-    fi
+    printf "${RED} >> Opção inválida.${WHITE}\n"
+    sleep 2
+    return 1
   fi
+
   echo
   sleep 2
+  return 0
 }
 
 # Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo): mesmo processo, banco oficialseparado
@@ -1217,11 +1490,11 @@ menu_ferramentas() {
     printf "   [${BLUE}7${WHITE}] Agendar Backup Diário do Banco Nativo\n"
     echo
     printf "  ${BLUE}━━ Redis ━━${WHITE}\n"
-    printf "   [${BLUE}8${WHITE}] Backup do Redis\n"
-    printf "   [${BLUE}9${WHITE}] Restaurar Redis\n"
+    printf "   [${BLUE}8${WHITE}] Backup do Redis (instância / Docker ou nativo)\n"
+    printf "   [${BLUE}9${WHITE}] Restaurar Redis (backup da instância → container)\n"
     echo
     printf "  ${BLUE}━━ Banco de dados (PostgreSQL) ━━${WHITE}\n"
-    printf "   [${BLUE}10${WHITE}] Importar backup do banco\n"
+    printf "   [${BLUE}10${WHITE}] Importar backup do banco (instância + escolher banco)\n"
     printf "   [${BLUE}11${WHITE}] Backup do banco\n"
     printf "   [${BLUE}12${WHITE}] Importar backup do banco da API Oficial\n"
     printf "   [${BLUE}13${WHITE}] Listar Bancos Existentes\n"
@@ -1676,8 +1949,10 @@ detectar_instancias_instaladas() {
   declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
 }
 
-# Função para selecionar qual instância atualizar
+# Função para selecionar qual instância usar (atualização, importação de banco, etc.)
+# $1 = texto da ação no menu (ex.: "atualizar", "importar o backup do banco")
 selecionar_instancia_atualizar() {
+  local rotulo_acao="${1:-atualizar}"
   banner
   printf "${WHITE} >> Detectando instâncias instaladas...\n"
   echo
@@ -1688,7 +1963,7 @@ selecionar_instancia_atualizar() {
   
   if [ $total_instancias -eq 0 ]; then
     printf "${RED} >> ERRO: Nenhuma instância instalada detectada!${WHITE}\n"
-    printf "${YELLOW} >> Não é possível atualizar. Verifique se há instâncias instaladas.${WHITE}\n"
+    printf "${YELLOW} >> Não é possível ${rotulo_acao}. Verifique se há instâncias instaladas.${WHITE}\n"
     sleep 3
     return 1
   elif [ $total_instancias -eq 1 ]; then
@@ -1743,7 +2018,7 @@ selecionar_instancia_atualizar() {
     
     printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
     echo
-    printf "${YELLOW} >> Qual instância deseja atualizar? (1-${total_instancias}):${WHITE}\n"
+    printf "${YELLOW} >> Qual instância deseja ${rotulo_acao}? (1-${total_instancias}):${WHITE}\n"
     read -p "> " escolha_instancia
     
     # Validar entrada

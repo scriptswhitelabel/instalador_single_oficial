@@ -127,11 +127,36 @@ descomentar_env_redis_bull_ack() {
   printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
-# Carregar variáveis base
+# Carregar variáveis base (instalação principal)
 carregar_variaveis_base() {
-  if [ -f "$ARQUIVO_VARIAVEIS_BASE" ]; then
-    source "$ARQUIVO_VARIAVEIS_BASE"
+  local base_file=""
+  local instalador_root
+  instalador_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -f "${instalador_root}/${ARQUIVO_VARIAVEIS_BASE}" ]; then
+    base_file="${instalador_root}/${ARQUIVO_VARIAVEIS_BASE}"
+  elif [ -f "$ARQUIVO_VARIAVEIS_BASE" ]; then
+    base_file="$ARQUIVO_VARIAVEIS_BASE"
+  elif [ -f "/root/instalador_single_oficial/${ARQUIVO_VARIAVEIS_BASE}" ]; then
+    base_file="/root/instalador_single_oficial/${ARQUIVO_VARIAVEIS_BASE}"
   fi
+  if [ -n "$base_file" ]; then
+  # shellcheck source=/dev/null
+    source "$base_file"
+  fi
+}
+
+# Multiflow-pro: TOKEN_GITHUB no package.json (dependência baileys privada) — obrigatório antes do npm install
+aplicar_token_baileys_package_json() {
+  local emp="${1:-$nova_empresa}"
+  local tok="${2:-$github_token}"
+  local repo="${3:-$repo_url}"
+  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  local pkg="/home/deploy/${emp}/backend/package.json"
+  [ ! -f "$pkg" ] && return 0
+  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
+  local tok_sed="${tok//&/\\&}"
+  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
 }
 
 # Validar token do GitHub
@@ -1468,34 +1493,80 @@ EOF
     banner
     printf "${WHITE} >> Instalando dependências do ${BLUE}backend${WHITE}...\n"
     echo
-    sudo su - deploy <<BACKENDINSTALL
+
+  if [ -z "${github_token}" ] || [ -z "${repo_url}" ]; then
+    printf "${RED} >> ERRO: github_token ou repo_url não definidos. Refaça os dados adicionais da instância.${WHITE}\n"
+    exit 1
+  fi
+  aplicar_token_baileys_package_json "${nova_empresa}" "${github_token}" "${repo_url}"
+
+  local _path_node_script
+  _path_node_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/path_node_deploy.sh"
+  [ ! -f "$_path_node_script" ] && _path_node_script="/root/instalador_single_oficial/tools/path_node_deploy.sh"
+
+  if ! sudo su - deploy <<BACKENDINSTALL
+set -e
+if [ -f "${_path_node_script}" ]; then
+  # shellcheck source=/dev/null
+  . "${_path_node_script}"
+else
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-  elif [ -f /usr/bin/node ]; then
-    export PATH=/usr/bin:/usr/local/bin:\$PATH
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  elif [ -d /usr/local/n/versions/node ]; then
+    _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+    [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ] && export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
   fi
-  
-  BACKEND_DIR="/home/deploy/${nova_empresa}/backend"
-  if [ ! -d "\$BACKEND_DIR" ]; then
-    echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
-    exit 1
-  fi
-  
-  cd "\$BACKEND_DIR"
-  
-  if [ ! -f "package.json" ]; then
-    echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
-    exit 1
-  fi
-  
-  export PUPPETEER_SKIP_DOWNLOAD=true
-  rm -rf node_modules 2>/dev/null || true
-  rm -f package-lock.json 2>/dev/null || true
-  npm install --force
-  npm install puppeteer-core --force
-  npm i glob
-  npm run build
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "ERRO: Node.js ou npm não encontrado. PATH=\$PATH"
+  which node 2>/dev/null || echo "node ausente"
+  which npm 2>/dev/null || echo "npm ausente"
+  exit 1
+fi
+
+echo ">> Node: \$(node -v) | npm: \$(npm -v)"
+
+BACKEND_DIR="/home/deploy/${nova_empresa}/backend"
+if [ ! -d "\$BACKEND_DIR" ]; then
+  echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
+  ls -la "/home/deploy/${nova_empresa}/" 2>/dev/null || true
+  exit 1
+fi
+
+cd "\$BACKEND_DIR"
+
+if [ ! -f "package.json" ]; then
+  echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+  ls -la
+  exit 1
+fi
+
+if grep -q 'TOKEN_GITHUB' package.json 2>/dev/null; then
+  echo "ERRO: package.json ainda contém TOKEN_GITHUB. Token GitHub inválido ou não aplicado."
+  exit 1
+fi
+
+export PUPPETEER_SKIP_DOWNLOAD=true
+export NODE_OPTIONS="\${NODE_OPTIONS:---max-old-space-size=4096}"
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+
+echo ">> npm install --force (pode levar vários minutos)..."
+npm install --force
+echo ">> npm install puppeteer-core --force..."
+npm install puppeteer-core --force
+npm i glob
+echo ">> npm run build..."
+npm run build
 BACKENDINSTALL
+  then
+    printf "${RED} >> Falha no npm install/build do backend da instância ${nova_empresa}.${WHITE}\n"
+    printf "${YELLOW} >> Verifique acima: TOKEN GitHub, Node 20.x, memória e rede.${WHITE}\n"
+    printf "${WHITE} >> Manual: su - deploy && cd /home/deploy/${nova_empresa}/backend && npm install --force${WHITE}\n"
+    exit 1
+  fi
 
     sleep 2
 
