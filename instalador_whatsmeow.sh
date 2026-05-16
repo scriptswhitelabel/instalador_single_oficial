@@ -9,9 +9,12 @@ YELLOW='\033[1;33m'
 # Variaveis Padrão
 ARCH=$(uname -m)
 UBUNTU_VERSION=$(lsb_release -sr)
-ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALADOR_DIR="$SCRIPT_DIR"
+ARQUIVO_VARIAVEIS=""
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 default_wuzapi_port=8090
+WUZAPI_COMPOSE_PROJECT=""
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -54,13 +57,173 @@ aviso_versao_pro() {
   sleep 3
 }
 
+detectar_instancias_instaladas() {
+  local instancias=()
+  local nomes_empresas=()
+  local temp_empresa=""
+
+  if [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    local empresa_original="${empresa:-}"
+    # shellcheck source=/dev/null
+    source "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    empresa="${empresa_original}"
+  fi
+
+  shopt -s nullglob
+  for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+    [ -f "$arquivo_instancia" ] || continue
+    local empresa_original="${empresa:-}"
+    # shellcheck source=/dev/null
+    source "$arquivo_instancia" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("$arquivo_instancia")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    empresa="${empresa_original}"
+  done
+  shopt -u nullglob
+
+  declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
+  declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
+}
+
+selecionar_instancia_whatsmeow() {
+  banner
+  printf "${WHITE} >> Em qual instância o WhatsMeow (WuzAPI) será instalado?\n\n"
+  detectar_instancias_instaladas
+  local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+
+  if [ "$total_instancias" -eq 0 ]; then
+    printf "${RED} >> Nenhuma instância detectada. Instale o MultiFlow antes.${WHITE}\n"
+    sleep 3
+    exit 1
+  elif [ "$total_instancias" -eq 1 ]; then
+    ARQUIVO_VARIAVEIS="${INSTANCIAS_DETECTADAS[0]}"
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+    printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE}\n\n"
+    sleep 1
+    return 0
+  fi
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  INSTÂNCIAS\n"
+  printf "═══════════════════════════════════════════════════════════${WHITE}\n\n"
+  local index=1
+  for i in "${!NOMES_EMPRESAS_DETECTADAS[@]}"; do
+    local empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+    local arquivo_instancia="${INSTANCIAS_DETECTADAS[$i]}"
+    local empresa_original="${empresa:-}"
+    # shellcheck source=/dev/null
+    source "$arquivo_instancia" 2>/dev/null
+    local wz_port="${wuzapi_port:-}"
+    empresa="${empresa_original}"
+    printf "  [${BLUE}%s${WHITE}] %s\n" "$index" "$empresa_nome"
+    if [ -d "/home/deploy/${empresa_nome}/wuzapi" ]; then
+      printf "      WhatsMeow: ${YELLOW}já instalado${WHITE}"
+      [ -n "$wz_port" ] && printf " (porta ${wz_port})"
+      echo
+    else
+      printf "      WhatsMeow: ${GREEN}não instalado${WHITE}\n"
+    fi
+    echo
+    index=$((index + 1))
+  done
+  printf "${YELLOW} >> Escolha a instância (1-%s):${WHITE}\n" "$total_instancias"
+  read -r escolha_instancia
+  if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]] || [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt "$total_instancias" ]; then
+    printf "${RED} >> Opção inválida.${WHITE}\n"
+    exit 1
+  fi
+  ARQUIVO_VARIAVEIS="${INSTANCIAS_DETECTADAS[$((escolha_instancia - 1))]}"
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
+  printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n\n"
+  sleep 1
+}
+
 # Carregar variáveis
 carregar_variaveis() {
-  if [ -f $ARQUIVO_VARIAVEIS ]; then
-    source $ARQUIVO_VARIAVEIS
+  if [ -n "$ARQUIVO_VARIAVEIS" ] && [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+  elif [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    ARQUIVO_VARIAVEIS="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
   else
     empresa="multiflow"
     nome_titulo="MultiFlow"
+  fi
+  WUZAPI_COMPOSE_PROJECT="wuzapi_${empresa}"
+}
+
+whatsmeow_coletar_portas_em_uso() {
+  WHATSMEOW_PORTAS_EM_USO=()
+  WHATSMEOW_PORTAS_RESUMO=()
+  local env_file emp port
+  for env_file in /home/deploy/*/wuzapi/.env; do
+    [ -f "$env_file" ] || continue
+    emp=$(basename "$(dirname "$(dirname "$env_file")")")
+    [ "$emp" = "${empresa:-}" ] && continue
+    port=$(grep -m1 '^WUZAPI_PORT=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -z "$port" ] && continue
+    WHATSMEOW_PORTAS_EM_USO+=("$port")
+    WHATSMEOW_PORTAS_RESUMO+=("${emp}:${port}")
+  done
+  local arq
+  for arq in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+    [ -f "$arq" ] || continue
+    [ "$arq" = "$ARQUIVO_VARIAVEIS" ] && continue
+    port=$(grep -m1 '^wuzapi_port=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -z "$port" ] && continue
+    emp=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [[ " ${WHATSMEOW_PORTAS_EM_USO[*]} " == *" $port "* ]] && continue
+    WHATSMEOW_PORTAS_EM_USO+=("$port")
+    WHATSMEOW_PORTAS_RESUMO+=("${emp:-?}:${port}")
+  done
+}
+
+whatsmeow_porta_em_listen() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH 2>/dev/null | grep -qE ":${port}([[:space:]]|$)"
+    return $?
+  fi
+  return 1
+}
+
+whatsmeow_porta_indisponivel() {
+  local port="$1"
+  local p
+  for p in "${WHATSMEOW_PORTAS_EM_USO[@]}"; do
+    [ "$p" = "$port" ] && return 0
+  done
+  whatsmeow_porta_em_listen "$port"
+}
+
+whatsmeow_proxima_porta_livre() {
+  local p="${default_wuzapi_port}"
+  while [ "$p" -le 65535 ] && whatsmeow_porta_indisponivel "$p"; do
+    p=$((p + 1))
+  done
+  printf '%s' "$p"
+}
+
+salvar_variavel_instancia() {
+  local chave="$1"
+  local valor="$2"
+  [ -z "$ARQUIVO_VARIAVEIS" ] || [ ! -f "$ARQUIVO_VARIAVEIS" ] && return 0
+  if grep -q "^${chave}=" "$ARQUIVO_VARIAVEIS" 2>/dev/null; then
+    sed -i "s|^${chave}=.*|${chave}=${valor}|" "$ARQUIVO_VARIAVEIS"
+  else
+    echo "${chave}=${valor}" >>"$ARQUIVO_VARIAVEIS"
   fi
 }
 
@@ -92,7 +255,8 @@ verificar_instalacao_existente() {
     if [ -f "/home/deploy/${empresa}/wuzapi/docker-compose.yml" ]; then
       printf "${WHITE} >> Parando containers Docker do WhatsMeow...${WHITE}\n"
       cd /home/deploy/${empresa}/wuzapi
-      docker compose down -v 2>/dev/null || true
+      local proj="wuzapi_${empresa}"
+      docker compose -p "$proj" down -v 2>/dev/null || docker-compose -p "$proj" down -v 2>/dev/null || true
       echo
       sleep 2
     fi
@@ -122,30 +286,47 @@ solicitar_subdominio_whatsmeow() {
   read -p "> " subdominio_whatsmeow
   echo
   printf "   ${WHITE}Subdomínio API WhatsMeow: ---->> ${YELLOW}${subdominio_whatsmeow}${WHITE}\n"
-  echo "subdominio_whatsmeow=${subdominio_whatsmeow}" >>$ARQUIVO_VARIAVEIS
+  salvar_variavel_instancia "subdominio_whatsmeow" "${subdominio_whatsmeow}"
   sleep 2
 }
 
 # Solicitar porta da API WhatsMeow
 solicitar_porta_whatsmeow() {
   banner
-  printf "${WHITE} >> Qual porta a API WhatsMeow vai rodar?${WHITE}\n"
+  whatsmeow_coletar_portas_em_uso
+  printf "${WHITE} >> Porta HTTP do WuzAPI (proxy Nginx → 127.0.0.1:PORTA)\n"
   echo
-  printf "${WHITE}   Porta padrão: ${YELLOW}${default_wuzapi_port}${WHITE}\n"
-  echo
-  printf "${WHITE}   Deseja usar a porta padrão (${default_wuzapi_port})? (s/n):${WHITE}\n"
-  read -p "> " usar_porta_padrao
-  
-  if [ "$usar_porta_padrao" = "s" ] || [ "$usar_porta_padrao" = "S" ]; then
-    wuzapi_port=${default_wuzapi_port}
-    printf "${GREEN} >> Usando porta padrão: ${wuzapi_port}${WHITE}\n"
-  else
-    printf "${WHITE} >> Digite a porta desejada:${WHITE}\n"
-    read -p "> " wuzapi_port
-    printf "${GREEN} >> Porta configurada: ${wuzapi_port}${WHITE}\n"
+  if [ ${#WHATSMEOW_PORTAS_RESUMO[@]} -gt 0 ]; then
+    printf "${YELLOW} >> Portas já usadas por outra(s) instância(s):${WHITE}\n"
+    local item
+    for item in "${WHATSMEOW_PORTAS_RESUMO[@]}"; do
+      printf "      ${BLUE}%s${WHITE}\n" "$item"
+    done
+    echo
   fi
-  
-  echo "wuzapi_port=${wuzapi_port}" >>$ARQUIVO_VARIAVEIS
+
+  local sugestao
+  sugestao=$(whatsmeow_proxima_porta_livre)
+  local porta_escolhida=""
+  while true; do
+    printf "${WHITE} >> Porta para ${BLUE}${empresa}${WHITE} [padrão: ${sugestao}]: \n"
+    read -r porta_escolhida
+    porta_escolhida="${porta_escolhida:-$sugestao}"
+    if ! [[ "$porta_escolhida" =~ ^[0-9]+$ ]] || [ "$porta_escolhida" -lt 1024 ] || [ "$porta_escolhida" -gt 65535 ]; then
+      printf "${RED} >> Porta inválida (1024-65535).${WHITE}\n\n"
+      continue
+    fi
+    if whatsmeow_porta_indisponivel "$porta_escolhida"; then
+      printf "${RED} >> Porta ${porta_escolhida} indisponível.${WHITE}\n\n"
+      sugestao=$(whatsmeow_proxima_porta_livre)
+      continue
+    fi
+    break
+  done
+
+  wuzapi_port="$porta_escolhida"
+  printf "${GREEN} >> Porta selecionada: ${wuzapi_port}${WHITE}\n"
+  salvar_variavel_instancia "wuzapi_port" "${wuzapi_port}"
   echo
   sleep 2
 }
@@ -208,14 +389,14 @@ configurar_nginx_whatsmeow() {
     whatsmeow_hostname=$(echo "${subdominio_whatsmeow}" | sed 's|https\?://||')
     sudo su - root <<EOF
 cat > /etc/nginx/sites-available/${empresa}-whatsmeow << END
-upstream api_whatsmeow {
+upstream api_whatsmeow_${empresa} {
         server 127.0.0.1:${wuzapi_port};
         keepalive 32;
     }
 server {
   server_name ${whatsmeow_hostname};
   location / {
-    proxy_pass http://api_whatsmeow;
+    proxy_pass http://api_whatsmeow_${empresa};
     proxy_http_version 1.1;
     proxy_set_header Upgrade \\\$http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -417,14 +598,15 @@ configurar_env_wuzapi() {
   printf "${WHITE} >> Configurando arquivo .env do wuzapi...\n"
   echo
   {
-    # Carregar variáveis necessárias
-    source $ARQUIVO_VARIAVEIS
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
     
-    # Gerar chaves de criptografia
     gerar_chaves_criptografia
     
-    # Limpar subdomínio (remover https:// se presente)
     subdominio_limpo=$(echo "${subdominio_whatsmeow}" | sed 's|https\?://||')
+    local db_user="wuzapi_${empresa}"
+    db_user="${db_user//[^a-zA-Z0-9_]}"
+    local db_name="$db_user"
     
     # Criar arquivo .env
     cat > /home/deploy/${empresa}/wuzapi/.env <<EOF
@@ -452,17 +634,17 @@ WEBHOOK_FORMAT=json
 SESSION_DEVICE_NAME=WuzAPI
 
 # Database configuration
-DB_USER=wuzapi
-DB_PASSWORD=wuzapi
-DB_NAME=wuzapi
+DB_USER=${db_user}
+DB_PASSWORD=${senha_deploy}
+DB_NAME=${db_name}
 DB_HOST=db
 DB_PORT=5432
 DB_SSLMODE=false
 TZ=America/Sao_Paulo
 
-# RabbitMQ configuration Optional
-RABBITMQ_URL=amqp://wuzapi:wuzapi@localhost:5672/%2F
-RABBITMQ_QUEUE=whatsapp_events
+# RabbitMQ configuration Optional (rede interna do compose)
+RABBITMQ_URL=amqp://${db_user}:${senha_deploy}@rabbitmq:5672/%2F
+RABBITMQ_QUEUE=whatsapp_events_${empresa}
 EOF
 
     printf "${GREEN} >> Arquivo .env do wuzapi configurado com sucesso!${WHITE}\n"
@@ -572,13 +754,17 @@ configurar_docker_compose() {
   printf "${WHITE} >> Configurando docker-compose.yml...\n"
   echo
   {
-    # Carregar variáveis necessárias
-    source $ARQUIVO_VARIAVEIS
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+    local db_user="wuzapi_${empresa}"
+    db_user="${db_user//[^a-zA-Z0-9_]}"
     
     # Criar arquivo docker-compose.yml
     cat > /home/deploy/${empresa}/wuzapi/docker-compose.yml <<DOCKERCOMPOSE
+name: ${WUZAPI_COMPOSE_PROJECT}
 services:
   wuzapi-server:
+    container_name: ${WUZAPI_COMPOSE_PROJECT}-server
     build:
       context: .
       dockerfile: Dockerfile
@@ -605,8 +791,8 @@ services:
       - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT:-json}
       - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME:-WuzAPI}
       # RabbitMQ configuration Optional
-      - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
-      - RABBITMQ_QUEUE=whatsapp_events
+      - RABBITMQ_URL=amqp://${db_user}:\${DB_PASSWORD}@rabbitmq:5672/
+      - RABBITMQ_QUEUE=whatsapp_events_${empresa}
     depends_on:
       db:
         condition: service_healthy
@@ -617,11 +803,12 @@ services:
     restart: always
 
   db:
+    container_name: ${WUZAPI_COMPOSE_PROJECT}-db
     image: postgres:16
     environment:
-      POSTGRES_USER: \${DB_USER:-wuzapi}
+      POSTGRES_USER: \${DB_USER:-${db_user}}
       POSTGRES_PASSWORD: \${DB_PASSWORD:-wuzapi}
-      POSTGRES_DB: \${DB_NAME:-wuzapi}
+      POSTGRES_DB: \${DB_NAME:-${db_user}}
     # ports:
     #   - "\${DB_PORT:-5432}:5432" # Uncomment to access the database directly from your host machine.
     volumes:
@@ -636,15 +823,14 @@ services:
     restart: always
 
   rabbitmq:
+    container_name: ${WUZAPI_COMPOSE_PROJECT}-rabbitmq
     image: rabbitmq:3-management
-    hostname: rabbitmq
+    hostname: rabbitmq-${empresa}
     environment:
-      RABBITMQ_DEFAULT_USER: wuzapi
-      RABBITMQ_DEFAULT_PASS: wuzapi
+      RABBITMQ_DEFAULT_USER: \${DB_USER:-${db_user}}
+      RABBITMQ_DEFAULT_PASS: \${DB_PASSWORD:-wuzapi}
       RABBITMQ_DEFAULT_VHOST: /
-    ports:
-      - "5672:5672" # AMQP port
-      - "15672:15672" # Management UI port
+    # Sem bind na host — evita conflito 5672/15672 entre instâncias
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -813,6 +999,7 @@ subir_containers_whatsmeow() {
     fi
     
     cd /home/deploy/${empresa}/wuzapi
+    docker_compose_cmd="$docker_compose_cmd -p ${WUZAPI_COMPOSE_PROJECT}"
     
     # Verificar conectividade antes do build
     printf "${WHITE} >> Verificando conectividade antes do build...\n"
@@ -977,6 +1164,7 @@ RESTARTBACKEND
 # Função principal
 main() {
   aviso_versao_pro
+  selecionar_instancia_whatsmeow
   carregar_variaveis
   verificar_instalacao_existente
   solicitar_subdominio_whatsmeow
@@ -994,8 +1182,8 @@ main() {
   reiniciar_servicos
   reiniciar_pm2_backend
   
-  # Carregar variáveis finais
-  source $ARQUIVO_VARIAVEIS
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
   
   # Limpar subdomínio para exibição
   subdominio_limpo=$(echo "${subdominio_whatsmeow}" | sed 's|https\?://||')

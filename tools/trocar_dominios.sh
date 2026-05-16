@@ -382,14 +382,14 @@ nginx_whatsmeow() {
   local host_wm="$1"
   local port_wm="${2:-$DEFAULT_WUZAPI_PORT}"
   cat > "/etc/nginx/sites-available/${empresa}-whatsmeow" << EOF
-upstream api_whatsmeow {
+upstream api_whatsmeow_${empresa} {
         server 127.0.0.1:${port_wm};
         keepalive 32;
     }
 server {
   server_name ${host_wm};
   location / {
-    proxy_pass http://api_whatsmeow;
+    proxy_pass http://api_whatsmeow_${empresa};
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection 'upgrade';
