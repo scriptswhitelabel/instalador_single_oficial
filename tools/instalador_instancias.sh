@@ -127,6 +127,26 @@ descomentar_env_redis_bull_ack() {
   printf "${GREEN} >> REDIS_URI_ACK / Bull Board adicionados ao .env (backend ${ver} >= 7.4.1).${WHITE}\n"
 }
 
+# Preserva dados digitados na sessão (Facebook, título, etc.) — carregar_variaveis_base não pode apagá-los
+__instancia_dados_guardados=0
+guardar_dados_instancia_sessao() {
+  __inst_fb_id="${facebook_app_id:-}"
+  __inst_fb_secret="${facebook_app_secret:-}"
+  __inst_nome_titulo="${nome_titulo:-}"
+  __inst_numero_suporte="${numero_suporte:-}"
+  __inst_senha_master="${senha_master:-}"
+  __instancia_dados_guardados=1
+}
+
+restaurar_dados_instancia_sessao() {
+  [ "${__instancia_dados_guardados}" = "1" ] || return 0
+  facebook_app_id="${__inst_fb_id}"
+  facebook_app_secret="${__inst_fb_secret}"
+  nome_titulo="${__inst_nome_titulo}"
+  numero_suporte="${__inst_numero_suporte}"
+  senha_master="${__inst_senha_master}"
+}
+
 # Carregar variáveis base (instalação principal)
 carregar_variaveis_base() {
   local base_file=""
@@ -142,6 +162,43 @@ carregar_variaveis_base() {
   if [ -n "$base_file" ]; then
   # shellcheck source=/dev/null
     source "$base_file"
+  fi
+  restaurar_dados_instancia_sessao
+}
+
+carregar_variaveis_instancia() {
+  local arquivo=""
+  local instalador_root
+  instalador_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -n "${nova_empresa}" ] && [ -f "${instalador_root}/VARIAVEIS_INSTALACAO_INSTANCIA_${nova_empresa}" ]; then
+    arquivo="${instalador_root}/VARIAVEIS_INSTALACAO_INSTANCIA_${nova_empresa}"
+  elif [ -n "${ARQUIVO_VARIAVEIS_INSTANCIA:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_INSTANCIA}" ]; then
+    arquivo="${ARQUIVO_VARIAVEIS_INSTANCIA}"
+  fi
+  if [ -n "$arquivo" ]; then
+    # shellcheck source=/dev/null
+    source "$arquivo"
+  fi
+  restaurar_dados_instancia_sessao
+}
+
+# Facebook da instalação principal (.env ou VARIAVEIS) quando a instância não informou
+preencher_facebook_da_base_se_vazio() {
+  local base_file env_principal empresa_base instalador_root
+  if [ -n "${facebook_app_id}" ] && [ -n "${facebook_app_secret}" ]; then
+    return 0
+  fi
+  instalador_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  base_file="${instalador_root}/${ARQUIVO_VARIAVEIS_BASE}"
+  if [ -f "$base_file" ]; then
+    empresa_base=$(grep -m1 '^empresa=' "$base_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -z "${facebook_app_id}" ] && facebook_app_id=$(grep -m1 '^facebook_app_id=' "$base_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -z "${facebook_app_secret}" ] && facebook_app_secret=$(grep -m1 '^facebook_app_secret=' "$base_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  fi
+  env_principal="/home/deploy/${empresa_base}/backend/.env"
+  if [ -f "$env_principal" ]; then
+    [ -z "${facebook_app_id}" ] && facebook_app_id=$(grep -m1 '^FACEBOOK_APP_ID=' "$env_principal" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -z "${facebook_app_secret}" ] && facebook_app_secret=$(grep -m1 '^FACEBOOK_APP_SECRET=' "$env_principal" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
   fi
 }
 
@@ -553,16 +610,31 @@ solicitar_dados_adicionais() {
   read -p "> " numero_suporte
   echo
   
-  # Facebook App ID
+  # Facebook — oferecer cópia da instalação principal
+  local fb_id_base="${facebook_app_id:-}"
+  local fb_secret_base="${facebook_app_secret:-}"
   banner
-  printf "${WHITE} >> Digite o FACEBOOK_APP_ID caso tenha:${WHITE}\n"
-  read -p "> " facebook_app_id
-  echo
-  
-  # Facebook App Secret
-  banner
-  printf "${WHITE} >> Digite o FACEBOOK_APP_SECRET caso tenha:${WHITE}\n"
-  read -p "> " facebook_app_secret
+  if [ -n "$fb_id_base" ] || [ -n "$fb_secret_base" ]; then
+    printf "${GREEN} >> Facebook na instalação principal:${WHITE}\n"
+    printf "      APP_ID: ${YELLOW}${fb_id_base:-'(vazio)'}${WHITE}\n"
+    printf "${WHITE} >> Usar os mesmos dados do Facebook? (S/N):${WHITE}\n"
+    read -p "> " usar_fb_base
+    usar_fb_base=$(echo "${usar_fb_base}" | tr '[:upper:]' '[:lower:]')
+    if [ "${usar_fb_base}" = "s" ]; then
+      facebook_app_id="$fb_id_base"
+      facebook_app_secret="$fb_secret_base"
+    else
+      printf "${WHITE} >> Digite o FACEBOOK_APP_ID (Enter para vazio):${WHITE}\n"
+      read -p "> " facebook_app_id
+      printf "${WHITE} >> Digite o FACEBOOK_APP_SECRET (Enter para vazio):${WHITE}\n"
+      read -p "> " facebook_app_secret
+    fi
+  else
+    printf "${WHITE} >> Digite o FACEBOOK_APP_ID caso tenha (Enter para vazio):${WHITE}\n"
+    read -p "> " facebook_app_id
+    printf "${WHITE} >> Digite o FACEBOOK_APP_SECRET caso tenha (Enter para vazio):${WHITE}\n"
+    read -p "> " facebook_app_secret
+  fi
   echo
   
   # Repositório - Carregar do arquivo base se existir
@@ -666,6 +738,7 @@ solicitar_dados_adicionais() {
     fi
   done
   echo
+  guardar_dados_instancia_sessao
 }
 
 # Salvar variáveis da nova instância
@@ -1365,7 +1438,9 @@ instala_backend_instancia() {
   
   {
     sleep 2
+    carregar_variaveis_instancia
     carregar_variaveis_base
+    preencher_facebook_da_base_se_vazio
     if [ "${ALTA_PERFORMANCE}" = "1" ]; then
       db_host_nova="127.0.0.1"
       db_port_nova="6732"
@@ -1684,6 +1759,8 @@ FRONTENDINSTALL
     subdominio_backend_clean=$(echo "${nova_subdominio_backend/https:\/\//}")
     subdominio_backend_clean=${subdominio_backend_clean%%/*}
     subdominio_backend_final=https://${subdominio_backend_clean}
+    carregar_variaveis_instancia
+    preencher_facebook_da_base_se_vazio
     
     sudo su - deploy <<EOF
   cat <<[-]EOF > /home/deploy/${nova_empresa}/frontend/.env
@@ -2020,6 +2097,8 @@ main() {
   
   verificar_dns_instancia
   
+  restaurar_dados_instancia_sessao
+  preencher_facebook_da_base_se_vazio
   salvar_variaveis_instancia
   verificar_e_instalar_docker
   instalar_redis_docker
