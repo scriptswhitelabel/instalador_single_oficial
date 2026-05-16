@@ -933,7 +933,11 @@ importar_backup_banco_api_oficial_ferramentas() {
   fi
   printf "${WHITE} >> Backup selecionado: %s${WHITE}\n" "$(basename "$arquivo_escolhido")"
   echo
-  local db_oficial="oficialseparado"
+  local db_oficial=""
+  if [ -f "/home/deploy/${empresa}/api_oficial/.env" ]; then
+    db_oficial=$(grep -m1 '^DATABASE_NAME=' "/home/deploy/${empresa}/api_oficial/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  fi
+  [ -z "$db_oficial" ] && db_oficial="oficialseparado"
   printf "${YELLOW} >> Deseja apagar o banco da API Oficial existente ou criar um novo?${WHITE}\n"
   printf "   [${BLUE}1${WHITE}] Apagar banco existente e restaurar (substitui o banco ${db_oficial})\n"
   printf "   [${BLUE}2${WHITE}] Criar novo banco e restaurar (mantém o existente, cria ${db_oficial}_novo)\n"

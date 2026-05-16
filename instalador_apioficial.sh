@@ -208,6 +208,149 @@ carregar_variaveis() {
   fi
 }
 
+# Instância adicional: oficial<empresa> | instalação principal: oficialseparado (legado)
+apioficial_nome_banco() {
+  local emp="${1:-${empresa:-}}"
+  emp="${emp//[^a-zA-Z0-9_]}"
+  if [[ "${ARQUIVO_VARIAVEIS:-}" == *VARIAVEIS_INSTALACAO_INSTANCIA_* ]] && [ -n "$emp" ]; then
+    printf 'oficial%s' "$emp"
+    return 0
+  fi
+  if [ -n "${apioficial_db_name:-}" ]; then
+    printf '%s' "${apioficial_db_name}"
+    return 0
+  fi
+  printf 'oficialseparado'
+}
+
+apioficial_definir_nome_banco() {
+  API_OFICIAL_DB_NAME="$(apioficial_nome_banco)"
+  if [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    if grep -q '^apioficial_db_name=' "$ARQUIVO_VARIAVEIS" 2>/dev/null; then
+      sed -i "s/^apioficial_db_name=.*/apioficial_db_name=${API_OFICIAL_DB_NAME}/" "$ARQUIVO_VARIAVEIS"
+    else
+      echo "apioficial_db_name=${API_OFICIAL_DB_NAME}" >>"$ARQUIVO_VARIAVEIS"
+    fi
+  fi
+}
+
+# Portas já usadas por outras instâncias (api_oficial/.env)
+apioficial_coletar_portas_em_uso() {
+  API_OFICIAL_PORTAS_EM_USO=()
+  API_OFICIAL_PORTAS_RESUMO=()
+  local env_file emp port
+  for env_file in /home/deploy/*/api_oficial/.env; do
+    [ -f "$env_file" ] || continue
+    emp=$(basename "$(dirname "$(dirname "$env_file")")")
+    [ "$emp" = "${empresa:-}" ] && continue
+    port="$(obter_valor_env "$env_file" "PORT" || true)"
+    [ -z "$port" ] && continue
+    API_OFICIAL_PORTAS_EM_USO+=("$port")
+    API_OFICIAL_PORTAS_RESUMO+=("${emp}:${port}")
+  done
+}
+
+apioficial_porta_em_listen() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH 2>/dev/null | grep -qE ":${port}([[:space:]]|$)"
+    return $?
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -tln 2>/dev/null | grep -qE ":${port}[[:space:]]"
+    return $?
+  fi
+  return 1
+}
+
+apioficial_porta_indisponivel() {
+  local port="$1"
+  local p
+  for p in "${API_OFICIAL_PORTAS_EM_USO[@]}"; do
+    [ "$p" = "$port" ] && return 0
+  done
+  apioficial_porta_em_listen "$port"
+}
+
+apioficial_proxima_porta_livre() {
+  local p=6000
+  while [ "$p" -le 65535 ] && apioficial_porta_indisponivel "$p"; do
+    p=$((p + 1))
+  done
+  printf '%s' "$p"
+}
+
+apioficial_deve_solicitar_porta() {
+  apioficial_coletar_portas_em_uso
+  local total_inst=${#INSTANCIAS_DETECTADAS[@]}
+  if [ "$total_inst" -gt 1 ]; then
+    return 0
+  fi
+  if [ ${#API_OFICIAL_PORTAS_EM_USO[@]} -gt 0 ]; then
+    return 0
+  fi
+  if [[ "${ARQUIVO_VARIAVEIS:-}" == *VARIAVEIS_INSTALACAO_INSTANCIA_* ]]; then
+    return 0
+  fi
+  if apioficial_porta_em_listen 6000; then
+    return 0
+  fi
+  return 1
+}
+
+solicitar_porta_apioficial() {
+  if ! apioficial_deve_solicitar_porta; then
+    default_apioficial_port=6000
+    return 0
+  fi
+
+  banner
+  printf "${WHITE} >> Porta HTTP da API Oficial (PM2 escuta em 127.0.0.1:PORTA)\n"
+  echo
+  if [ ${#API_OFICIAL_PORTAS_RESUMO[@]} -gt 0 ]; then
+    printf "${YELLOW} >> Portas já usadas por outra(s) API Oficial:${WHITE}\n"
+    local item
+    for item in "${API_OFICIAL_PORTAS_RESUMO[@]}"; do
+      printf "      ${BLUE}%s${WHITE}\n" "$item"
+    done
+    echo
+  fi
+  if apioficial_porta_em_listen 6000 && [[ " ${API_OFICIAL_PORTAS_EM_USO[*]} " != *" 6000 "* ]]; then
+    printf "${YELLOW} >> A porta 6000 já está em uso no servidor (outro processo).${WHITE}\n\n"
+  fi
+
+  local sugestao
+  sugestao=$(apioficial_proxima_porta_livre)
+  local porta_escolhida=""
+  while true; do
+    printf "${WHITE} >> Informe a porta para ${BLUE}${empresa}${WHITE} [padrão: ${sugestao}]: \n"
+    read -r porta_escolhida
+    porta_escolhida="${porta_escolhida:-$sugestao}"
+    if ! [[ "$porta_escolhida" =~ ^[0-9]+$ ]] || [ "$porta_escolhida" -lt 1024 ] || [ "$porta_escolhida" -gt 65535 ]; then
+      printf "${RED} >> Porta inválida. Use um número entre 1024 e 65535.${WHITE}\n\n"
+      continue
+    fi
+    if apioficial_porta_indisponivel "$porta_escolhida"; then
+      printf "${RED} >> Porta ${porta_escolhida} indisponível (outra API Oficial ou processo já escutando).${WHITE}\n\n"
+      sugestao=$(apioficial_proxima_porta_livre)
+      continue
+    fi
+    break
+  done
+
+  default_apioficial_port="$porta_escolhida"
+  printf "\n${GREEN} >> Porta selecionada: ${BLUE}${default_apioficial_port}${WHITE}\n\n"
+  sleep 1
+
+  if [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    if grep -q '^apioficial_port=' "$ARQUIVO_VARIAVEIS" 2>/dev/null; then
+      sed -i "s/^apioficial_port=.*/apioficial_port=${default_apioficial_port}/" "$ARQUIVO_VARIAVEIS"
+    else
+      echo "apioficial_port=${default_apioficial_port}" >>"$ARQUIVO_VARIAVEIS"
+    fi
+  fi
+}
+
 # Solicitar dados do subdomínio da API Oficial
 solicitar_dados_apioficial() {
   banner
@@ -275,14 +418,14 @@ configurar_nginx_apioficial() {
     oficial_hostname=$(echo "${subdominio_oficial/https:\/\//}")
     sudo su - root <<EOF
 cat > /etc/nginx/sites-available/${empresa}-oficial << 'END'
-upstream oficial {
+upstream oficial_${empresa} {
         server 127.0.0.1:${default_apioficial_port};
         keepalive 32;
     }
 server {
   server_name ${oficial_hostname};
   location / {
-    proxy_pass http://oficial;
+    proxy_pass http://oficial_${empresa};
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -319,7 +462,8 @@ EOF
 # Criar banco de dados para API Oficial
 criar_banco_apioficial() {
   banner
-  printf "${WHITE} >> Criando banco de dados para API Oficial...\n"
+  apioficial_definir_nome_banco
+  printf "${WHITE} >> Criando banco de dados para API Oficial (${API_OFICIAL_DB_NAME})...\n"
   echo
   {
     carregar_config_banco_backend
@@ -347,13 +491,13 @@ criar_banco_apioficial() {
     export PGPASSWORD="${DB_PASS_APIOFICIAL}"
     printf "${WHITE} >> Conectando em ${pg_host}:${DB_PORT_APIOFICIAL} (timeout ${PGCONNECT_TIMEOUT}s)...\n"
 
-    psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE oficialseparado;" 2>/dev/null || true
-    if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d oficialseparado -c "SELECT 1;" >/dev/null 2>&1; then
+    psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d postgres -c "CREATE DATABASE \"${API_OFICIAL_DB_NAME}\";" 2>/dev/null || true
+    if ! psql -h "${pg_host}" -p "${DB_PORT_APIOFICIAL}" -U "${DB_USER_APIOFICIAL}" -d "${API_OFICIAL_DB_NAME}" -c "SELECT 1;" >/dev/null 2>&1; then
       unset PGPASSWORD PGCONNECT_TIMEOUT
-      trata_erro "criar_banco_apioficial (Postgres ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} — confira porta publicada do container, usuário com CREATEDB ou banco já existente oficialseparado)"
+      trata_erro "criar_banco_apioficial (Postgres ${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL} — confira porta publicada do container, usuário com CREATEDB ou banco já existente ${API_OFICIAL_DB_NAME})"
     fi
     unset PGPASSWORD PGCONNECT_TIMEOUT
-    printf "${GREEN} >> Banco de dados 'oficialseparado' criado/configurado com sucesso!${WHITE}\n"
+    printf "${GREEN} >> Banco de dados '${API_OFICIAL_DB_NAME}' criado/configurado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "criar_banco_apioficial"
 }
@@ -364,6 +508,7 @@ configurar_env_apioficial() {
   printf "${WHITE} >> Configurando arquivo .env da API Oficial...\n"
   echo
   {
+    apioficial_definir_nome_banco
     # Carregar variáveis necessárias
     # shellcheck source=/dev/null
     source "$ARQUIVO_VARIAVEIS"
@@ -387,12 +532,12 @@ configurar_env_apioficial() {
     
     # Criar arquivo .env
     cat > /home/deploy/${empresa}/api_oficial/.env <<EOF
-DATABASE_LINK=postgresql://${DB_USER_APIOFICIAL}:${DB_PASS_APIOFICIAL}@${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL}/oficialseparado?schema=public
+DATABASE_LINK=postgresql://${DB_USER_APIOFICIAL}:${DB_PASS_APIOFICIAL}@${DB_HOST_APIOFICIAL}:${DB_PORT_APIOFICIAL}/${API_OFICIAL_DB_NAME}?schema=public
 DATABASE_URL=${DB_HOST_APIOFICIAL}
 DATABASE_PORT=${DB_PORT_APIOFICIAL}
 DATABASE_USER=${DB_USER_APIOFICIAL}
 DATABASE_PASSWORD=${DB_PASS_APIOFICIAL}
-DATABASE_NAME=oficialseparado
+DATABASE_NAME=${API_OFICIAL_DB_NAME}
 TOKEN_ADMIN=adminpro
 URL_BACKEND_MULT100=${backend_url}
 REDIS_URI=${REDIS_URI_APIOFICIAL}
@@ -486,6 +631,7 @@ EOF
 main() {
   selecionar_instancia_apioficial
   carregar_variaveis
+  solicitar_porta_apioficial
   solicitar_dados_apioficial
   verificar_dns_apioficial
   configurar_nginx_apioficial
@@ -498,8 +644,10 @@ main() {
   banner
   printf "${GREEN} >> Instalação da API Oficial concluída com sucesso!${WHITE}\n"
   echo
+  apioficial_definir_nome_banco
   printf "${WHITE} >> API Oficial disponível em: ${YELLOW}https://${subdominio_oficial}${WHITE}\n"
   printf "${WHITE} >> Porta da API Oficial: ${YELLOW}${default_apioficial_port}${WHITE}\n"
+  printf "${WHITE} >> Banco PostgreSQL: ${YELLOW}${API_OFICIAL_DB_NAME}${WHITE}\n"
   echo
   sleep 5
 }
