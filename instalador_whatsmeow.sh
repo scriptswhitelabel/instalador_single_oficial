@@ -14,7 +14,11 @@ INSTALADOR_DIR="$SCRIPT_DIR"
 ARQUIVO_VARIAVEIS=""
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 default_wuzapi_port=8090
+default_rabbitmq_amqp_port=5672
+default_rabbitmq_mgmt_port=15672
 WUZAPI_COMPOSE_PROJECT=""
+wuzapi_rabbit_amqp_port="${default_rabbitmq_amqp_port}"
+wuzapi_rabbit_mgmt_port="${default_rabbitmq_mgmt_port}"
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -214,6 +218,104 @@ whatsmeow_proxima_porta_livre() {
     p=$((p + 1))
   done
   printf '%s' "$p"
+}
+
+whatsmeow_docker_publica_porta_host() {
+  local port="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(0\.0\.0\.0|127\.0\.0\.1|\[::\]):${port}->"
+}
+
+whatsmeow_coletar_portas_rabbit_registradas() {
+  WHATSMEOW_RABBIT_AMQP_USADAS=()
+  WHATSMEOW_RABBIT_MGMT_USADAS=()
+  local env_file emp amqp mgmt
+  for env_file in /home/deploy/*/wuzapi/.env; do
+    [ -f "$env_file" ] || continue
+    emp=$(basename "$(dirname "$(dirname "$env_file")")")
+    [ "$emp" = "${empresa:-}" ] && continue
+    amqp=$(grep -m1 '^RABBITMQ_AMQP_PORT=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    mgmt=$(grep -m1 '^RABBITMQ_MGMT_PORT=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -n "$amqp" ] && WHATSMEOW_RABBIT_AMQP_USADAS+=("$amqp")
+    [ -n "$mgmt" ] && WHATSMEOW_RABBIT_MGMT_USADAS+=("$mgmt")
+  done
+}
+
+whatsmeow_rabbit_porta_na_lista() {
+  local port="$1"
+  shift
+  local p
+  for p in "$@"; do
+    [ "$p" = "$port" ] && return 0
+  done
+  return 1
+}
+
+whatsmeow_rabbit_portas_host_ocupadas() {
+  local amqp="$1"
+  local mgmt="$2"
+  whatsmeow_porta_em_listen "$amqp" && return 0
+  whatsmeow_porta_em_listen "$mgmt" && return 0
+  whatsmeow_docker_publica_porta_host "$amqp" && return 0
+  whatsmeow_docker_publica_porta_host "$mgmt" && return 0
+  whatsmeow_rabbit_porta_na_lista "$amqp" "${WHATSMEOW_RABBIT_AMQP_USADAS[@]}" && return 0
+  whatsmeow_rabbit_porta_na_lista "$mgmt" "${WHATSMEOW_RABBIT_MGMT_USADAS[@]}" && return 0
+  return 1
+}
+
+whatsmeow_ha_rabbitmq_rodando() {
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Image}}' 2>/dev/null | grep -qi 'rabbitmq'; then
+      return 0
+    fi
+  fi
+  whatsmeow_porta_em_listen "$default_rabbitmq_amqp_port" && return 0
+  whatsmeow_porta_em_listen "$default_rabbitmq_mgmt_port" && return 0
+  return 1
+}
+
+# Escolhe portas AMQP/management no host (5672/15672, 5673/15673, ...) sem conflito
+whatsmeow_definir_portas_rabbit() {
+  banner
+  printf "${WHITE} >> Definindo portas do RabbitMQ no host (evitar conflito entre instâncias)...\n"
+  echo
+
+  # shellcheck source=/dev/null
+  [ -n "$ARQUIVO_VARIAVEIS" ] && [ -f "$ARQUIVO_VARIAVEIS" ] && source "$ARQUIVO_VARIAVEIS"
+
+  if [ -f "/home/deploy/${empresa}/wuzapi/.env" ]; then
+    local amqp_ex mgmt_ex
+    amqp_ex=$(grep -m1 '^RABBITMQ_AMQP_PORT=' "/home/deploy/${empresa}/wuzapi/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    mgmt_ex=$(grep -m1 '^RABBITMQ_MGMT_PORT=' "/home/deploy/${empresa}/wuzapi/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    if [ -n "$amqp_ex" ] && [ -n "$mgmt_ex" ]; then
+      wuzapi_rabbit_amqp_port="$amqp_ex"
+      wuzapi_rabbit_mgmt_port="$mgmt_ex"
+      printf "${GREEN} >> Reutilizando portas já configuradas: AMQP ${wuzapi_rabbit_amqp_port} | Management ${wuzapi_rabbit_mgmt_port}${WHITE}\n\n"
+      sleep 1
+      return 0
+    fi
+  fi
+
+  whatsmeow_coletar_portas_rabbit_registradas
+  wuzapi_rabbit_amqp_port=$default_rabbitmq_amqp_port
+  wuzapi_rabbit_mgmt_port=$default_rabbitmq_mgmt_port
+
+  if whatsmeow_ha_rabbitmq_rodando; then
+    printf "${YELLOW} >> RabbitMQ já detectado no servidor (container ou porta ${default_rabbitmq_amqp_port}/${default_rabbitmq_mgmt_port}).${WHITE}\n"
+  fi
+
+  while whatsmeow_rabbit_portas_host_ocupadas "$wuzapi_rabbit_amqp_port" "$wuzapi_rabbit_mgmt_port"; do
+    printf "${WHITE} >> Portas ${wuzapi_rabbit_amqp_port}/${wuzapi_rabbit_mgmt_port} ocupadas — tentando próximo par...${WHITE}\n"
+    wuzapi_rabbit_amqp_port=$((wuzapi_rabbit_amqp_port + 1))
+    wuzapi_rabbit_mgmt_port=$((wuzapi_rabbit_mgmt_port + 1))
+  done
+
+  salvar_variavel_instancia "wuzapi_rabbit_amqp_port" "${wuzapi_rabbit_amqp_port}"
+  salvar_variavel_instancia "wuzapi_rabbit_mgmt_port" "${wuzapi_rabbit_mgmt_port}"
+
+  printf "${GREEN} >> RabbitMQ no host: AMQP ${BLUE}${wuzapi_rabbit_amqp_port}${GREEN} → container 5672 | Management ${BLUE}${wuzapi_rabbit_mgmt_port}${GREEN} → 15672${WHITE}\n"
+  echo
+  sleep 1
 }
 
 salvar_variavel_instancia() {
@@ -642,7 +744,9 @@ DB_PORT=5432
 DB_SSLMODE=false
 TZ=America/Sao_Paulo
 
-# RabbitMQ configuration Optional (rede interna do compose)
+# RabbitMQ (host publicado; URL interna usa hostname rabbitmq:5672 no compose)
+RABBITMQ_AMQP_PORT=${wuzapi_rabbit_amqp_port}
+RABBITMQ_MGMT_PORT=${wuzapi_rabbit_mgmt_port}
 RABBITMQ_URL=amqp://${db_user}:${senha_deploy}@rabbitmq:5672/%2F
 RABBITMQ_QUEUE=whatsapp_events_${empresa}
 EOF
@@ -830,7 +934,9 @@ services:
       RABBITMQ_DEFAULT_USER: \${DB_USER:-${db_user}}
       RABBITMQ_DEFAULT_PASS: \${DB_PASSWORD:-wuzapi}
       RABBITMQ_DEFAULT_VHOST: /
-    # Sem bind na host — evita conflito 5672/15672 entre instâncias
+    ports:
+      - "${wuzapi_rabbit_amqp_port}:5672"
+      - "${wuzapi_rabbit_mgmt_port}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -1216,6 +1322,7 @@ main() {
   verificar_e_instalar_docker
   verificar_e_corrigir_dns
   corrigir_dockerfile_wuzapi
+  whatsmeow_definir_portas_rabbit
   configurar_env_wuzapi
   configurar_docker_compose
   atualizar_env_backend
@@ -1241,6 +1348,8 @@ main() {
   echo
   printf "${WHITE}   📚 Para consultar os endpoints da API, acesse:${WHITE}\n"
   printf "${YELLOW}   https://${subdominio_limpo}/api${WHITE}\n"
+  echo
+  printf "${WHITE}   🐰 RabbitMQ (host): AMQP ${YELLOW}${wuzapi_rabbit_amqp_port}${WHITE} | Management ${YELLOW}${wuzapi_rabbit_mgmt_port}${WHITE}\n"
   echo
   printf "${GREEN}══════════════════════════════════════════════════════════════════${WHITE}\n"
   echo
