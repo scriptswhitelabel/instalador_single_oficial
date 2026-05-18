@@ -203,6 +203,105 @@ selecionar_instancia_atualizar() {
   fi
 }
 
+# Versões (tools/versoes_multiflow_pro.conf — mesma lista da instalação / atualização completa)
+definir_versoes_instalacao() {
+  local _mf_loader
+  _mf_loader="${INSTALADOR_DIR}/tools/carregar_versoes_multiflow_pro.sh"
+  # shellcheck source=/dev/null
+  source "$_mf_loader" || true
+  if ! mf_carregar_versoes_no_array "VERSOES_INSTALACAO"; then
+    printf "${RED} >> ERRO: não foi possível carregar versões. Verifique tools/versoes_multiflow_pro.conf (formato: versao|commit).${WHITE}\n"
+    return 1
+  fi
+  return 0
+}
+
+mostrar_lista_versoes_instalacao() {
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  VERSÕES DISPONÍVEIS %s\n" "${TITULO_LISTA_VERSOES:-PARA ATUALIZAÇÃO}"
+  printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+
+  printf "${BLUE}  [0]${WHITE} Mais Recente${WHITE}\n"
+  printf "      Usa a última revisão da branch oficial do repositório\n"
+  echo
+
+  local index=1
+  for versao in $(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r); do
+    printf "${BLUE}  [$index]${WHITE} Versão ${GREEN}${versao}${WHITE}\n"
+    printf "      Commit: ${YELLOW}${VERSOES_INSTALACAO[$versao]}${WHITE}\n"
+    echo
+    ((index++))
+  done
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+}
+
+selecionar_versao_atualizacao() {
+  banner
+  printf "${WHITE} >> Selecionando versão para atualização FAST...\n"
+  echo
+
+  if ! echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    declare -g versao_atualizacao="Mais_Recente"
+    declare -g commit_atualizacao=""
+    printf "${GREEN} >> Atualização padrão: branch principal do repositório.${WHITE}\n"
+    echo
+    sleep 1
+    return 0
+  fi
+
+  if ! definir_versoes_instalacao; then
+    sleep 2
+    return 1
+  fi
+
+  TITULO_LISTA_VERSOES="PARA ATUALIZAÇÃO FAST"
+  mostrar_lista_versoes_instalacao
+  unset TITULO_LISTA_VERSOES
+
+  local versoes_array=($(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r))
+  local total_versoes=${#versoes_array[@]}
+
+  if [ "$total_versoes" -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma versão disponível na lista.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  printf "${YELLOW} >> Selecione a versão desejada (0-${total_versoes}):${WHITE}\n"
+  read -p "> " ESCOLHA_ATUALIZACAO
+
+  if ! [[ "$ESCOLHA_ATUALIZACAO" =~ ^[0-9]+$ ]]; then
+    printf "${RED} >> ERRO: Entrada inválida. Digite um número.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  if [ "$ESCOLHA_ATUALIZACAO" -lt 0 ] || [ "$ESCOLHA_ATUALIZACAO" -gt "$total_versoes" ]; then
+    printf "${RED} >> ERRO: Opção inválida. Escolha um número entre 0 e ${total_versoes}.\n${WHITE}"
+    sleep 2
+    return 1
+  fi
+
+  if [ "$ESCOLHA_ATUALIZACAO" -eq 0 ]; then
+    declare -g versao_atualizacao="Mais_Recente"
+    declare -g commit_atualizacao=""
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE}\n"
+    printf "${GREEN} >> Será usada a última revisão da branch MULTI100-OFICIAL-u21${WHITE}\n"
+  else
+    local index=$((ESCOLHA_ATUALIZACAO - 1))
+    declare -g versao_atualizacao="${versoes_array[$index]}"
+    declare -g commit_atualizacao="${VERSOES_INSTALACAO[$versao_atualizacao]}"
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}${versao_atualizacao}${WHITE}\n"
+    printf "${GREEN} >> Commit: ${BLUE}${commit_atualizacao}${WHITE}\n"
+  fi
+  echo
+  sleep 2
+  return 0
+}
+
 # Carregar variáveis
 dummy_carregar_variaveis() {
   if [ -f $ARQUIVO_VARIAVEIS ]; then
@@ -230,8 +329,8 @@ backup_app_atualizar() {
     if mf_backup_banco_empresa "${empresa}"; then
       printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO}\n"
     else
-      printf "${RED} >> Falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
-      exit 1
+      printf "${YELLOW} >> Aviso: falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
+      printf "${YELLOW} >> A atualização FAST continuará sem backup do banco.${WHITE}\n"
     fi
     sleep 2
   } || trata_erro "backup_app_atualizar"
@@ -673,27 +772,43 @@ printf "${WHITE} >> Atualizando Backend...\n"
 echo
 cd /home/deploy/${empresa}
 
-# fetch + limpeza; em seguida alinhar à branch oficial em origin (evita "no tracking information" após rollback)
-git fetch --all --prune 2>/dev/null || git fetch origin 2>/dev/null || true
+# fetch + limpeza; depois commit fixo ou branch oficial
+git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
 git reset --hard
 printf "${WHITE} >> Removendo arquivos/pastas não rastreados que bloqueiam a atualização (git clean -fd)...${WHITE}\n"
 git clean -fd
 
-DEPLOY_BRANCH=""
-if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
-  DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
-elif git show-ref --verify --quiet refs/remotes/origin/main; then
-  DEPLOY_BRANCH="main"
-elif git show-ref --verify --quiet refs/remotes/origin/master; then
-  DEPLOY_BRANCH="master"
+if [ -n "${commit_atualizacao}" ]; then
+  printf "${WHITE} >> Atualizando FAST para versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
+  if ! git cat-file -e "${commit_atualizacao}^{commit}" 2>/dev/null; then
+    echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch. Verifique a lista de versões."
+    exit 1
+  fi
+  _BR_ATU="atualizacao-fast-${versao_atualizacao}-\$(date +%Y%m%d-%H%M%S)"
+  git checkout -f "${commit_atualizacao}" 2>/dev/null
+  git checkout -b "\$_BR_ATU" 2>/dev/null || { git branch "\$_BR_ATU" 2>/dev/null; git checkout "\$_BR_ATU"; }
+  _HEAD_ATU=\$(git rev-parse HEAD 2>/dev/null)
+  if [ "\$_HEAD_ATU" != "${commit_atualizacao}" ]; then
+    echo "ERRO: Checkout falhou. Esperado ${commit_atualizacao}, atual \$_HEAD_ATU"
+    exit 1
+  fi
+else
+  DEPLOY_BRANCH=""
+  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+    DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    DEPLOY_BRANCH="main"
+  elif git show-ref --verify --quiet refs/remotes/origin/master; then
+    DEPLOY_BRANCH="master"
+  fi
+  if [ -z "\$DEPLOY_BRANCH" ]; then
+    echo "ERRO: Nenhuma branch remota conhecida em origin (MULTI100-OFICIAL-u21, main ou master). Verifique o clone e o remote."
+    exit 1
+  fi
+  printf "${WHITE} >> Sincronizando código com origin/\$DEPLOY_BRANCH (Mais Recente)...${WHITE}\n"
+  git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
+  git reset --hard "origin/\$DEPLOY_BRANCH"
 fi
-if [ -z "\$DEPLOY_BRANCH" ]; then
-  echo "ERRO: Nenhuma branch remota conhecida em origin (MULTI100-OFICIAL-u21, main ou master). Verifique o clone e o remote."
-  exit 1
-fi
-printf "${WHITE} >> Sincronizando código com origin/\$DEPLOY_BRANCH (ignora branch local sem upstream, ex.: rollback)...${WHITE}\n"
-git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
-git reset --hard "origin/\$DEPLOY_BRANCH"
 
 cd /home/deploy/${empresa}/backend
 # npm prune --force > /dev/null 2>&1
@@ -815,6 +930,11 @@ done
 # Verificar e selecionar instância para atualizar
 if ! selecionar_instancia_atualizar; then
   printf "${RED} >> Erro ao selecionar instância. Encerrando script...${WHITE}\n"
+  exit 1
+fi
+
+if ! selecionar_versao_atualizacao; then
+  printf "${RED} >> Atualização FAST cancelada.${WHITE}\n"
   exit 1
 fi
 
