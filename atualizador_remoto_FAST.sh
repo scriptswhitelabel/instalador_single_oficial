@@ -312,6 +312,30 @@ dummy_carregar_variaveis() {
   fi
 }
 
+carregar_credenciais_instancia() {
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}"
+  fi
+}
+
+# Multiflow-pro: TOKEN_GITHUB no package.json (baileys) — o git checkout restaura o placeholder
+aplicar_token_baileys_package_json() {
+  local emp="${1:-$empresa}"
+  local tok="${2:-$github_token}"
+  local repo="${3:-$repo_url}"
+  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  [ -z "$tok" ] && return 1
+  local pkg="/home/deploy/${emp}/backend/package.json"
+  [ ! -f "$pkg" ] && return 1
+  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
+  local tok_sed="${tok//&/\\&}"
+  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+  chown deploy:deploy "$pkg" 2>/dev/null || true
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  return 0
+}
+
 # Funções de atualização
 backup_app_atualizar() {
   # Verifica se a variável empresa está definida
@@ -762,31 +786,40 @@ baixa_codigo_atualizar() {
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
 
+  carregar_credenciais_instancia
+
   exportar_vars_frontend_env_seguro
   frontend_port=$(grep -m1 '^SERVER_PORT=' "/home/deploy/${empresa}/frontend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
   frontend_port=${frontend_port:-3000}
   ativar_tela_atualizacao_frontend
   if ! sudo su - deploy <<EOF
 set -e
-printf "${WHITE} >> Atualizando Backend...\n"
+if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+  . /root/instalador_single_oficial/tools/path_node_deploy.sh
+else
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  fi
+fi
+
+printf "${WHITE} >> Atualizando código (git)...\n"
 echo
 cd /home/deploy/${empresa}
 
-# fetch + limpeza; depois commit fixo ou branch oficial
 git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
-git reset --hard
-printf "${WHITE} >> Removendo arquivos/pastas não rastreados que bloqueiam a atualização (git clean -fd)...${WHITE}\n"
-git clean -fd
 
 if [ -n "${commit_atualizacao}" ]; then
-  printf "${WHITE} >> Atualizando FAST para versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
+  printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
   if ! git cat-file -e "${commit_atualizacao}^{commit}" 2>/dev/null; then
-    echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch. Verifique a lista de versões."
+    echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch."
     exit 1
   fi
   _BR_ATU="atualizacao-fast-${versao_atualizacao}-\$(date +%Y%m%d-%H%M%S)"
-  git checkout -f "${commit_atualizacao}" 2>/dev/null
-  git checkout -b "\$_BR_ATU" 2>/dev/null || { git branch "\$_BR_ATU" 2>/dev/null; git checkout "\$_BR_ATU"; }
+  git checkout -f "${commit_atualizacao}"
+  git reset --hard "${commit_atualizacao}"
+  git clean -fd
+  git checkout -b "\$_BR_ATU" 2>/dev/null || git checkout "\$_BR_ATU"
   _HEAD_ATU=\$(git rev-parse HEAD 2>/dev/null)
   if [ "\$_HEAD_ATU" != "${commit_atualizacao}" ]; then
     echo "ERRO: Checkout falhou. Esperado ${commit_atualizacao}, atual \$_HEAD_ATU"
@@ -802,36 +835,55 @@ else
     DEPLOY_BRANCH="master"
   fi
   if [ -z "\$DEPLOY_BRANCH" ]; then
-    echo "ERRO: Nenhuma branch remota conhecida em origin (MULTI100-OFICIAL-u21, main ou master). Verifique o clone e o remote."
+    echo "ERRO: Nenhuma branch remota conhecida em origin."
     exit 1
   fi
-  printf "${WHITE} >> Sincronizando código com origin/\$DEPLOY_BRANCH (Mais Recente)...${WHITE}\n"
+  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (Mais Recente)...${WHITE}\n"
   git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
   git reset --hard "origin/\$DEPLOY_BRANCH"
+  git clean -fd
 fi
 
 cd /home/deploy/${empresa}/backend
-# npm prune --force > /dev/null 2>&1
-# export PUPPETEER_SKIP_DOWNLOAD=true
-# rm -r node_modules
-# rm package-lock.json
-# npm install --force
-# npm install puppeteer-core --force
-# npm i glob
-# npm install jimp@^1.6.0
+if [ ! -f package.json ]; then
+  echo "ERRO: package.json não encontrado no backend."
+  exit 1
+fi
+
+if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    if [ -z "${github_token}" ]; then
+      echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+      exit 1
+    fi
+    sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
+    echo " >> Token GitHub aplicado no package.json (Baileys)."
+  fi
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
+    exit 1
+  fi
+fi
+
+printf "${WHITE} >> npm install no backend (sem remover node_modules — FAST)...\n"
+export PUPPETEER_SKIP_DOWNLOAD=true
+npm install --prefer-offline 2>/dev/null || npm install
+
+printf "${WHITE} >> Build do backend...\n"
 npm run build
 sleep 2
-printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
-echo
+
+printf "${WHITE} >> Migrations do banco (sequelize db:migrate)...\n"
+if ! npx sequelize db:migrate; then
+  echo "ERRO: sequelize db:migrate falhou. Verifique logs acima."
+  exit 1
+fi
 sleep 2
-npx sequelize db:migrate
-sleep 2
+
 printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
 echo
-sleep 2
 cd /home/deploy/${empresa}/frontend
-# npm prune --force > /dev/null 2>&1
-# npm install --force
+npm install --prefer-offline 2>/dev/null || npm install
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 rm -rf .build_nova
 build_ok=0
@@ -936,6 +988,12 @@ fi
 if ! selecionar_versao_atualizacao; then
   printf "${RED} >> Atualização FAST cancelada.${WHITE}\n"
   exit 1
+fi
+
+carregar_credenciais_instancia
+if echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -z "${github_token:-}" ]; then
+  printf "${YELLOW} >> Aviso: github_token não definido — o Baileys no package.json pode falhar no npm install.${WHITE}\n"
+  sleep 2
 fi
 
 backup_app_atualizar
