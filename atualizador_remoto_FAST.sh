@@ -867,7 +867,9 @@ fi
 
 printf "${WHITE} >> npm install no backend (sem remover node_modules — FAST)...\n"
 export PUPPETEER_SKIP_DOWNLOAD=true
-npm install --prefer-offline 2>/dev/null || npm install
+npm install --legacy-peer-deps --prefer-offline 2>/dev/null \
+  || npm install --legacy-peer-deps 2>/dev/null \
+  || npm install --force
 
 printf "${WHITE} >> Build do backend...\n"
 npm run build
@@ -883,7 +885,8 @@ sleep 2
 printf "${WHITE} >> Atualizando Frontend da ${empresa}...\n"
 echo
 cd /home/deploy/${empresa}/frontend
-npm install --prefer-offline 2>/dev/null || npm install
+printf "${WHITE} >> npm install --force no frontend (FAST — instala deps novas sem apagar node_modules)...\n"
+npm install --force
 sed -i 's/3000/'"$frontend_port"'/g' server.js
 rm -rf .build_nova
 build_ok=0
