@@ -281,7 +281,7 @@ agendar() {
     printf "${RED} >> Instale postgresql-client.${WHITE}\n"
     sleep 3
     return 1
-  fi
+  }
 
   backup_detectar_empresas
   if [ ${#BACKUP_EMPRESAS[@]} -eq 0 ]; then

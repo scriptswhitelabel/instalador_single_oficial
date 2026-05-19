@@ -732,29 +732,11 @@ sleep 3
 STOPDBPM2
 }
 
-ferramentas_pm2_retomar_apos_manutencao_pg() {
+ferramentas_pm2_aviso_retomada_manual_pg() {
   local em="${1:-${empresa:-}}"
   [ -n "$em" ] || return 0
-  printf "${WHITE} >> Reiniciando PM2 da instância %s...${WHITE}\n" "$em"
-  sudo su - deploy <<RESTARTDBPM2
-set +e
-export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-elif [ -d /usr/local/n/versions/node ]; then
-  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-  fi
-fi
-if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
-  . /root/instalador_single_oficial/tools/path_node_deploy.sh
-fi
-for _p in "${em}-backend" "${em}-frontend" "${em}-transcricao" "transc-${em}" "api_oficial_${em}"; do
-  pm2 restart "\$_p" 2>/dev/null || true
-done
-pm2 save 2>/dev/null || true
-RESTARTDBPM2
+  printf "${YELLOW} >> PM2 da instância %s ficou parado de propósito.${WHITE}\n" "$em"
+  printf "${YELLOW} >> Após validar a importação, inicie manualmente os processos desejados com pm2 list/restart.${WHITE}\n"
 }
 
 # DROP + CREATE + restore em banco alvo (PostgreSQL nativo).
@@ -764,7 +746,6 @@ ferramentas_restaurar_sql_em_banco() {
   local owner_db="${PG_USUARIO}"
   local db_sql
   ferramentas_pm2_parar_para_manutencao_pg || true
-  trap 'ferramentas_pm2_retomar_apos_manutencao_pg || true; trap - RETURN' RETURN
   db_sql=$(printf "%s" "$db_alvo" | sed "s/'/''/g")
   printf "${WHITE} >> Encerrando conexões com o banco ${db_alvo}...${WHITE}\n"
   ferramentas_psql_admin_pg_nativo "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_sql}' AND pid <> pg_backend_pid();" || true
@@ -776,15 +757,18 @@ ferramentas_restaurar_sql_em_banco() {
     printf "${YELLOW} >> Falha ao criar com owner ${owner_db}. Tentando criar sem owner explícito...${WHITE}\n"
     if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_alvo}\";"; then
       printf "${RED} >> Erro ao criar o banco ${db_alvo}. Verifique a mensagem do PostgreSQL acima.${WHITE}\n"
+      ferramentas_pm2_aviso_retomada_manual_pg || true
       return 1
     fi
   fi
   printf "${WHITE} >> Restaurando backup em ${db_alvo}...${WHITE}\n"
   if PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d "${db_alvo}" -f "$arquivo_sql"; then
     printf "${GREEN} >> Banco ${db_alvo} restaurado com sucesso.${WHITE}\n"
+    ferramentas_pm2_aviso_retomada_manual_pg || true
     return 0
   fi
   printf "${YELLOW} >> Restauração finalizada (verifique mensagens acima).${WHITE}\n"
+  ferramentas_pm2_aviso_retomada_manual_pg || true
   return 0
 }
 
@@ -934,7 +918,7 @@ importar_backup_banco_ferramentas() {
       printf "${YELLOW} >> Falha ao criar com owner ${PG_USUARIO}. Tentando criar sem owner explícito...${WHITE}\n"
       if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_destino}\";"; then
         printf "${RED} >> Erro ao criar banco ${db_destino}. Verifique a mensagem do PostgreSQL acima.${WHITE}\n"
-        ferramentas_pm2_retomar_apos_manutencao_pg || true
+        ferramentas_pm2_aviso_retomada_manual_pg || true
         sleep 2
         return 1
       fi
@@ -945,7 +929,7 @@ importar_backup_banco_ferramentas() {
     else
       printf "${YELLOW} >> Restauração finalizada (verifique mensagens acima).${WHITE}\n"
     fi
-    ferramentas_pm2_retomar_apos_manutencao_pg || true
+    ferramentas_pm2_aviso_retomada_manual_pg || true
     if [ "$db_destino" != "${PG_DB_NAME}" ]; then
       printf "${YELLOW} >> Atualize DB_NAME no .env do backend (${empresa}) para: ${db_destino}${WHITE}\n"
     fi
@@ -1080,7 +1064,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL (porta ${db_port}).${WHITE}\n"
-      ferramentas_pm2_retomar_apos_manutencao_pg || true
+      ferramentas_pm2_aviso_retomada_manual_pg || true
       sleep 2
       return 1
     fi
@@ -1091,7 +1075,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
-    ferramentas_pm2_retomar_apos_manutencao_pg || true
+    ferramentas_pm2_aviso_retomada_manual_pg || true
   else
     ferramentas_pm2_parar_para_manutencao_pg || true
     local db_novo="${db_oficial}_novo"
@@ -1099,7 +1083,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
-      ferramentas_pm2_retomar_apos_manutencao_pg || true
+      ferramentas_pm2_aviso_retomada_manual_pg || true
       sleep 2
       return 1
     fi
@@ -1111,7 +1095,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
-    ferramentas_pm2_retomar_apos_manutencao_pg || true
+    ferramentas_pm2_aviso_retomada_manual_pg || true
   fi
   echo
   sleep 2
