@@ -336,6 +336,83 @@ aplicar_token_baileys_package_json() {
   return 0
 }
 
+instalacao_alta_performance() {
+  carregar_credenciais_instancia
+  [ "${ALTA_PERFORMANCE:-0}" = "1" ] && return 0
+
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  if [ -f "$env_file" ]; then
+    local db_port db_host
+    db_port=$(grep -m1 '^DB_PORT=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r ')
+    db_host=$(grep -m1 '^DB_HOST=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r ')
+    [ "$db_port" = "6732" ] && [ "$db_host" = "127.0.0.1" ] && return 0
+  fi
+
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "postgres_${empresa}" && return 0
+  return 1
+}
+
+backup_banco_alta_performance_fast() {
+  local env_file="/home/deploy/${empresa}/backend/.env"
+  local postgres_container="postgres_${empresa}"
+  local backup_dir="/home/deploy/backup-bd-docker-${empresa}"
+  local config_retencao="${backup_dir}/.retencao_dias"
+  local retencao_dias="7"
+  local data db_user db_pass db_name bancos db db_clean arquivo tmp_sql log_file
+
+  [ -f "$env_file" ] || return 1
+  db_user=$(grep -m1 '^DB_USER=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  db_pass=$(grep -m1 '^DB_PASS=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  db_name=$(grep -m1 '^DB_NAME=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+
+  db_user="${db_user:-$empresa}"
+  db_pass="${db_pass:-$senha_deploy}"
+  db_name="${db_name:-$empresa}"
+  [ -n "$db_pass" ] || return 1
+
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$postgres_container"; then
+    printf "${RED} >> Container Postgres não encontrado/rodando: ${postgres_container}${WHITE}\n"
+    return 1
+  fi
+
+  mkdir -p "$backup_dir"
+  chown deploy:deploy "$backup_dir" 2>/dev/null || true
+  log_file="${backup_dir}/backup.log"
+  if [ -f "$config_retencao" ]; then
+    read -r retencao_dias < "$config_retencao" 2>/dev/null || retencao_dias="7"
+  fi
+  [[ "$retencao_dias" =~ ^[0-9]+$ ]] || retencao_dias="7"
+
+  data=$(date +%Y-%m-%d_%H-%M-%S)
+  bancos=$(docker exec "$postgres_container" env PGPASSWORD="$db_pass" \
+    psql -h 127.0.0.1 -p 5432 -U "$db_user" -d postgres -t -A \
+    -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname IS NOT NULL ORDER BY datname;" 2>> "$log_file")
+
+  if [ -z "$bancos" ]; then
+    bancos="$db_name"
+    printf "${YELLOW} >> Não foi possível listar todos os bancos; tentando apenas ${db_name}.${WHITE}\n"
+  fi
+
+  for db in $bancos; do
+    db_clean=$(echo "$db" | tr -d '\r\n')
+    [ -z "$db_clean" ] && continue
+    arquivo="${backup_dir}/backup-${db_clean}-${data}.sql.gz"
+    tmp_sql=$(mktemp)
+    if docker exec "$postgres_container" env PGPASSWORD="$db_pass" \
+      pg_dump -h 127.0.0.1 -p 5432 -U "$db_user" -d "$db_clean" -F p > "$tmp_sql" 2>> "$log_file"; then
+      gzip -c "$tmp_sql" > "$arquivo"
+      chown deploy:deploy "$arquivo" 2>/dev/null || true
+      printf "${GREEN} >> Backup concluído: ${arquivo}${WHITE}\n"
+    else
+      printf "${YELLOW} >> Aviso: falha ao gerar backup do banco ${db_clean}. Veja ${log_file}${WHITE}\n"
+    fi
+    rm -f "$tmp_sql"
+  done
+
+  find "$backup_dir" -maxdepth 1 -name "backup-*.sql.gz" -mtime +"$retencao_dias" -delete 2>/dev/null || true
+  return 0
+}
+
 # Funções de atualização
 backup_app_atualizar() {
   # Verifica se a variável empresa está definida
@@ -345,16 +422,36 @@ backup_app_atualizar() {
   fi
 
   {
-    printf "${WHITE} >> Fazendo backup do banco de dados da empresa ${empresa}...\n"
-    MF_BACKUP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_backup_banco_empresa.sh"
-    [ -f "$MF_BACKUP_SCRIPT" ] || MF_BACKUP_SCRIPT="/root/instalador_single_oficial/tools/mf_backup_banco_empresa.sh"
-    # shellcheck source=/dev/null
-    source "$MF_BACKUP_SCRIPT"
-    if mf_backup_banco_empresa "${empresa}"; then
-      printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO}\n"
+    banner
+    printf "${WHITE} >> Antes de atualizar deseja fazer backup do banco de dados? ${GREEN}S/${RED}N:${WHITE}\n"
+    echo
+    read -p "> " confirmacao_backup
+    echo
+    confirmacao_backup=$(echo "${confirmacao_backup}" | tr '[:lower:]' '[:upper:]')
+    if [ "${confirmacao_backup}" != "S" ]; then
+      printf "${YELLOW} >> Backup ignorado. Continuando a atualização FAST...${WHITE}\n"
+      sleep 2
+      return 0
+    fi
+
+    if instalacao_alta_performance; then
+      printf "${WHITE} >> Instalação Alta Performance detectada. Usando backup via Docker/Postgres...${WHITE}\n"
+      if ! backup_banco_alta_performance_fast; then
+        printf "${YELLOW} >> Aviso: falha ao gerar backup Alta Performance.${WHITE}\n"
+        printf "${YELLOW} >> A atualização FAST continuará sem backup do banco.${WHITE}\n"
+      fi
     else
-      printf "${YELLOW} >> Aviso: falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
-      printf "${YELLOW} >> A atualização FAST continuará sem backup do banco.${WHITE}\n"
+      printf "${WHITE} >> Fazendo backup nativo do banco de dados da empresa ${empresa}...${WHITE}\n"
+      MF_BACKUP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_backup_banco_empresa.sh"
+      [ -f "$MF_BACKUP_SCRIPT" ] || MF_BACKUP_SCRIPT="/root/instalador_single_oficial/tools/mf_backup_banco_empresa.sh"
+      # shellcheck source=/dev/null
+      source "$MF_BACKUP_SCRIPT"
+      if mf_backup_banco_empresa "${empresa}"; then
+        printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO}\n"
+      else
+        printf "${YELLOW} >> Aviso: falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
+        printf "${YELLOW} >> A atualização FAST continuará sem backup do banco.${WHITE}\n"
+      fi
     fi
     sleep 2
   } || trata_erro "backup_app_atualizar"
@@ -840,6 +937,8 @@ else
   fi
   printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (Mais Recente)...${WHITE}\n"
   git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
+  printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
+  git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
   git reset --hard "origin/\$DEPLOY_BRANCH"
   git clean -fd
 fi
