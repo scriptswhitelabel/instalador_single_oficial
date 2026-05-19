@@ -87,6 +87,8 @@ aplicar_perfil() {
   local max_wal_size=""
   local min_wal_size=""
   local autovacuum_max_workers=""
+  local pg_major=""
+  local maintenance_io_conf="# maintenance_io_concurrency exige PostgreSQL 13+; ignorado em versões anteriores."
 
   case "${perfil}" in
     1)
@@ -146,6 +148,11 @@ aplicar_perfil() {
     printf "${YELLOW} >> Backup da configuração anterior: ${backup_file}${WHITE}\n"
   fi
 
+  pg_major=$(psql --version 2>/dev/null | awk '{print $3}' | cut -d. -f1)
+  if [[ "${pg_major}" =~ ^[0-9]+$ ]] && [ "${pg_major}" -ge 13 ]; then
+    maintenance_io_conf="maintenance_io_concurrency = 50"
+  fi
+
   cat > "${conf_file}" <<EOF
 # Gerado por tools/otimizar_postgres_nativo.sh em $(date '+%Y-%m-%d %H:%M:%S')
 # Perfil: ${perfil_descricao}
@@ -171,7 +178,7 @@ max_parallel_maintenance_workers = ${max_parallel_maintenance_workers}
 
 random_page_cost = 1.1
 effective_io_concurrency = 200
-maintenance_io_concurrency = 50
+${maintenance_io_conf}
 
 autovacuum_max_workers = ${autovacuum_max_workers}
 autovacuum_naptime = 60s

@@ -645,6 +645,37 @@ ferramentas_listar_bancos_pg_nativo() {
     "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> 'postgres' ORDER BY datname;" 2>/dev/null)
 }
 
+ferramentas_pg_nativo_eh_local() {
+  [ "${PG_HOST}" = "127.0.0.1" ] || [ "${PG_HOST}" = "localhost" ] || [ "${PG_HOST}" = "/var/run/postgresql" ]
+}
+
+ferramentas_psql_admin_pg_nativo() {
+  local sql="$1"
+  if ferramentas_pg_nativo_eh_local && id postgres >/dev/null 2>&1; then
+    sudo -u postgres psql -p "${PG_PORT}" -d postgres -v ON_ERROR_STOP=1 -c "$sql"
+  else
+    PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres -v ON_ERROR_STOP=1 -c "$sql"
+  fi
+}
+
+ferramentas_garantir_role_pg_nativo() {
+  local role="$1"
+  local pass="${2:-}"
+  local role_sql pass_sql
+  role_sql=$(printf "%s" "$role" | sed "s/'/''/g")
+  pass_sql=$(printf "%s" "$pass" | sed "s/'/''/g")
+
+  if ferramentas_pg_nativo_eh_local && id postgres >/dev/null 2>&1; then
+    if sudo -u postgres psql -p "${PG_PORT}" -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${role_sql}'" 2>/dev/null | grep -qx 1; then
+      sudo -u postgres psql -p "${PG_PORT}" -d postgres -v ON_ERROR_STOP=1 \
+        -c "ALTER ROLE \"${role}\" WITH LOGIN SUPERUSER INHERIT CREATEDB CREATEROLE PASSWORD '${pass_sql}';" >/dev/null
+    else
+      sudo -u postgres psql -p "${PG_PORT}" -d postgres -v ON_ERROR_STOP=1 \
+        -c "CREATE ROLE \"${role}\" WITH LOGIN SUPERUSER INHERIT CREATEDB CREATEROLE PASSWORD '${pass_sql}';" >/dev/null
+    fi
+  fi
+}
+
 # Escolhe item numerado; retorna 0 e define FERRAMENTAS_ESCOLHA, ou 1 se cancelar/inválido.
 ferramentas_escolher_item_lista() {
   local prompt_msg="$1"
@@ -675,23 +706,76 @@ ferramentas_escolher_item_lista() {
   return 0
 }
 
+# Apps PM2 (pool de conexões) podem reabrir sessão logo após pg_terminate_backend e impedir DROP/CREATE.
+ferramentas_pm2_parar_para_manutencao_pg() {
+  local em="${1:-${empresa:-}}"
+  [ -n "$em" ] || return 0
+  printf "${WHITE} >> Parando PM2 da instância %s (libera conexões no PostgreSQL)...${WHITE}\n" "$em"
+  sudo su - deploy <<STOPDBPM2
+set +e
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+  . /root/instalador_single_oficial/tools/path_node_deploy.sh
+fi
+for _p in "${em}-backend" "${em}-frontend" "${em}-transcricao" "transc-${em}" "api_oficial_${em}"; do
+  pm2 stop "\$_p" 2>/dev/null || true
+done
+sleep 3
+STOPDBPM2
+}
+
+ferramentas_pm2_retomar_apos_manutencao_pg() {
+  local em="${1:-${empresa:-}}"
+  [ -n "$em" ] || return 0
+  printf "${WHITE} >> Reiniciando PM2 da instância %s...${WHITE}\n" "$em"
+  sudo su - deploy <<RESTARTDBPM2
+set +e
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+  . /root/instalador_single_oficial/tools/path_node_deploy.sh
+fi
+for _p in "${em}-backend" "${em}-frontend" "${em}-transcricao" "transc-${em}" "api_oficial_${em}"; do
+  pm2 restart "\$_p" 2>/dev/null || true
+done
+pm2 save 2>/dev/null || true
+RESTARTDBPM2
+}
+
 # DROP + CREATE + restore em banco alvo (PostgreSQL nativo).
 ferramentas_restaurar_sql_em_banco() {
   local db_alvo="$1"
   local arquivo_sql="$2"
   local owner_db="${PG_USUARIO}"
+  local db_sql
+  ferramentas_pm2_parar_para_manutencao_pg || true
+  trap 'ferramentas_pm2_retomar_apos_manutencao_pg || true; trap - RETURN' RETURN
+  db_sql=$(printf "%s" "$db_alvo" | sed "s/'/''/g")
   printf "${WHITE} >> Encerrando conexões com o banco ${db_alvo}...${WHITE}\n"
-  PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-    -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_alvo}' AND pid <> pg_backend_pid();" 2>/dev/null || true
-  sleep 1
+  ferramentas_psql_admin_pg_nativo "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_sql}' AND pid <> pg_backend_pid();" || true
+  sleep 2
   printf "${WHITE} >> Recriando banco ${db_alvo}...${WHITE}\n"
-  PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-    -c "DROP DATABASE IF EXISTS \"${db_alvo}\";" 2>/dev/null || true
-  if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-    -c "CREATE DATABASE \"${db_alvo}\" OWNER \"${owner_db}\";" 2>/dev/null; then
-    if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-      -c "CREATE DATABASE \"${db_alvo}\";" 2>/dev/null; then
-      printf "${RED} >> Erro ao criar o banco ${db_alvo}. Verifique usuário/senha e permissões.${WHITE}\n"
+  ferramentas_psql_admin_pg_nativo "DROP DATABASE IF EXISTS \"${db_alvo}\";" || true
+  ferramentas_garantir_role_pg_nativo "${owner_db}" "${PG_SENHA}" || true
+  if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_alvo}\" OWNER \"${owner_db}\";"; then
+    printf "${YELLOW} >> Falha ao criar com owner ${owner_db}. Tentando criar sem owner explícito...${WHITE}\n"
+    if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_alvo}\";"; then
+      printf "${RED} >> Erro ao criar o banco ${db_alvo}. Verifique a mensagem do PostgreSQL acima.${WHITE}\n"
       return 1
     fi
   fi
@@ -843,12 +927,14 @@ importar_backup_banco_ferramentas() {
       sleep 2
       return 1
     fi
+    ferramentas_pm2_parar_para_manutencao_pg || true
     printf "${WHITE} >> Criando banco ${db_destino}...${WHITE}\n"
-    if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-      -c "CREATE DATABASE \"${db_destino}\" OWNER \"${PG_USUARIO}\";" 2>/dev/null; then
-      if ! PGPASSWORD="${PG_SENHA}" psql -U "${PG_USUARIO}" -h "${PG_HOST}" -p "${PG_PORT}" -d postgres \
-        -c "CREATE DATABASE \"${db_destino}\";" 2>/dev/null; then
-        printf "${RED} >> Erro ao criar banco ${db_destino}.${WHITE}\n"
+    ferramentas_garantir_role_pg_nativo "${PG_USUARIO}" "${PG_SENHA}" || true
+    if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_destino}\" OWNER \"${PG_USUARIO}\";"; then
+      printf "${YELLOW} >> Falha ao criar com owner ${PG_USUARIO}. Tentando criar sem owner explícito...${WHITE}\n"
+      if ! ferramentas_psql_admin_pg_nativo "CREATE DATABASE \"${db_destino}\";"; then
+        printf "${RED} >> Erro ao criar banco ${db_destino}. Verifique a mensagem do PostgreSQL acima.${WHITE}\n"
+        ferramentas_pm2_retomar_apos_manutencao_pg || true
         sleep 2
         return 1
       fi
@@ -859,6 +945,7 @@ importar_backup_banco_ferramentas() {
     else
       printf "${YELLOW} >> Restauração finalizada (verifique mensagens acima).${WHITE}\n"
     fi
+    ferramentas_pm2_retomar_apos_manutencao_pg || true
     if [ "$db_destino" != "${PG_DB_NAME}" ]; then
       printf "${YELLOW} >> Atualize DB_NAME no .env do backend (${empresa}) para: ${db_destino}${WHITE}\n"
     fi
@@ -983,6 +1070,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     fi
   fi
   if [ "$op_tipo" = "1" ]; then
+    ferramentas_pm2_parar_para_manutencao_pg || true
     # Conectar ao banco 'postgres' para terminate/DROP/CREATE; senão psql conecta ao banco com nome do usuário e não permite dropar.
     printf "${WHITE} >> Encerrando conexões com o banco ${db_oficial}...${WHITE}\n"
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_oficial}' AND pid <> pg_backend_pid();" 2>/dev/null || true
@@ -992,6 +1080,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco. Verifique se o usuário ${empresa} existe no PostgreSQL (porta ${db_port}).${WHITE}\n"
+      ferramentas_pm2_retomar_apos_manutencao_pg || true
       sleep 2
       return 1
     fi
@@ -1002,12 +1091,15 @@ importar_backup_banco_api_oficial_ferramentas() {
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
+    ferramentas_pm2_retomar_apos_manutencao_pg || true
   else
+    ferramentas_pm2_parar_para_manutencao_pg || true
     local db_novo="${db_oficial}_novo"
     printf "${WHITE} >> Criando banco ${db_novo} (mantendo ${db_oficial})...${WHITE}\n"
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d postgres -c "CREATE DATABASE ${db_novo} OWNER ${empresa};" 2>/dev/null || true
     if [ $? -ne 0 ]; then
       printf "${RED} >> Erro ao criar banco ${db_novo}. Pode já existir.${WHITE}\n"
+      ferramentas_pm2_retomar_apos_manutencao_pg || true
       sleep 2
       return 1
     fi
@@ -1019,6 +1111,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
+    ferramentas_pm2_retomar_apos_manutencao_pg || true
   fi
   echo
   sleep 2
@@ -2692,13 +2785,20 @@ instala_ffmpeg_base() {
 # Instala Postgres
 instala_postgres_base() {
   banner
-  printf "${WHITE} >> Instalando postgres...\n"
+  printf "${WHITE} >> Instalando PostgreSQL 17...\n"
   echo
 
-  if command -v psql >/dev/null 2>&1 && systemctl is-active --quiet postgresql 2>/dev/null; then
-    printf "${GREEN} >> PostgreSQL já está instalado e ativo.${WHITE}\n"
-    sleep 2
-    return 0
+  local pg_major_instalado=""
+  if command -v psql >/dev/null 2>&1; then
+    pg_major_instalado=$(psql --version 2>/dev/null | awk '{print $3}' | cut -d. -f1)
+    if [[ "$pg_major_instalado" =~ ^[0-9]+$ ]] && [ "$pg_major_instalado" -ge 17 ] && systemctl is-active --quiet postgresql 2>/dev/null; then
+      printf "${GREEN} >> PostgreSQL ${pg_major_instalado} já está instalado e ativo.${WHITE}\n"
+      sleep 2
+      return 0
+    fi
+    if [[ "$pg_major_instalado" =~ ^[0-9]+$ ]] && [ "$pg_major_instalado" -lt 17 ]; then
+      printf "${YELLOW} >> PostgreSQL ${pg_major_instalado} detectado, mas esta instalação exige PostgreSQL 17.${WHITE}\n"
+    fi
   fi
 
   if ! sudo apt-get install gnupg wget ca-certificates -y; then
@@ -2716,19 +2816,19 @@ instala_postgres_base() {
       sudo systemctl enable postgresql >/dev/null 2>&1 || true
       sudo systemctl restart postgresql >/dev/null 2>&1 || true
     else
-      printf "${YELLOW} >> Aviso: repositório PGDG falhou. Tentando PostgreSQL do Ubuntu...${WHITE}\n"
+      printf "${RED} >> ERRO: não foi possível instalar PostgreSQL 17 via PGDG.${WHITE}\n"
       sudo rm -f /etc/apt/sources.list.d/pgdg.list
-      sudo apt-get update -y || return 1
-      sudo apt-get -y install postgresql postgresql-contrib || return 1
-      sudo systemctl enable postgresql >/dev/null 2>&1 || true
-      sudo systemctl restart postgresql >/dev/null 2>&1 || true
+      if [ "$ubuntu_codename" = "focal" ]; then
+        printf "${YELLOW} >> Ubuntu 20.04 (focal) instala PostgreSQL 12 pelos repositórios padrão.${WHITE}\n"
+        printf "${YELLOW} >> Como o sistema exige PostgreSQL 17, use Ubuntu 22.04/24.04 ou a opção Alta Performance (Docker Postgres 17).${WHITE}\n"
+      else
+        printf "${YELLOW} >> Verifique o repositório apt.postgresql.org para ${ubuntu_codename}-pgdg.${WHITE}\n"
+      fi
+      return 1
     fi
   else
-    printf "${YELLOW} >> Não foi possível detectar codename do Ubuntu. Usando repositório padrão.${WHITE}\n"
-    sudo apt-get update -y || return 1
-    sudo apt-get -y install postgresql postgresql-contrib || return 1
-    sudo systemctl enable postgresql >/dev/null 2>&1 || true
-    sudo systemctl restart postgresql >/dev/null 2>&1 || true
+    printf "${RED} >> Não foi possível detectar codename do Ubuntu para instalar PostgreSQL 17.${WHITE}\n"
+    return 1
   fi
 
   if ! command -v psql >/dev/null 2>&1; then
@@ -2736,7 +2836,15 @@ instala_postgres_base() {
     return 1
   fi
 
-  printf "${GREEN} >> PostgreSQL instalado com sucesso.${WHITE}\n"
+  local pg_major_final
+  pg_major_final=$(psql --version 2>/dev/null | awk '{print $3}' | cut -d. -f1)
+  if ! [[ "$pg_major_final" =~ ^[0-9]+$ ]] || [ "$pg_major_final" -lt 17 ]; then
+    printf "${RED} >> PostgreSQL instalado não é versão 17+ (detectado: ${pg_major_final:-desconhecido}).${WHITE}\n"
+    printf "${YELLOW} >> Instalação interrompida para evitar banco em versão incompatível.${WHITE}\n"
+    return 1
+  fi
+
+  printf "${GREEN} >> PostgreSQL ${pg_major_final} instalado com sucesso.${WHITE}\n"
   sleep 2
 }
 
