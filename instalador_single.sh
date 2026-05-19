@@ -43,7 +43,7 @@ banner() {
 # Função para manipular erros e encerrar o script
 trata_erro() {
   printf "${RED}Erro encontrado na etapa $1. Encerrando o script.${WHITE}\n"
-  salvar_etapa "$1"
+  echo "$1" >"${ARQUIVO_ETAPAS}.erro" 2>/dev/null || true
   exit 1
 }
 
@@ -140,9 +140,11 @@ salvar_etapa() {
 # Carregar última etapa
 carregar_etapa() {
   if [ -f $ARQUIVO_ETAPAS ]; then
-    etapa=$(cat $ARQUIVO_ETAPAS)
-    if [ -z "$etapa" ]; then
+    etapa=$(cat $ARQUIVO_ETAPAS 2>/dev/null | tr -d '\r\n ')
+    if ! [[ "$etapa" =~ ^[0-9]+$ ]]; then
+      printf "${YELLOW} >> Aviso: etapa inválida em ${ARQUIVO_ETAPAS} (${etapa:-vazio}). Reiniciando controle de etapas.${WHITE}\n"
       etapa="0"
+      salvar_etapa "$etapa"
     fi
   else
     etapa="0"
@@ -2651,15 +2653,50 @@ instala_postgres_base() {
   banner
   printf "${WHITE} >> Instalando postgres...\n"
   echo
-  {
-    sudo su - root <<EOF
-  sudo apt-get install gnupg -y
-  sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-  wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-  sudo apt-get update -y && sudo apt-get -y install postgresql-17
-EOF
+
+  if command -v psql >/dev/null 2>&1 && systemctl is-active --quiet postgresql 2>/dev/null; then
+    printf "${GREEN} >> PostgreSQL já está instalado e ativo.${WHITE}\n"
     sleep 2
-  } || trata_erro "instala_postgres_base"
+    return 0
+  fi
+
+  if ! sudo apt-get install gnupg wget ca-certificates -y; then
+    printf "${RED} >> Falha ao instalar dependências do repositório PostgreSQL.${WHITE}\n"
+    return 1
+  fi
+
+  local ubuntu_codename
+  ubuntu_codename="$(lsb_release -cs 2>/dev/null || true)"
+  if [ -n "$ubuntu_codename" ]; then
+    sudo sh -c "echo 'deb http://apt.postgresql.org/pub/repos/apt ${ubuntu_codename}-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
+    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - >/dev/null 2>&1 || true
+
+    if sudo apt-get update -y && sudo apt-get -y install postgresql-17; then
+      sudo systemctl enable postgresql >/dev/null 2>&1 || true
+      sudo systemctl restart postgresql >/dev/null 2>&1 || true
+    else
+      printf "${YELLOW} >> Aviso: repositório PGDG falhou. Tentando PostgreSQL do Ubuntu...${WHITE}\n"
+      sudo rm -f /etc/apt/sources.list.d/pgdg.list
+      sudo apt-get update -y || return 1
+      sudo apt-get -y install postgresql postgresql-contrib || return 1
+      sudo systemctl enable postgresql >/dev/null 2>&1 || true
+      sudo systemctl restart postgresql >/dev/null 2>&1 || true
+    fi
+  else
+    printf "${YELLOW} >> Não foi possível detectar codename do Ubuntu. Usando repositório padrão.${WHITE}\n"
+    sudo apt-get update -y || return 1
+    sudo apt-get -y install postgresql postgresql-contrib || return 1
+    sudo systemctl enable postgresql >/dev/null 2>&1 || true
+    sudo systemctl restart postgresql >/dev/null 2>&1 || true
+  fi
+
+  if ! command -v psql >/dev/null 2>&1; then
+    printf "${RED} >> PostgreSQL não foi instalado corretamente (psql ausente).${WHITE}\n"
+    return 1
+  fi
+
+  printf "${GREEN} >> PostgreSQL instalado com sucesso.${WHITE}\n"
+  sleep 2
 }
 
 # Aplica tuning do PostgreSQL nativo escolhido na instalação
