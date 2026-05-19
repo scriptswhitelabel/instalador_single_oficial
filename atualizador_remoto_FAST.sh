@@ -843,6 +843,21 @@ restaurar_build_frontend_anterior() {
 
 atualizar_api_oficial_fast() {
   local script_api="/root/instalador_single_oficial/atualizar_apioficial.sh"
+  local resposta_api_oficial=""
+
+  if [ ! -d "/home/deploy/${empresa}/api_oficial" ]; then
+    printf "${YELLOW} >> API Oficial não encontrada para a instância ${empresa}. Pulando etapa.${WHITE}\n"
+    return 0
+  fi
+
+  echo
+  printf "${WHITE} >> Deseja atualizar também a API Oficial da instância ${BLUE}${empresa}${WHITE}? ${GREEN}S/${RED}N:${WHITE}\n"
+  read -p "> " resposta_api_oficial
+  resposta_api_oficial=$(echo "${resposta_api_oficial}" | tr '[:lower:]' '[:upper:]')
+  if [ "${resposta_api_oficial}" != "S" ]; then
+    printf "${YELLOW} >> API Oficial não será atualizada. Continuando a atualização FAST...${WHITE}\n"
+    return 0
+  fi
 
   if [ ! -f "${script_api}" ]; then
     printf "${YELLOW} >> Aviso: script da API Oficial não encontrado (${script_api}). Pulando etapa.${WHITE}\n"
