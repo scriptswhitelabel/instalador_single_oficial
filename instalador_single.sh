@@ -2462,6 +2462,39 @@ questoes_otimizacao_nativa() {
   sleep 2
 }
 
+# PGDG (apt.postgresql.org): em Ubuntu 20.04 (focal) o sufixo focal-pgdg costuma retornar 404 — quebra "apt update".
+# Em releases mais novas o PGDG pode ser válido; só removemos em focal ou linhas explícitas focal-pgdg.
+mf_remover_repositorios_apt_postgresql_pgdg_quebrados() {
+  local f removido=0 codename
+  codename="$(lsb_release -cs 2>/dev/null || true)"
+  if [ ! -d /etc/apt/sources.list.d ]; then
+    return 0
+  fi
+  shopt -s nullglob
+  for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    [ -f "$f" ] || continue
+    if grep -q "apt.postgresql.org" "$f" 2>/dev/null; then
+      if [ "$codename" = "focal" ] || grep -q "focal-pgdg" "$f" 2>/dev/null; then
+        printf "${YELLOW} >> Removendo fonte APT PostgreSQL.org incompatível (focal / focal-pgdg): ${f}${WHITE}\n"
+        rm -f "$f"
+        removido=1
+      fi
+    fi
+  done
+  shopt -u nullglob
+  if [ -f /etc/apt/sources.list ] && grep -q "apt.postgresql.org" /etc/apt/sources.list 2>/dev/null; then
+    if [ "$codename" = "focal" ] || grep -q "focal-pgdg" /etc/apt/sources.list 2>/dev/null; then
+      sed -i '\|apt.postgresql.org|d' /etc/apt/sources.list 2>/dev/null || true
+      removido=1
+    fi
+  fi
+  if [ "$removido" = "1" ]; then
+    printf "${WHITE} >> Dica: use os pacotes \"postgresql\" do Ubuntu nesta VPS ou atualize o SO para PGDG suportado.${WHITE}\n"
+    sleep 1
+  fi
+  return 0
+}
+
 # Atualiza sistema operacional
 atualiza_vps_base() {
   banner
@@ -2483,14 +2516,22 @@ atualiza_vps_base() {
   
   UPDATE_FILE="$(pwd)/update.x"
   {
+    mf_remover_repositorios_apt_postgresql_pgdg_quebrados
     # Tentar atualizar, se falhar, corrigir DNS e tentar novamente
     if ! sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
-      printf "${YELLOW} >> Erro ao atualizar. Tentando corrigir DNS e tentar novamente...${WHITE}\n"
-      tentar_corrigir_dns
-      if ! sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
-        printf "${RED} >> ERRO: Falha ao atualizar lista de pacotes após correções.${WHITE}\n"
-        printf "${YELLOW} >> Verifique sua conexão de internet e configuração de DNS.${WHITE}\n"
-        trata_erro "atualiza_vps_base"
+      printf "${YELLOW} >> Erro ao atualizar. Removendo fontes PGDG problemáticas (se ainda existirem) e tentando de novo...${WHITE}\n"
+      mf_remover_repositorios_apt_postgresql_pgdg_quebrados
+      if sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
+        :
+      else
+        printf "${YELLOW} >> Erro ao atualizar. Tentando corrigir DNS e tentar novamente...${WHITE}\n"
+        tentar_corrigir_dns
+        mf_remover_repositorios_apt_postgresql_pgdg_quebrados
+        if ! sudo DEBIAN_FRONTEND=noninteractive apt update -y; then
+          printf "${RED} >> ERRO: Falha ao atualizar lista de pacotes após correções.${WHITE}\n"
+          printf "${YELLOW} >> Verifique sua conexão de internet e configuração de DNS.${WHITE}\n"
+          trata_erro "atualiza_vps_base"
+        fi
       fi
     fi
     
