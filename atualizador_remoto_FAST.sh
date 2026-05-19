@@ -904,9 +904,8 @@ printf "${WHITE} >> Atualizando código (git)...\n"
 echo
 cd /home/deploy/${empresa}
 
-git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
-
 if [ -n "${commit_atualizacao}" ]; then
+  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
   printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
   if ! git cat-file -e "${commit_atualizacao}^{commit}" 2>/dev/null; then
     echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch."
@@ -935,11 +934,10 @@ else
     echo "ERRO: Nenhuma branch remota conhecida em origin."
     exit 1
   fi
-  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (Mais Recente)...${WHITE}\n"
-  git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH"
+  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (Mais Recente: reset + pull)...${WHITE}\n"
+  git reset --hard "origin/\$DEPLOY_BRANCH"
   printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
   git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
-  git reset --hard "origin/\$DEPLOY_BRANCH"
   git clean -fd
 fi
 
