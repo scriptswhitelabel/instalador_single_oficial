@@ -903,6 +903,14 @@ baixa_codigo_atualizar() {
   exportar_vars_frontend_env_seguro
   frontend_port=$(grep -m1 '^SERVER_PORT=' "/home/deploy/${empresa}/frontend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
   frontend_port=${frontend_port:-3000}
+  # O git reset/pull pode restaurar api_transcricao/main.py para a porta padrão 4002.
+  # Preservar a porta registrada na instância evita conflito entre múltiplas instâncias.
+  porta_transcricao="${porta_transcricao:-}"
+  if [ -z "${porta_transcricao}" ]; then
+    transcribe_url_atual=$(grep -m1 '^TRANSCRIBE_URL=' "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+    porta_transcricao=$(echo "${transcribe_url_atual}" | sed -nE 's|.*:([0-9]+).*|\1|p' | head -1)
+  fi
+  porta_transcricao=${porta_transcricao:-4002}
   ativar_tela_atualizacao_frontend
   if ! sudo su - deploy <<EOF
 set -e
@@ -954,6 +962,13 @@ else
   printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
   git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
   git clean -fd
+fi
+
+if [ -d "/home/deploy/${empresa}/api_transcricao" ] && [ -f "/home/deploy/${empresa}/api_transcricao/main.py" ]; then
+  main_py_transc="/home/deploy/${empresa}/api_transcricao/main.py"
+  sed -i -E "s|port[[:space:]]*=[[:space:]]*[0-9]+|port=${porta_transcricao}|g" "\$main_py_transc" 2>/dev/null || true
+  sed -i -E "s|porta[[:space:]]+[0-9]+|porta ${porta_transcricao}|g" "\$main_py_transc" 2>/dev/null || true
+  printf " >> Porta da transcrição reaplicada no main.py: ${porta_transcricao}\n"
 fi
 
 cd /home/deploy/${empresa}/backend
