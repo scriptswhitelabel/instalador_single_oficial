@@ -4996,7 +4996,7 @@ STOPPM2
       exit 1
     fi
     git reset --hard
-    git clean -fd
+    git clean -fd -e api_transcricao/run_transcricao.sh
     _BR_ATU="atualizacao-\$(date +%Y%m%d-%H%M%S)"
     git checkout -b "\$_BR_ATU" "${commit_atualizacao}"
   else
@@ -5135,6 +5135,15 @@ UPDATEAPP
 
   descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
 
+  _mf_transc_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_transcricao_manutencao.sh"
+  if [ -f "$_mf_transc_script" ]; then
+    # shellcheck source=/dev/null
+    source "$_mf_transc_script"
+    printf "${WHITE} >> Recriando run_transcricao.sh e PM2 da transcrição após atualização do código...${WHITE}\n"
+    mf_transcricao_pos_atualizacao_git "${empresa}" "${porta_transcricao}" \
+      || printf "${YELLOW} >> Aviso: falha ao reconfigurar transcrição automaticamente.${WHITE}\n"
+  fi
+
   sudo su - deploy <<RESTARTPM2ATUALIZACAO
   export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -5146,7 +5155,7 @@ UPDATEAPP
     fi
   fi
   # Nomes fixos (pm2 list + awk na tabela com │/cores costuma falhar)
-  for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao"; do
+  for _p in "${empresa}-backend" "${empresa}-frontend"; do
     pm2 restart "\$_p" 2>/dev/null || true
   done
   pm2 save

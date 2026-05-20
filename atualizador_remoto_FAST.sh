@@ -937,7 +937,7 @@ if [ -n "${commit_atualizacao}" ]; then
   _BR_ATU="atualizacao-fast-${versao_atualizacao}-\$(date +%Y%m%d-%H%M%S)"
   git checkout -f "${commit_atualizacao}"
   git reset --hard "${commit_atualizacao}"
-  git clean -fd
+  git clean -fd -e api_transcricao/run_transcricao.sh
   git checkout -b "\$_BR_ATU" 2>/dev/null || git checkout "\$_BR_ATU"
   _HEAD_ATU=\$(git rev-parse HEAD 2>/dev/null)
   if [ "\$_HEAD_ATU" != "${commit_atualizacao}" ]; then
@@ -961,7 +961,7 @@ else
   git reset --hard "origin/\$DEPLOY_BRANCH"
   printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
   git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
-  git clean -fd
+  git clean -fd -e api_transcricao/run_transcricao.sh
 fi
 
 if [ -d "/home/deploy/${empresa}/api_transcricao" ] && [ -f "/home/deploy/${empresa}/api_transcricao/main.py" ]; then
@@ -1050,6 +1050,17 @@ EOF
     trata_erro "atualizar_api_oficial_fast"
   fi
 
+  _mf_transc_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_transcricao_manutencao.sh"
+  if [ -f "$_mf_transc_script" ]; then
+    # shellcheck source=/dev/null
+    source "$_mf_transc_script"
+    printf "${WHITE} >> Recriando run_transcricao.sh e PM2 da transcrição (git clean apaga o wrapper local)...${WHITE}\n"
+    mf_transcricao_pos_atualizacao_git "${empresa}" "${porta_transcricao}" \
+      || printf "${YELLOW} >> Aviso: falha ao reconfigurar transcrição. Use o menu Instalar transcrição ou pm2 logs ${empresa}-transcricao.${WHITE}\n"
+  else
+    printf "${YELLOW} >> Aviso: tools/mf_transcricao_manutencao.sh não encontrado — transcrição pode falhar após git clean.${WHITE}\n"
+  fi
+
   sudo su - deploy <<RESTARTPM2ATUALIZACAO
 printf "${WHITE} >> Atualização Concluida, Reiniciando Instancias da empresa ${empresa} e Aplicando a Atualização... \n"
 sleep 7
@@ -1058,7 +1069,7 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-for _p in "${empresa}-backend" "${empresa}-frontend" "${empresa}-transcricao" "api_oficial_${empresa}"; do
+for _p in "${empresa}-backend" "${empresa}-frontend" "api_oficial_${empresa}"; do
   pm2 restart "\$_p" 2>/dev/null || true
   pm2 reset "\$_p" 2>/dev/null || true
   pm2 flush "\$_p" 2>/dev/null || true
