@@ -1294,31 +1294,42 @@ atualizar_codigo_wuzapi_git() {
   echo
   {
     local wuz_dir="/home/deploy/${empresa}/wuzapi"
-    cd "$wuz_dir" || exit 1
+    local git_user="deploy"
+    local head_antes head_depois
 
-    if [ ! -d .git ]; then
+    if [ ! -d "${wuz_dir}/.git" ]; then
       printf "${RED} >> Pasta não é um repositório git. Reinstale pelo menu (opção 3).${WHITE}\n"
       exit 1
     fi
 
-    if [ -f .env ]; then
-      cp -a .env ".env.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    if ! id "$git_user" >/dev/null 2>&1; then
+      printf "${RED} >> Usuário ${git_user} não encontrado.${WHITE}\n"
+      exit 1
+    fi
+
+    # Root em /home/deploy/* dispara "dubious ownership" no Git 2.35+
+    git config --global --add safe.directory "$wuz_dir" 2>/dev/null || true
+    sudo -u "$git_user" git config --global --add safe.directory "$wuz_dir" 2>/dev/null || true
+
+    if [ -f "${wuz_dir}/.env" ]; then
+      cp -a "${wuz_dir}/.env" "${wuz_dir}/.env.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
       printf "${GREEN} >> Backup do .env criado antes do pull.${WHITE}\n"
     fi
 
-    local head_antes head_depois
-    head_antes=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+    head_antes=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --short HEAD 2>/dev/null || echo "?")
+    printf "${WHITE} >> git fetch / pull (usuário ${git_user})...${WHITE}\n"
 
-    git fetch origin 2>&1 || true
-    if ! git pull --ff-only 2>&1; then
+    sudo -u "$git_user" git -C "$wuz_dir" fetch origin 2>&1 || true
+    if ! sudo -u "$git_user" git -C "$wuz_dir" pull --ff-only 2>&1; then
       printf "${YELLOW} >> Fast-forward falhou; tentando git pull normal...${WHITE}\n"
-      if ! git pull 2>&1; then
-        printf "${RED} >> ERRO no git pull. Resolva conflitos em ${wuz_dir} e tente de novo.${WHITE}\n"
+      if ! sudo -u "$git_user" git -C "$wuz_dir" pull 2>&1; then
+        printf "${RED} >> ERRO no git pull em ${wuz_dir}.${WHITE}\n"
+        printf "${YELLOW} >> Verifique permissões e conflitos: sudo -u deploy git -C ${wuz_dir} status${WHITE}\n"
         exit 1
       fi
     fi
 
-    head_depois=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+    head_depois=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --short HEAD 2>/dev/null || echo "?")
     printf "${GREEN} >> Git: ${head_antes} → ${head_depois}${WHITE}\n"
     chown -R deploy:deploy "$wuz_dir" 2>/dev/null || true
     sleep 1
