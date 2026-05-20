@@ -36,7 +36,7 @@ banner() {
   printf "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ╚════██║██║███╗██║██║\n"
   printf "██║██║ ╚████║███████╗   ██║   ██║  ██║███████╗███████╗███████╗╚███╔███╔╝███████╗\n"
   printf "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝ ╚══╝╚══╝ ╚══════╝\n"
-  printf "                                INSTALADOR 8.7\n"
+  printf "                                INSTALADOR 9.0\n"
   printf "\n\n"
 }
 
@@ -1592,7 +1592,6 @@ menu_ferramentas() {
     printf "  ${BLUE}━━ Instalações e integrações ━━${WHITE}\n"
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
-    printf "   [${BLUE}21${WHITE}] Atualizar API WhatsMeow (WuzAPI — git pull + rebuild)\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
@@ -1615,13 +1614,14 @@ menu_ferramentas() {
     echo
     printf "  ${BLUE}━━ Domínio, SSL e Docker ━━${WHITE}\n"
     printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
-    printf "   [${BLUE}18${WHITE}] Aplicar certificado SSL no Nginx\n"
+    printf "   [${BLUE}21${WHITE}] Aplicar certificado SSL no Nginx\n"
     printf "   [${BLUE}20${WHITE}] Domínio + porta + SSL no Nginx (proxy reverso)\n"
     printf "   [${BLUE}19${WHITE}] Instalar Portainer (Docker)\n"
     echo
     printf "  ${BLUE}━━ Performance e dependências ━━${WHITE}\n"
     printf "   [${BLUE}16${WHITE}] Atualizar Baileys PRO (Heineken)\n"
-    printf "   [${BLUE}17${WHITE}] Otimizar Postgres Nativo\n"
+    printf "   [${BLUE}17${WHITE}] Atualizar API WhatsMeow (WuzAPI — git pull + rebuild)\n"
+    printf "   [${BLUE}18${WHITE}] Otimizar Postgres Nativo\n"
     echo
     printf "  ${BLUE}━━ Menu ━━${WHITE}\n"
     printf "   [${BLUE}0${WHITE}] Voltar ao Menu Principal\n"
@@ -1645,9 +1645,6 @@ menu_ferramentas() {
       ;;
     3)
       instalar_whatsmeow
-      ;;
-    21)
-      atualizar_whatsmeow
       ;;
     4)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1762,6 +1759,9 @@ menu_ferramentas() {
       read -r
       ;;
     17)
+      atualizar_whatsmeow
+      ;;
+    18)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       OTIMIZAR_PG_SCRIPT="${SCRIPT_DIR}/tools/otimizar_postgres_nativo.sh"
       if [ -f "$OTIMIZAR_PG_SCRIPT" ]; then
@@ -1775,7 +1775,7 @@ menu_ferramentas() {
         sleep 3
       fi
       ;;
-    18)
+    21)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       SSL_NGINX_SCRIPT="${SCRIPT_DIR}/tools/aplicar_certificado_ssl_nginx.sh"
       if [ -f "$SSL_NGINX_SCRIPT" ]; then
