@@ -1363,7 +1363,7 @@ FETCHCOMMIT
 cd ${dest_dir}
 # Limpar qualquer alteração local
 git reset --hard HEAD 2>/dev/null || true
-git clean -fd 2>/dev/null || true
+# git clean -fd 2>/dev/null || true  # desativado: não apagar arquivos locais da instância
 
 # Fazer checkout direto para o commit (detached HEAD primeiro)
 git checkout "${commit_instalacao}" 2>/dev/null

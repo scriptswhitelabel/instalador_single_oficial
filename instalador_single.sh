@@ -4996,7 +4996,7 @@ STOPPM2
       exit 1
     fi
     git reset --hard
-    git clean -fd -e api_transcricao/run_transcricao.sh
+    # git clean -fd -e api_transcricao/run_transcricao.sh  # desativado: apaga arquivos locais (ex.: run_transcricao.sh)
     _BR_ATU="atualizacao-\$(date +%Y%m%d-%H%M%S)"
     git checkout -b "\$_BR_ATU" "${commit_atualizacao}"
   else

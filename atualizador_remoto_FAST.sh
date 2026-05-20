@@ -937,7 +937,7 @@ if [ -n "${commit_atualizacao}" ]; then
   _BR_ATU="atualizacao-fast-${versao_atualizacao}-\$(date +%Y%m%d-%H%M%S)"
   git checkout -f "${commit_atualizacao}"
   git reset --hard "${commit_atualizacao}"
-  git clean -fd -e api_transcricao/run_transcricao.sh
+  # git clean -fd -e api_transcricao/run_transcricao.sh  # desativado: apaga arquivos locais (ex.: run_transcricao.sh)
   git checkout -b "\$_BR_ATU" 2>/dev/null || git checkout "\$_BR_ATU"
   _HEAD_ATU=\$(git rev-parse HEAD 2>/dev/null)
   if [ "\$_HEAD_ATU" != "${commit_atualizacao}" ]; then
@@ -961,7 +961,7 @@ else
   git reset --hard "origin/\$DEPLOY_BRANCH"
   printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
   git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
-  git clean -fd -e api_transcricao/run_transcricao.sh
+  # git clean -fd -e api_transcricao/run_transcricao.sh  # desativado: apaga arquivos locais (ex.: run_transcricao.sh)
 fi
 
 if [ -d "/home/deploy/${empresa}/api_transcricao" ] && [ -f "/home/deploy/${empresa}/api_transcricao/main.py" ]; then
@@ -1054,11 +1054,11 @@ EOF
   if [ -f "$_mf_transc_script" ]; then
     # shellcheck source=/dev/null
     source "$_mf_transc_script"
-    printf "${WHITE} >> Recriando run_transcricao.sh e PM2 da transcrição (git clean apaga o wrapper local)...${WHITE}\n"
+    printf "${WHITE} >> Garantindo run_transcricao.sh e PM2 da transcrição...${WHITE}\n"
     mf_transcricao_pos_atualizacao_git "${empresa}" "${porta_transcricao}" \
       || printf "${YELLOW} >> Aviso: falha ao reconfigurar transcrição. Use o menu Instalar transcrição ou pm2 logs ${empresa}-transcricao.${WHITE}\n"
   else
-    printf "${YELLOW} >> Aviso: tools/mf_transcricao_manutencao.sh não encontrado — transcrição pode falhar após git clean.${WHITE}\n"
+    printf "${YELLOW} >> Aviso: tools/mf_transcricao_manutencao.sh não encontrado.${WHITE}\n"
   fi
 
   sudo su - deploy <<RESTARTPM2ATUALIZACAO

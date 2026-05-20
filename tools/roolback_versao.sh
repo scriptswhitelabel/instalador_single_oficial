@@ -513,16 +513,13 @@ CLEAN
   printf "${GREEN} ✓ Alterações locais removidas\n${WHITE}"
   echo
   
-  # 5) Limpar arquivos não rastreados
-  printf "${WHITE} [5/11] Limpando arquivos não rastreados (git clean -fd)...\n"
-  sudo su - deploy <<CLEANFD
-cd "$APP_DIR"
-git clean -fd
-CLEANFD
-  if [ $? -ne 0 ]; then
-    trata_erro "git clean -fd"
-  fi
-  printf "${GREEN} ✓ Arquivos não rastreados removidos\n${WHITE}"
+  # 5) Limpar arquivos não rastreados (git clean desativado — preserva arquivos locais da instância)
+  printf "${WHITE} [5/11] Limpeza git clean — pulada (desativada)\n"
+  # sudo su - deploy <<CLEANFD
+# cd "$APP_DIR"
+# git clean -fd
+# CLEANFD
+  printf "${GREEN} ✓ Etapa de limpeza ignorada (git clean não utilizado)\n${WHITE}"
   echo
   
   # 6) Fazer checkout para o commit alvo (criando branch de rollback)

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Manutenção da API de transcrição após git pull/clean (FAST e atualização completa).
-# run_transcricao.sh é gerado localmente e é removido por "git clean -fd".
+# Manutenção da API de transcrição após git pull (FAST e atualização completa).
+# run_transcricao.sh é gerado localmente pelo instalador; garante wrapper e PM2 após atualização.
 
 mf_transcricao_aplicar_porta_main_py() {
   local main_py="$1"
