@@ -1317,17 +1317,40 @@ atualizar_codigo_wuzapi_git() {
     fi
 
     head_antes=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --short HEAD 2>/dev/null || echo "?")
-    printf "${WHITE} >> git fetch / pull (usuário ${git_user})...${WHITE}\n"
+    printf "${WHITE} >> git fetch + sincronizar com origin (usuário ${git_user})...${WHITE}\n"
+    printf "${YELLOW} >> Alterações locais em arquivos versionados serão descartadas; o .env é preservado.${WHITE}\n"
+    printf "${YELLOW} >> O Dockerfile será reajustado na etapa seguinte (corrigir_dockerfile).${WHITE}\n"
 
     sudo -u "$git_user" git -C "$wuz_dir" fetch origin 2>&1 || true
-    if ! sudo -u "$git_user" git -C "$wuz_dir" pull --ff-only 2>&1; then
-      printf "${YELLOW} >> Fast-forward falhou; tentando git pull normal...${WHITE}\n"
-      if ! sudo -u "$git_user" git -C "$wuz_dir" pull 2>&1; then
-        printf "${RED} >> ERRO no git pull em ${wuz_dir}.${WHITE}\n"
-        printf "${YELLOW} >> Verifique permissões e conflitos: sudo -u deploy git -C ${wuz_dir} status${WHITE}\n"
-        exit 1
-      fi
+
+    local branch remoto_ref
+    branch=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+      branch=""
+      for branch in main master; do
+        if sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
+          break
+        fi
+        branch=""
+      done
+      [ -z "$branch" ] && branch="main"
     fi
+    remoto_ref="origin/${branch}"
+    if ! sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/${remoto_ref}" 2>/dev/null; then
+      for branch in main master; do
+        if sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
+          remoto_ref="origin/${branch}"
+          break
+        fi
+      done
+    fi
+
+    if ! sudo -u "$git_user" git -C "$wuz_dir" reset --hard "${remoto_ref}" 2>&1; then
+      printf "${RED} >> ERRO ao alinhar com ${remoto_ref}.${WHITE}\n"
+      exit 1
+    fi
+    sudo -u "$git_user" git -C "$wuz_dir" pull --ff-only origin "${branch}" 2>&1 || \
+      sudo -u "$git_user" git -C "$wuz_dir" pull origin "${branch}" 2>&1 || true
 
     head_depois=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --short HEAD 2>/dev/null || echo "?")
     printf "${GREEN} >> Git: ${head_antes} → ${head_depois}${WHITE}\n"
