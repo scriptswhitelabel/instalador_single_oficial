@@ -350,12 +350,24 @@ whatsmeow_definir_portas_rabbit() {
     if [ -n "$amqp_ex" ] && [ -n "$mgmt_ex" ]; then
       wuzapi_rabbit_amqp_port="$amqp_ex"
       wuzapi_rabbit_mgmt_port="$mgmt_ex"
-      printf "${GREEN} >> Reutilizando portas já configuradas: AMQP ${wuzapi_rabbit_amqp_port} | Management ${wuzapi_rabbit_mgmt_port}${WHITE}\n\n"
-      sleep 1
-      return 0
     fi
   fi
 
+  if [ -z "${wuzapi_rabbit_amqp_port}" ] || [ -z "${wuzapi_rabbit_mgmt_port}" ]; then
+    wuzapi_rabbit_amqp_port="${wuzapi_rabbit_amqp_port:-$default_rabbitmq_amqp_port}"
+    wuzapi_rabbit_mgmt_port="${wuzapi_rabbit_mgmt_port:-$default_rabbitmq_mgmt_port}"
+  fi
+
+  whatsmeow_coletar_portas_rabbit_registradas
+  if ! whatsmeow_rabbit_portas_host_ocupadas "$wuzapi_rabbit_amqp_port" "$wuzapi_rabbit_mgmt_port"; then
+    printf "${GREEN} >> Portas RabbitMQ: AMQP ${wuzapi_rabbit_amqp_port} | Management ${wuzapi_rabbit_mgmt_port}${WHITE}\n\n"
+    salvar_variavel_instancia "wuzapi_rabbit_amqp_port" "${wuzapi_rabbit_amqp_port}"
+    salvar_variavel_instancia "wuzapi_rabbit_mgmt_port" "${wuzapi_rabbit_mgmt_port}"
+    sleep 1
+    return 0
+  fi
+
+  printf "${YELLOW} >> Portas ${wuzapi_rabbit_amqp_port}/${wuzapi_rabbit_mgmt_port} em uso — buscando par livre...${WHITE}\n"
   whatsmeow_coletar_portas_rabbit_registradas
   wuzapi_rabbit_amqp_port=$default_rabbitmq_amqp_port
   wuzapi_rabbit_mgmt_port=$default_rabbitmq_mgmt_port
@@ -814,6 +826,39 @@ EOF
     printf "${GREEN} >> Arquivo .env do wuzapi configurado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "configurar_env_wuzapi"
+}
+
+# Após git pull: só atualiza portas Rabbit no .env (não recria o arquivo inteiro).
+whatsmeow_atualizar_env_portas_rabbit() {
+  local env_file="/home/deploy/${empresa}/wuzapi/.env"
+  [ -f "$env_file" ] || return 0
+  if grep -q '^RABBITMQ_AMQP_PORT=' "$env_file" 2>/dev/null; then
+    sed -i "s|^RABBITMQ_AMQP_PORT=.*|RABBITMQ_AMQP_PORT=${wuzapi_rabbit_amqp_port}|" "$env_file"
+  else
+    echo "RABBITMQ_AMQP_PORT=${wuzapi_rabbit_amqp_port}" >>"$env_file"
+  fi
+  if grep -q '^RABBITMQ_MGMT_PORT=' "$env_file" 2>/dev/null; then
+    sed -i "s|^RABBITMQ_MGMT_PORT=.*|RABBITMQ_MGMT_PORT=${wuzapi_rabbit_mgmt_port}|" "$env_file"
+  else
+    echo "RABBITMQ_MGMT_PORT=${wuzapi_rabbit_mgmt_port}" >>"$env_file"
+  fi
+  chown deploy:deploy "$env_file" 2>/dev/null || true
+}
+
+# Reaplica docker-compose.yml do instalador (git sobrescreve com 5672 padrão do upstream).
+whatsmeow_reaplicar_compose_instalador() {
+  banner
+  printf "${WHITE} >> Reaplicando docker-compose.yml do instalador (portas da instância)...\n"
+  echo
+  carregar_variaveis
+  if [ -f "/home/deploy/${empresa}/wuzapi/.env" ]; then
+    local p
+    p=$(grep -m1 '^WUZAPI_PORT=' "/home/deploy/${empresa}/wuzapi/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -n "$p" ] && wuzapi_port="$p"
+  fi
+  whatsmeow_definir_portas_rabbit
+  configurar_docker_compose
+  whatsmeow_atualizar_env_portas_rabbit
 }
 
 # Verificar e corrigir DNS antes do build
@@ -1383,6 +1428,10 @@ rebuild_containers_whatsmeow_atualizacao() {
     cd "/home/deploy/${empresa}/wuzapi" || exit 1
     docker_compose_cmd="$docker_compose_cmd -p ${WUZAPI_COMPOSE_PROJECT}"
 
+    printf "${WHITE} >> Parando stack atual (mantém volumes de DB/RabbitMQ)...${WHITE}\n"
+    $docker_compose_cmd down 2>/dev/null || true
+    sleep 2
+
     printf "${WHITE} >> docker compose build wuzapi-server...${WHITE}\n"
     if ! $docker_compose_cmd build wuzapi-server 2>&1; then
       printf "${YELLOW} >> Build com cache falhou; tentando --no-cache...${WHITE}\n"
@@ -1560,6 +1609,7 @@ main_atualizar_whatsmeow() {
   selecionar_instancia_whatsmeow_atualizar
   carregar_variaveis
   atualizar_codigo_wuzapi_git
+  whatsmeow_reaplicar_compose_instalador
   corrigir_dockerfile_wuzapi
   rebuild_containers_whatsmeow_atualizacao
   reiniciar_servicos
