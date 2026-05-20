@@ -17,6 +17,7 @@ default_wuzapi_port=8090
 default_rabbitmq_amqp_port=5672
 default_rabbitmq_mgmt_port=15672
 WUZAPI_COMPOSE_PROJECT=""
+WHATSMEOW_COMPOSE_LEGACY=0
 wuzapi_rabbit_amqp_port="${default_rabbitmq_amqp_port}"
 wuzapi_rabbit_mgmt_port="${default_rabbitmq_mgmt_port}"
 
@@ -226,6 +227,95 @@ carregar_variaveis() {
     nome_titulo="MultiFlow"
   fi
   WUZAPI_COMPOSE_PROJECT="wuzapi_${empresa}"
+  whatsmeow_detectar_compose_project
+}
+
+# Detecta o projeto Docker Compose já em uso (evita duplicar stack na atualização).
+# Instalações antigas: projeto "wuzapi" (nome da pasta). Novas: "wuzapi_<empresa>".
+whatsmeow_detectar_compose_project() {
+  local wuz_dir="/home/deploy/${empresa}/wuzapi"
+  local proj_novo="wuzapi_${empresa}"
+  local port_host="${wuzapi_port:-$default_wuzapi_port}"
+  local holder names_all
+  WHATSMEOW_COMPOSE_LEGACY=0
+
+  if [ -f "${wuz_dir}/.env" ]; then
+    local p_env
+    p_env=$(grep -m1 '^WUZAPI_PORT=' "${wuz_dir}/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    [ -n "$p_env" ] && port_host="$p_env"
+  fi
+
+  names_all=$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
+
+  # Stack legada (compose sem "name:" — projeto = pasta wuzapi)
+  if echo "$names_all" | grep -qE '^wuzapi-(db|rabbitmq|wuzapi-server)(-|$)'; then
+    WUZAPI_COMPOSE_PROJECT="wuzapi"
+    WHATSMEOW_COMPOSE_LEGACY=1
+    printf "${GREEN} >> Stack Docker existente: projeto ${BLUE}wuzapi${GREEN} (instalação anterior).${WHITE}\n\n"
+    return 0
+  fi
+
+  # API já publicada na porta da instância (ex.: 8090) — usa o container que está na porta
+  holder=$(docker ps --filter "publish=${port_host}" --format '{{.Names}}' 2>/dev/null | head -1)
+  if [ -n "$holder" ]; then
+    case "$holder" in
+      wuzapi-wuzapi-server-*|wuzapi-server|wuzapi-wuzapi-server)
+        WUZAPI_COMPOSE_PROJECT="wuzapi"
+        WHATSMEOW_COMPOSE_LEGACY=1
+        printf "${GREEN} >> Stack na porta ${port_host}: projeto ${BLUE}wuzapi${GREEN} (${holder}).${WHITE}\n\n"
+        return 0
+        ;;
+      ${proj_novo}-wuzapi-server-*|${proj_novo}-server)
+        WUZAPI_COMPOSE_PROJECT="${proj_novo}"
+        printf "${GREEN} >> Stack na porta ${port_host}: projeto ${BLUE}${proj_novo}${GREEN}.${WHITE}\n\n"
+        return 0
+        ;;
+    esac
+  fi
+
+  if echo "$names_all" | grep -qE "^${proj_novo}-(db|rabbitmq|server|wuzapi-server)(-|$)"; then
+    WUZAPI_COMPOSE_PROJECT="${proj_novo}"
+    printf "${GREEN} >> Stack Docker existente: projeto ${BLUE}${proj_novo}${GREEN}.${WHITE}\n\n"
+    return 0
+  fi
+
+  if [ -f "${wuz_dir}/docker-compose.yml" ]; then
+    local nm
+    nm=$(grep -m1 '^name:' "${wuz_dir}/docker-compose.yml" 2>/dev/null | sed -E 's/^name:[[:space:]]*//; s/["'"'"']//g; s/[[:space:]]+$//')
+    if [ -n "$nm" ] && [ "$nm" != "${proj_novo}" ]; then
+      WUZAPI_COMPOSE_PROJECT="$nm"
+      [ "$nm" = "wuzapi" ] && WHATSMEOW_COMPOSE_LEGACY=1
+      printf "${GREEN} >> Projeto no docker-compose.yml: ${BLUE}${nm}${GREEN}.${WHITE}\n\n"
+      return 0
+    fi
+    # name: wuzapi_multiflow no YAML mas stack real é wuzapi — ignorar YAML se legado existir
+    if [ "$nm" = "${proj_novo}" ] && echo "$names_all" | grep -qE '^wuzapi-'; then
+      WUZAPI_COMPOSE_PROJECT="wuzapi"
+      WHATSMEOW_COMPOSE_LEGACY=1
+      printf "${YELLOW} >> docker-compose.yml com ${proj_novo}, mas containers ${BLUE}wuzapi-*${YELLOW} ativos — usando projeto ${BLUE}wuzapi${YELLOW}.${WHITE}\n\n"
+      return 0
+    fi
+    [ -n "$nm" ] && WUZAPI_COMPOSE_PROJECT="$nm" && [ "$nm" = "wuzapi" ] && WHATSMEOW_COMPOSE_LEGACY=1 && return 0
+  fi
+
+  WUZAPI_COMPOSE_PROJECT="${proj_novo}"
+}
+
+# Remove stack duplicada criada por atualização com projeto errado (ex.: wuzapi_multiflow junto de wuzapi).
+whatsmeow_remover_stack_orfao() {
+  local orfao="wuzapi_${empresa}"
+  [ "$orfao" = "$WUZAPI_COMPOSE_PROJECT" ] && return 0
+  if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qE "^${orfao}(-|$)"; then
+    return 0
+  fi
+  # Não remover órfã se a stack legada wuzapi ainda está em uso
+  if [ "$WUZAPI_COMPOSE_PROJECT" = "wuzapi" ] && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qE '^wuzapi-(db|rabbitmq|wuzapi-server)'; then
+    printf "${YELLOW} >> Limpando stack duplicada ${orfao} (a stack ativa é wuzapi)...${WHITE}\n"
+  fi
+  local docker_compose_cmd="docker compose"
+  docker compose version >/dev/null 2>&1 || docker_compose_cmd="docker-compose"
+  printf "${YELLOW} >> Removendo stack órfã ${orfao} (containers duplicados da atualização)...${WHITE}\n"
+  (cd "/home/deploy/${empresa}/wuzapi" && $docker_compose_cmd -p "$orfao" down 2>/dev/null) || true
 }
 
 whatsmeow_coletar_portas_em_uso() {
@@ -828,6 +918,20 @@ EOF
   } || trata_erro "configurar_env_wuzapi"
 }
 
+# Na atualização: reutiliza portas do RabbitMQ já publicadas pela stack (evita 5673+ e stack nova).
+whatsmeow_portas_rabbit_da_stack_atual() {
+  local rmq_name amqp_host mgmt_host
+  rmq_name=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^(${WUZAPI_COMPOSE_PROJECT}-rabbitmq|wuzapi-rabbitmq)-" | head -1)
+  [ -z "$rmq_name" ] && return 1
+  amqp_host=$(docker port "$rmq_name" 5672/tcp 2>/dev/null | head -1 | sed -n 's/.*:\([0-9]*\)$/\1/p')
+  mgmt_host=$(docker port "$rmq_name" 15672/tcp 2>/dev/null | head -1 | sed -n 's/.*:\([0-9]*\)$/\1/p')
+  [ -z "$amqp_host" ] || [ -z "$mgmt_host" ] && return 1
+  wuzapi_rabbit_amqp_port="$amqp_host"
+  wuzapi_rabbit_mgmt_port="$mgmt_host"
+  printf "${GREEN} >> Mantendo portas Rabbit da stack atual: AMQP ${wuzapi_rabbit_amqp_port} | Management ${wuzapi_rabbit_mgmt_port}${WHITE}\n\n"
+  return 0
+}
+
 # Após git pull: só atualiza portas Rabbit no .env (não recria o arquivo inteiro).
 whatsmeow_atualizar_env_portas_rabbit() {
   local env_file="/home/deploy/${empresa}/wuzapi/.env"
@@ -856,7 +960,9 @@ whatsmeow_reaplicar_compose_instalador() {
     p=$(grep -m1 '^WUZAPI_PORT=' "/home/deploy/${empresa}/wuzapi/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
     [ -n "$p" ] && wuzapi_port="$p"
   fi
-  whatsmeow_definir_portas_rabbit
+  if ! whatsmeow_portas_rabbit_da_stack_atual; then
+    whatsmeow_definir_portas_rabbit
+  fi
   configurar_docker_compose
   whatsmeow_atualizar_env_portas_rabbit
 }
@@ -967,13 +1073,19 @@ configurar_docker_compose() {
     source "$ARQUIVO_VARIAVEIS"
     local db_user="wuzapi_${empresa}"
     db_user="${db_user//[^a-zA-Z0-9_]}"
-    
+    local cn_server="" cn_db="" cn_rmq=""
+    if [ "${WHATSMEOW_COMPOSE_LEGACY}" != "1" ]; then
+      cn_server="    container_name: ${WUZAPI_COMPOSE_PROJECT}-server"
+      cn_db="    container_name: ${WUZAPI_COMPOSE_PROJECT}-db"
+      cn_rmq="    container_name: ${WUZAPI_COMPOSE_PROJECT}-rabbitmq"
+    fi
+
     # Criar arquivo docker-compose.yml
     cat > /home/deploy/${empresa}/wuzapi/docker-compose.yml <<DOCKERCOMPOSE
 name: ${WUZAPI_COMPOSE_PROJECT}
 services:
   wuzapi-server:
-    container_name: ${WUZAPI_COMPOSE_PROJECT}-server
+${cn_server}
     build:
       context: .
       dockerfile: Dockerfile
@@ -1012,7 +1124,7 @@ services:
     restart: always
 
   db:
-    container_name: ${WUZAPI_COMPOSE_PROJECT}-db
+${cn_db}
     image: postgres:16
     environment:
       POSTGRES_USER: \${DB_USER:-${db_user}}
@@ -1032,7 +1144,7 @@ services:
     restart: always
 
   rabbitmq:
-    container_name: ${WUZAPI_COMPOSE_PROJECT}-rabbitmq
+${cn_rmq}
     image: rabbitmq:3-management
     hostname: rabbitmq-${empresa}
     environment:
@@ -1426,11 +1538,10 @@ rebuild_containers_whatsmeow_atualizacao() {
     fi
 
     cd "/home/deploy/${empresa}/wuzapi" || exit 1
+    carregar_variaveis
     docker_compose_cmd="$docker_compose_cmd -p ${WUZAPI_COMPOSE_PROJECT}"
 
-    printf "${WHITE} >> Parando stack atual (mantém volumes de DB/RabbitMQ)...${WHITE}\n"
-    $docker_compose_cmd down 2>/dev/null || true
-    sleep 2
+    printf "${WHITE} >> Atualizando só wuzapi-server (projeto ${WUZAPI_COMPOSE_PROJECT}; DB/RabbitMQ intactos)...${WHITE}\n"
 
     printf "${WHITE} >> docker compose build wuzapi-server...${WHITE}\n"
     if ! $docker_compose_cmd build wuzapi-server 2>&1; then
@@ -1441,10 +1552,22 @@ rebuild_containers_whatsmeow_atualizacao() {
       fi
     fi
 
-    printf "${WHITE} >> docker compose up -d...${WHITE}\n"
-    if ! $docker_compose_cmd up -d 2>&1; then
-      printf "${RED} >> ERRO ao subir containers.${WHITE}\n"
-      exit 1
+    printf "${WHITE} >> docker compose up -d --no-deps --force-recreate wuzapi-server...${WHITE}\n"
+    if ! $docker_compose_cmd up -d --no-deps --force-recreate wuzapi-server 2>&1; then
+      if [ "${WHATSMEOW_COMPOSE_LEGACY}" = "1" ]; then
+        local legado_api
+        legado_api=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^wuzapi-wuzapi-server-' | head -1)
+        if [ -n "$legado_api" ]; then
+          printf "${YELLOW} >> Recriando container legado ${legado_api} com a nova imagem...${WHITE}\n"
+          docker stop "$legado_api" 2>/dev/null || true
+          docker rm "$legado_api" 2>/dev/null || true
+        fi
+      fi
+      if ! $docker_compose_cmd up -d --no-deps wuzapi-server 2>&1; then
+        printf "${RED} >> ERRO ao subir wuzapi-server (projeto ${WUZAPI_COMPOSE_PROJECT}).${WHITE}\n"
+        printf "${YELLOW} >> Porta ${wuzapi_port:-8090} em uso? Verifique: docker ps --filter publish=${wuzapi_port:-8090}${WHITE}\n"
+        exit 1
+      fi
     fi
 
     sleep 8
@@ -1608,10 +1731,12 @@ main_atualizar_whatsmeow() {
 
   selecionar_instancia_whatsmeow_atualizar
   carregar_variaveis
+  whatsmeow_remover_stack_orfao
   atualizar_codigo_wuzapi_git
   whatsmeow_reaplicar_compose_instalador
   corrigir_dockerfile_wuzapi
   rebuild_containers_whatsmeow_atualizacao
+  whatsmeow_remover_stack_orfao
   reiniciar_servicos
   reiniciar_pm2_backend
 

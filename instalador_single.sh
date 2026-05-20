@@ -301,8 +301,8 @@ instalar_whatsmeow() {
 atualizar_whatsmeow() {
   banner
   printf "${WHITE} >> Atualizar API WhatsMeow (WuzAPI)${WHITE}\n"
-  printf "${WHITE} >> Atualiza o código (git pull) e reconstrói o container wuzapi-server.${WHITE}\n"
-  printf "${YELLOW} >> Não remove banco Postgres nem RabbitMQ da instância.${WHITE}\n"
+  printf "${WHITE} >> Atualiza o código (git pull) e reconstrói só o container wuzapi-server da stack existente.${WHITE}\n"
+  printf "${YELLOW} >> Não cria stack nova nem remove banco Postgres / RabbitMQ.${WHITE}\n"
   echo
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   WHATSMEOW_SCRIPT="${SCRIPT_DIR}/instalador_whatsmeow.sh"
