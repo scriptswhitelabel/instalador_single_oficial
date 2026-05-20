@@ -297,6 +297,26 @@ instalar_whatsmeow() {
   fi
 }
 
+# Atualizar WhatsMeow (WuzAPI) já instalado: git pull + rebuild do container da API
+atualizar_whatsmeow() {
+  banner
+  printf "${WHITE} >> Atualizar API WhatsMeow (WuzAPI)${WHITE}\n"
+  printf "${WHITE} >> Atualiza o código (git pull) e reconstrói o container wuzapi-server.${WHITE}\n"
+  printf "${YELLOW} >> Não remove banco Postgres nem RabbitMQ da instância.${WHITE}\n"
+  echo
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  WHATSMEOW_SCRIPT="${SCRIPT_DIR}/instalador_whatsmeow.sh"
+  if [ -f "$WHATSMEOW_SCRIPT" ]; then
+    bash "$WHATSMEOW_SCRIPT" --atualizar
+    echo
+    printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+    read -r
+  else
+    printf "${RED} >> Arquivo ${WHATSMEOW_SCRIPT} não encontrado.${WHITE}\n"
+    sleep 3
+  fi
+}
+
 # --- Redis: Docker (instâncias) e nativo ---
 ferramentas_redis_dir_backup_instancia() {
   printf '/home/deploy/backup-%s/redis' "${empresa}"
@@ -1572,6 +1592,7 @@ menu_ferramentas() {
     printf "  ${BLUE}━━ Instalações e integrações ━━${WHITE}\n"
     printf "   [${BLUE}2${WHITE}] Instalar Push Notifications\n"
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
+    printf "   [${BLUE}21${WHITE}] Atualizar API WhatsMeow (WuzAPI — git pull + rebuild)\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
@@ -1624,6 +1645,9 @@ menu_ferramentas() {
       ;;
     3)
       instalar_whatsmeow
+      ;;
+    21)
+      atualizar_whatsmeow
       ;;
     4)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

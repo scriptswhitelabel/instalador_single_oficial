@@ -152,6 +152,66 @@ selecionar_instancia_whatsmeow() {
   sleep 1
 }
 
+# Só instâncias que já têm WhatsMeow instalado (pasta wuzapi + compose).
+selecionar_instancia_whatsmeow_atualizar() {
+  banner
+  printf "${WHITE} >> Qual instância atualizar (WhatsMeow / WuzAPI)?\n\n"
+  detectar_instancias_instaladas
+  local instancias_wz=()
+  local nomes_wz=()
+  local i arquivo_inst empresa_nome
+
+  for i in "${!INSTANCIAS_DETECTADAS[@]}"; do
+    arquivo_inst="${INSTANCIAS_DETECTADAS[$i]}"
+    empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+    [ -d "/home/deploy/${empresa_nome}/wuzapi" ] && [ -f "/home/deploy/${empresa_nome}/wuzapi/docker-compose.yml" ] || continue
+    instancias_wz+=("$arquivo_inst")
+    nomes_wz+=("$empresa_nome")
+  done
+
+  if [ ${#instancias_wz[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhuma instância com WhatsMeow instalado (/home/deploy/<empresa>/wuzapi).${WHITE}\n"
+    printf "${YELLOW} >> Use a opção 3 do menu para instalar primeiro.${WHITE}\n"
+    sleep 3
+    exit 1
+  fi
+
+  if [ ${#instancias_wz[@]} -eq 1 ]; then
+    ARQUIVO_VARIAVEIS="${instancias_wz[0]}"
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS"
+    printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE}\n\n"
+    sleep 1
+    return 0
+  fi
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  INSTÂNCIAS COM WHATSMEOW\n"
+  printf "═══════════════════════════════════════════════════════════${WHITE}\n\n"
+  local index=1
+  for i in "${!nomes_wz[@]}"; do
+    empresa_nome="${nomes_wz[$i]}"
+    # shellcheck source=/dev/null
+    source "${instancias_wz[$i]}" 2>/dev/null
+    local wz_port="${wuzapi_port:-}"
+    printf "  [${BLUE}%s${WHITE}] %s" "$index" "$empresa_nome"
+    [ -n "$wz_port" ] && printf " ${WHITE}(porta host ${wz_port})"
+    echo
+    index=$((index + 1))
+  done
+  printf "${YELLOW} >> Escolha (1-%s):${WHITE}\n" "${#instancias_wz[@]}"
+  read -r escolha_instancia
+  if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]] || [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt ${#instancias_wz[@]} ]; then
+    printf "${RED} >> Opção inválida.${WHITE}\n"
+    exit 1
+  fi
+  ARQUIVO_VARIAVEIS="${instancias_wz[$((escolha_instancia - 1))]}"
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
+  printf "${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n\n"
+  sleep 1
+}
+
 # Carregar variáveis
 carregar_variaveis() {
   if [ -n "$ARQUIVO_VARIAVEIS" ] && [ -f "$ARQUIVO_VARIAVEIS" ]; then
@@ -1227,6 +1287,97 @@ subir_containers_whatsmeow() {
   } || trata_erro "subir_containers_whatsmeow"
 }
 
+# Atualizar código do repositório wuzapi (git pull — não apaga .env nem volumes Docker).
+atualizar_codigo_wuzapi_git() {
+  banner
+  printf "${WHITE} >> Atualizando código do WuzAPI (git)...\n"
+  echo
+  {
+    local wuz_dir="/home/deploy/${empresa}/wuzapi"
+    cd "$wuz_dir" || exit 1
+
+    if [ ! -d .git ]; then
+      printf "${RED} >> Pasta não é um repositório git. Reinstale pelo menu (opção 3).${WHITE}\n"
+      exit 1
+    fi
+
+    if [ -f .env ]; then
+      cp -a .env ".env.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+      printf "${GREEN} >> Backup do .env criado antes do pull.${WHITE}\n"
+    fi
+
+    local head_antes head_depois
+    head_antes=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+
+    git fetch origin 2>&1 || true
+    if ! git pull --ff-only 2>&1; then
+      printf "${YELLOW} >> Fast-forward falhou; tentando git pull normal...${WHITE}\n"
+      if ! git pull 2>&1; then
+        printf "${RED} >> ERRO no git pull. Resolva conflitos em ${wuz_dir} e tente de novo.${WHITE}\n"
+        exit 1
+      fi
+    fi
+
+    head_depois=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+    printf "${GREEN} >> Git: ${head_antes} → ${head_depois}${WHITE}\n"
+    chown -R deploy:deploy "$wuz_dir" 2>/dev/null || true
+    sleep 1
+  } || trata_erro "atualizar_codigo_wuzapi_git"
+}
+
+# Rebuild só do serviço da API (preserva Postgres/RabbitMQ — sem docker compose down -v).
+rebuild_containers_whatsmeow_atualizacao() {
+  banner
+  printf "${WHITE} >> Rebuild do container wuzapi-server (mantém banco e RabbitMQ)...\n"
+  echo
+  {
+    if ! command -v docker >/dev/null 2>&1; then
+      printf "${RED} >> Docker não encontrado.${WHITE}\n"
+      exit 1
+    fi
+
+    local docker_compose_cmd="docker compose"
+    if ! docker compose version >/dev/null 2>&1; then
+      if command -v docker-compose >/dev/null 2>&1; then
+        docker_compose_cmd="docker-compose"
+      else
+        printf "${RED} >> docker compose não disponível.${WHITE}\n"
+        exit 1
+      fi
+    fi
+
+    cd "/home/deploy/${empresa}/wuzapi" || exit 1
+    docker_compose_cmd="$docker_compose_cmd -p ${WUZAPI_COMPOSE_PROJECT}"
+
+    printf "${WHITE} >> docker compose build wuzapi-server...${WHITE}\n"
+    if ! $docker_compose_cmd build wuzapi-server 2>&1; then
+      printf "${YELLOW} >> Build com cache falhou; tentando --no-cache...${WHITE}\n"
+      if ! $docker_compose_cmd build --no-cache wuzapi-server 2>&1; then
+        printf "${RED} >> ERRO no build. Verifique: cd /home/deploy/${empresa}/wuzapi && $docker_compose_cmd build wuzapi-server${WHITE}\n"
+        exit 1
+      fi
+    fi
+
+    printf "${WHITE} >> docker compose up -d...${WHITE}\n"
+    if ! $docker_compose_cmd up -d 2>&1; then
+      printf "${RED} >> ERRO ao subir containers.${WHITE}\n"
+      exit 1
+    fi
+
+    sleep 8
+    $docker_compose_cmd ps
+    echo
+    if $docker_compose_cmd ps 2>/dev/null | grep -qE "wuzapi-server|server"; then
+      if $docker_compose_cmd ps 2>/dev/null | grep -qiE "Up|Running|healthy"; then
+        printf "${GREEN} >> Containers atualizados.${WHITE}\n"
+      else
+        printf "${YELLOW} >> Verifique: $docker_compose_cmd logs wuzapi-server --tail 80${WHITE}\n"
+      fi
+    fi
+    sleep 2
+  } || trata_erro "rebuild_containers_whatsmeow_atualizacao"
+}
+
 # Reiniciar serviços
 reiniciar_servicos() {
   banner
@@ -1356,5 +1507,47 @@ main() {
   sleep 5
 }
 
-# Executar função principal
-main
+# Atualizar WhatsMeow já instalado: git pull + rebuild wuzapi-server (sem reinstalar do zero).
+main_atualizar_whatsmeow() {
+  banner
+  printf "${WHITE} >> Atualizar WhatsMeow (WuzAPI)${WHITE}\n"
+  printf "${WHITE} >> Fluxo: git pull → ajuste Dockerfile (se preciso) → rebuild do container da API.${WHITE}\n"
+  printf "${YELLOW} >> Postgres e RabbitMQ permanecem (sem apagar volumes).${WHITE}\n"
+  echo
+  printf "${WHITE} >> Continuar? (S/N):${WHITE}\n"
+  read -r conf
+  conf=$(echo "$conf" | tr '[:lower:]' '[:upper:]')
+  if [ "$conf" != "S" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    exit 0
+  fi
+
+  selecionar_instancia_whatsmeow_atualizar
+  carregar_variaveis
+  atualizar_codigo_wuzapi_git
+  corrigir_dockerfile_wuzapi
+  rebuild_containers_whatsmeow_atualizacao
+  reiniciar_servicos
+  reiniciar_pm2_backend
+
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
+  local subdominio_limpo
+  subdominio_limpo=$(echo "${subdominio_whatsmeow:-}" | sed 's|https\?://||')
+  [ -z "$subdominio_limpo" ] && subdominio_limpo="localhost:${wuzapi_port:-8090}"
+
+  banner
+  printf "${GREEN} >> Atualização do WhatsMeow (${empresa}) concluída.${WHITE}\n"
+  echo
+  printf "${WHITE}   URL: ${YELLOW}https://${subdominio_limpo}${WHITE}\n"
+  printf "${WHITE}   Logs: ${YELLOW}cd /home/deploy/${empresa}/wuzapi && docker compose -p ${WUZAPI_COMPOSE_PROJECT} logs wuzapi-server --tail 50${WHITE}\n"
+  echo
+  sleep 3
+}
+
+if [ "${1:-}" = "--atualizar" ]; then
+  main_atualizar_whatsmeow
+else
+  main
+fi
