@@ -581,9 +581,12 @@ backup_app_atualizar() {
     # shellcheck source=/dev/null
     source "$MF_BACKUP_SCRIPT"
     if mf_backup_banco_empresa "${empresa}"; then
-      printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO}\n"
+      local bk_sz
+      bk_sz=$(wc -c <"${MF_BACKUP_ARQUIVO}" 2>/dev/null | tr -d ' ')
+      printf "${GREEN} >> Backup concluído: ${MF_BACKUP_ARQUIVO} (${bk_sz} bytes)\n"
     else
       printf "${RED} >> Falha ao gerar backup em /home/deploy/backup-${empresa}/${WHITE}\n"
+      printf "${RED} >> Verifique container postgres_${empresa} (VPS multi-instância) ou conexão host/PgBouncer.${WHITE}\n"
       exit 1
     fi
     sleep 2
@@ -646,6 +649,25 @@ otimiza_banco_atualizar() {
       printf "${YELLOW} >> AVISO: Senha do banco não encontrada. Pulando otimização.\n${WHITE}"
       return 0
     fi
+
+    # Estimar tamanho do banco pra dar ideia do tempo de VACUUM FULL.
+    db_size_bytes=$(PGPASSWORD="$db_password" psql -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" -At -c "SELECT pg_database_size('${empresa}')" 2>/dev/null || echo 0)
+    db_size_h=$(PGPASSWORD="$db_password" psql -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" -At -c "SELECT pg_size_pretty(pg_database_size('${empresa}'))" 2>/dev/null || echo "?")
+    # Estimativa grosseira: ~100MB/min em VACUUM FULL (varia com I/O do disco).
+    est_min=$(( db_size_bytes / 100000000 + 1 ))
+
+    printf "${YELLOW} >> Otimização do banco: VACUUM FULL + REINDEX + ANALYZE.\n"
+    printf "${YELLOW}    Banco: ${empresa} | Tamanho: ${db_size_h} | Estimativa: ~${est_min} min\n"
+    printf "${YELLOW}    ATENÇÃO: VACUUM FULL bloqueia o banco enquanto roda (backend já está parado, sem impacto extra).\n"
+    printf "${YELLOW} >> Executar agora? (S/N — padrão N, pode rodar manualmente depois): ${WHITE}"
+    read -r run_vacuum
+
+    if [[ ! "$run_vacuum" =~ ^[Ss]$ ]]; then
+      printf "${WHITE} >> Otimização pulada. Para rodar depois manualmente:\n"
+      printf "${WHITE}    PGPASSWORD='***' vacuumdb -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} --full --analyze\n${WHITE}"
+      return 0
+    fi
+
     sudo su - root <<EOF
     PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
     PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
