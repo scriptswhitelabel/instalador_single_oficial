@@ -1026,7 +1026,7 @@ for mem in 4096 3072 2048; do
   printf "${YELLOW} >> Tentativa com ${mem} MB falhou. Tentando próximo limite...${WHITE}\n"
   sleep 2
 done
-if [ "$build_ok" -ne 1 ]; then
+if [ "\$build_ok" -ne 1 ]; then
   echo "ERRO: Falha no build do frontend mesmo após fallback de memória (4096/3072/2048)."
   exit 1
 fi
@@ -1054,6 +1054,8 @@ EOF
   if [ -f "$_mf_transc_script" ]; then
     # shellcheck source=/dev/null
     source "$_mf_transc_script"
+    MF_TRANSC_MAINT_SCRIPT="$_mf_transc_script"
+    chmod 755 "$_mf_transc_script" 2>/dev/null || true
     printf "${WHITE} >> Garantindo run_transcricao.sh e PM2 da transcrição...${WHITE}\n"
     mf_transcricao_pos_atualizacao_git "${empresa}" "${porta_transcricao}" \
       || printf "${YELLOW} >> Aviso: falha ao reconfigurar transcrição. Use o menu Instalar transcrição ou pm2 logs ${empresa}-transcricao.${WHITE}\n"

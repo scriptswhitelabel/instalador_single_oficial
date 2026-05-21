@@ -71,17 +71,38 @@ mf_transcricao_pm2_garantir() {
   return 0
 }
 
+# Copia o script para pasta da instância (deploy não lê /root).
+mf_transcricao_script_para_deploy() {
+  local empresa="$1"
+  local dest="/home/deploy/${empresa}/.mf_transcricao_manutencao.sh"
+  local src="${MF_TRANSC_MAINT_SCRIPT:-}"
+
+  if [ -z "$src" ] || [ ! -f "$src" ]; then
+    src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_transcricao_manutencao.sh"
+  fi
+  [ -f "$src" ] || src="/root/instalador_single_oficial/tools/mf_transcricao_manutencao.sh"
+  [ -f "$src" ] || return 1
+
+  cp -f "$src" "$dest"
+  chmod 755 "$dest"
+  chown deploy:deploy "$dest" 2>/dev/null || true
+  echo "$dest"
+}
+
 # Chamada após git reset/pull/clean (como root).
 mf_transcricao_pos_atualizacao_git() {
   local empresa="$1"
   local porta="${2:-4002}"
   local transc_dir="/home/deploy/${empresa}/api_transcricao"
   local main_py="${transc_dir}/main.py"
+  local script_deploy
 
   [ -f "$main_py" ] || return 0
 
   mf_transcricao_aplicar_porta_main_py "$main_py" "$porta"
   mf_transcricao_garantir_run_wrapper "$empresa" || return 1
+
+  script_deploy=$(mf_transcricao_script_para_deploy "$empresa") || return 1
 
   sudo su - deploy <<DEPLOYTRANSC
 set +e
@@ -94,7 +115,7 @@ else
   fi
 fi
 # shellcheck source=/dev/null
-. /root/instalador_single_oficial/tools/mf_transcricao_manutencao.sh
+. "${script_deploy}"
 mf_transcricao_pip_deps_leve "${transc_dir}"
 mf_transcricao_pm2_garantir "${empresa}"
 DEPLOYTRANSC
