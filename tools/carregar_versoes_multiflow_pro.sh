@@ -3,6 +3,9 @@
 # Uso: source este arquivo; mf_carregar_versoes_no_array VERSOES_INSTALACAO
 #      ou mf_carregar_versoes_no_array VERSOES
 
+# Aviso exibido na opção [0] Mais Recente (instalação, FAST, atualização completa).
+MF_AVISO_OPCAO_MAIS_RECENTE="( Versão DEMO para Homologação )"
+
 mf_arquivo_versoes_multiflow_pro() {
   if [ -n "${INSTALADOR_DIR:-}" ] && [ -f "${INSTALADOR_DIR}/tools/versoes_multiflow_pro.conf" ]; then
     printf '%s\n' "${INSTALADOR_DIR}/tools/versoes_multiflow_pro.conf"

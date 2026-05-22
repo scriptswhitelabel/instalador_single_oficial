@@ -267,7 +267,7 @@ mostrar_lista_versoes_instalacao() {
   printf "═══════════════════════════════════════════════════════════\n${WHITE}"
   echo
   
-  printf "${BLUE}  [0]${WHITE} Mais Recente${WHITE}\n"
+  printf "${BLUE}  [0]${WHITE} Mais Recente ${YELLOW}${MF_AVISO_OPCAO_MAIS_RECENTE}${WHITE}\n"
   printf "      Instala a versão mais recente disponível no repositório\n"
   echo
   
@@ -321,7 +321,7 @@ selecionar_versao_instalacao() {
   if [ "$ESCOLHA" -eq 0 ]; then
     declare -g versao_instalacao="Mais Recente"
     declare -g commit_instalacao=""
-    printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE}\n"
+    printf "\n${GREEN} >> Versão selecionada: ${BLUE}Mais Recente${WHITE} ${YELLOW}${MF_AVISO_OPCAO_MAIS_RECENTE}${WHITE}\n"
     printf "${GREEN} >> Será instalada a versão mais recente disponível no repositório${WHITE}\n"
     echo
     sleep 2
