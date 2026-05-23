@@ -239,7 +239,9 @@ mostrar_lista_versoes() {
   
   local index=1
   for versao in $(printf '%s\n' "${!VERSOES[@]}" | sort -V -r); do
-    printf "${BLUE}  [$index]${WHITE} Versão ${GREEN}${versao}${WHITE}\n"
+    printf "${BLUE}  [$index]${WHITE} "
+    mf_exibir_rotulo_versao_menu "$versao" "VERSOES"
+    printf "Versão ${GREEN}${versao}${WHITE}\n"
     printf "      Commit: ${YELLOW}${VERSOES[$versao]}${WHITE}\n"
     echo
     ((index++))

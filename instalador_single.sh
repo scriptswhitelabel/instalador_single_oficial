@@ -3609,7 +3609,9 @@ mostrar_lista_versoes_instalacao() {
   
   local index=1
   for versao in $(printf '%s\n' "${!VERSOES_INSTALACAO[@]}" | sort -V -r); do
-    printf "${BLUE}  [$index]${WHITE} Versão ${GREEN}${versao}${WHITE}\n"
+    printf "${BLUE}  [$index]${WHITE} "
+    mf_exibir_rotulo_versao_menu "$versao" "VERSOES_INSTALACAO"
+    printf "Versão ${GREEN}${versao}${WHITE}\n"
     printf "      Commit: ${YELLOW}${VERSOES_INSTALACAO[$versao]}${WHITE}\n"
     echo
     ((index++))
