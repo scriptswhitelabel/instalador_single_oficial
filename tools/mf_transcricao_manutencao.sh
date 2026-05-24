@@ -34,6 +34,20 @@ EOF
   return 0
 }
 
+# Python 3.13+ removeu aifc/audioop da stdlib; SpeechRecognition ainda importa aifc.
+mf_transcricao_pip_python313_compat() {
+  local pip_cmd="${1:-pip3}"
+
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 13) else 1)' 2>/dev/null || return 0
+
+  printf " >> Python 3.13+: instalando standard-aifc e audioop-lts (SpeechRecognition)...\n"
+  $pip_cmd install --user --break-system-packages standard-aifc audioop-lts 2>/dev/null \
+    || $pip_cmd install --user standard-aifc audioop-lts 2>/dev/null \
+    || true
+  return 0
+}
+
 # Atualiza dependências Python sem apagar venv (rápido; falhas não interrompem o fluxo).
 mf_transcricao_pip_deps_leve() {
   local transc_dir="$1"
@@ -48,6 +62,7 @@ mf_transcricao_pip_deps_leve() {
       || $pip_cmd install --user --break-system-packages -r "$req" 2>/dev/null \
       || true
   fi
+  mf_transcricao_pip_python313_compat "$pip_cmd"
   return 0
 }
 

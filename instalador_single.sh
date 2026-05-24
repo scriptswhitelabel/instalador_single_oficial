@@ -1017,16 +1017,22 @@ importar_backup_banco_ferramentas() {
   return 0
 }
 
-# Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo)
+# Importar/restaurar backup do banco da API Oficial (PostgreSQL nativo ou Alta Performance / Docker)
 importar_backup_banco_api_oficial_ferramentas() {
   banner
-  printf "${WHITE} >> Importar backup do banco da API Oficial (PostgreSQL nativo)...\n"
+  printf "${WHITE} >> Importar backup do banco da API Oficial...\n"
   echo
 
   if ! selecionar_instancia_atualizar "importar o backup da API Oficial"; then
     sleep 2
     return 1
   fi
+
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+  local alta_perf="${ALTA_PERFORMANCE:-0}"
 
   local db_oficial=""
   if [ -f "/home/deploy/${empresa}/api_oficial/.env" ]; then
@@ -1043,21 +1049,58 @@ importar_backup_banco_api_oficial_ferramentas() {
     fi
   fi
 
-  printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE} | Banco API Oficial: ${YELLOW}${db_oficial}${WHITE}\n"
+  if [ "${alta_perf}" = "1" ]; then
+    printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE} | Banco API Oficial: ${YELLOW}${db_oficial}${WHITE} | ${BLUE}Alta Performance (Docker)${WHITE}\n"
+  else
+    printf "${GREEN} >> Instância: ${BLUE}${empresa}${WHITE} | Banco API Oficial: ${YELLOW}${db_oficial}${WHITE} | PostgreSQL nativo${WHITE}\n"
+  fi
   echo
 
-  BACKUP_BASE="/home/deploy/backup-${empresa}"
+  local BACKUP_BASE BACKUP_BASE_LEGACY
+  if [ "${alta_perf}" = "1" ]; then
+    BACKUP_BASE="/home/deploy/backup-bd-docker-${empresa}"
+    BACKUP_BASE_LEGACY="/home/deploy/backup-bd-docker"
+    if [ ! -d "${BACKUP_BASE}" ] && [ -d "${BACKUP_BASE_LEGACY}" ]; then
+      printf "${YELLOW} >> Pasta por empresa não encontrada; usando legado: ${BACKUP_BASE_LEGACY}${WHITE}\n"
+      BACKUP_BASE="${BACKUP_BASE_LEGACY}"
+    fi
+  else
+    BACKUP_BASE="/home/deploy/backup-${empresa}"
+  fi
+
   if [ ! -d "$BACKUP_BASE" ]; then
-    printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
+    if [ "${alta_perf}" = "1" ]; then
+      printf "${RED} >> Pasta não encontrada: /home/deploy/backup-bd-docker-${empresa}${WHITE}\n"
+      printf "${YELLOW} >> Em Alta Performance os backups ficam em backup-bd-docker-<empresa> (opção 6 do menu).${WHITE}\n"
+    else
+      printf "${RED} >> Pasta não encontrada: ${BACKUP_BASE}${WHITE}\n"
+    fi
     sleep 2
     return 1
   fi
+
   BACKUPS_SQL=()
-  while IFS= read -r f; do
-    [ -n "$f" ] && BACKUPS_SQL+=("$f")
-  done < <(find "$BACKUP_BASE" -maxdepth 2 -type f -name "*.sql" 2>/dev/null | sort -r)
+  if [ "${alta_perf}" = "1" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] && BACKUPS_SQL+=("$f")
+    done < <(find "$BACKUP_BASE" -maxdepth 1 -type f \( -name "backup-${db_oficial}-*.sql.gz" -o -name "backup-${db_oficial}-*.sql" -o -name "backup_${db_oficial}_*.sql.gz" -o -name "backup_${db_oficial}_*.sql" \) 2>/dev/null | sort -r)
+    if [ ${#BACKUPS_SQL[@]} -eq 0 ]; then
+      while IFS= read -r f; do
+        [ -n "$f" ] && BACKUPS_SQL+=("$f")
+      done < <(find "$BACKUP_BASE" -maxdepth 1 -type f \( -name "*.sql.gz" -o -name "*.sql" \) 2>/dev/null | sort -r)
+      if [ ${#BACKUPS_SQL[@]} -gt 0 ]; then
+        printf "${YELLOW} >> Nenhum backup com nome do banco ${db_oficial}; listando todos da pasta Docker.${WHITE}\n"
+        echo
+      fi
+    fi
+  else
+    while IFS= read -r f; do
+      [ -n "$f" ] && BACKUPS_SQL+=("$f")
+    done < <(find "$BACKUP_BASE" -maxdepth 2 -type f -name "*.sql" 2>/dev/null | sort -r)
+  fi
+
   if [ ${#BACKUPS_SQL[@]} -eq 0 ]; then
-    printf "${RED} >> Nenhum arquivo .sql encontrado em ${BACKUP_BASE}${WHITE}\n"
+    printf "${RED} >> Nenhum backup encontrado em ${BACKUP_BASE}${WHITE}\n"
     sleep 2
     return 1
   fi
@@ -1104,6 +1147,77 @@ importar_backup_banco_api_oficial_ferramentas() {
     sleep 2
     return 0
   fi
+
+  if [ "${alta_perf}" = "1" ]; then
+    local senha_db="${senha_deploy}"
+    local POSTGRES_CONTAINER="postgres_${empresa}"
+    local db_destino="${db_oficial}"
+    [ "$op_tipo" = "2" ] && db_destino="${db_oficial}_novo"
+
+    if [ -z "$senha_db" ]; then
+      [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep -m1 '^DB_PASS=' "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    fi
+    if [ -z "$senha_db" ]; then
+      printf "${YELLOW} >> Informe a senha do banco (senha_deploy):${WHITE}\n"
+      read -s -p "> " senha_db
+      echo
+      [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+    fi
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${POSTGRES_CONTAINER}$"; then
+      printf "${RED} >> Container ${POSTGRES_CONTAINER} não está em execução.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+
+    ferramentas_pm2_parar_para_manutencao_pg || true
+
+    if [ "$op_tipo" = "1" ]; then
+      printf "${WHITE} >> Encerrando conexões com ${db_oficial}...${WHITE}\n"
+      docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_oficial}' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
+      sleep 1
+      printf "${WHITE} >> Apagando banco existente e criando novo...${WHITE}\n"
+      docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "DROP DATABASE IF EXISTS ${db_oficial};" >/dev/null 2>&1 || true
+      if ! docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "CREATE DATABASE ${db_oficial} OWNER ${empresa};" >/dev/null 2>&1; then
+        printf "${RED} >> Erro ao criar banco ${db_oficial} no container ${POSTGRES_CONTAINER}.${WHITE}\n"
+        ferramentas_pm2_aviso_retomada_manual_pg || true
+        sleep 2
+        return 1
+      fi
+      db_destino="${db_oficial}"
+    else
+      printf "${WHITE} >> Criando banco ${db_destino} (mantendo ${db_oficial})...${WHITE}\n"
+      if ! docker exec "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d postgres -c "CREATE DATABASE ${db_destino} OWNER ${empresa};" >/dev/null 2>&1; then
+        printf "${RED} >> Erro ao criar banco ${db_destino}. Pode já existir.${WHITE}\n"
+        ferramentas_pm2_aviso_retomada_manual_pg || true
+        sleep 2
+        return 1
+      fi
+    fi
+
+    printf "${WHITE} >> Restaurando backup em ${db_destino} (Docker)...${WHITE}\n"
+    local restore_ok=0
+    if [[ "${arquivo_escolhido}" == *.sql.gz ]]; then
+      if gunzip -c "${arquivo_escolhido}" | docker exec -i "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d "${db_destino}" >/dev/null 2>&1; then
+        restore_ok=1
+      fi
+    elif cat "${arquivo_escolhido}" | docker exec -i "${POSTGRES_CONTAINER}" env PGPASSWORD="${senha_db}" psql -h 127.0.0.1 -p 5432 -U "${empresa}" -d "${db_destino}" >/dev/null 2>&1; then
+      restore_ok=1
+    fi
+
+    if [ "$restore_ok" = "1" ]; then
+      printf "${GREEN} >> Banco da API Oficial (${db_destino}) restaurado com sucesso no Postgres Docker.${WHITE}\n"
+      if [ "$op_tipo" = "2" ]; then
+        printf "${YELLOW} >> Para usar na API Oficial, altere DATABASE_NAME no .env da API Oficial para: ${db_destino}${WHITE}\n"
+      fi
+    else
+      printf "${RED} >> Erro ao restaurar o backup em ${db_destino}. Verifique o arquivo e os logs do container.${WHITE}\n"
+    fi
+    ferramentas_pm2_aviso_retomada_manual_pg || true
+    echo
+    sleep 2
+    return 0
+  fi
+
   local usuario_db="${empresa}"
   local senha_db="${senha_deploy}"
   [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
@@ -1164,7 +1278,7 @@ importar_backup_banco_api_oficial_ferramentas() {
     PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h 127.0.0.1 -p "${db_port}" -d "${db_novo}" -f "$arquivo_escolhido" 2>/dev/null
     if [ $? -eq 0 ]; then
       printf "${GREEN} >> Banco ${db_novo} restaurado com sucesso.${WHITE}\n"
-      printf "${YELLOW} >> Para usar na API Oficial, altere DB_NAME no .env da API Oficial para: ${db_novo}${WHITE}\n"
+      printf "${YELLOW} >> Para usar na API Oficial, altere DATABASE_NAME no .env da API Oficial para: ${db_novo}${WHITE}\n"
     else
       printf "${YELLOW} >> Restauração concluída (verifique erros acima).${WHITE}\n"
     fi
@@ -1661,7 +1775,7 @@ menu_ferramentas() {
     printf "  ${BLUE}━━ Banco de dados (PostgreSQL) ━━${WHITE}\n"
     printf "   [${BLUE}10${WHITE}] Importar backup do banco (instância + escolher banco)\n"
     printf "   [${BLUE}11${WHITE}] Backup do banco\n"
-    printf "   [${BLUE}12${WHITE}] Importar backup do banco da API Oficial\n"
+    printf "   [${BLUE}12${WHITE}] Importar backup do banco da API Oficial (nativo ou Alta Performance)\n"
     printf "   [${BLUE}13${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}14${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
     echo
@@ -6174,6 +6288,14 @@ TEMPSCRIPT
         printf "${YELLOW} >> Erro na instalação. Tentando com --break-system-packages...${WHITE}\n"
         \$PIP_CMD install --user --break-system-packages -r "\$TRANSC_DIR/requirements.txt" 2>&1 | grep -v "already satisfied\|Requirement already satisfied" || true
         printf "${GREEN} >> ✓ Dependências instaladas${WHITE}\n"
+      fi
+      if [ -f /root/instalador_single_oficial/tools/mf_transcricao_manutencao.sh ]; then
+        # shellcheck source=/dev/null
+        . /root/instalador_single_oficial/tools/mf_transcricao_manutencao.sh
+        mf_transcricao_pip_python313_compat "\$PIP_CMD"
+      elif python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 13) else 1)' 2>/dev/null; then
+        printf "${YELLOW} >> Python 3.13+: instalando standard-aifc e audioop-lts...${WHITE}\n"
+        \$PIP_CMD install --user --break-system-packages standard-aifc audioop-lts 2>/dev/null || true
       fi
     else
       printf "${YELLOW} >> requirements.txt não encontrado. Instalando dependências básicas...${WHITE}\n"
