@@ -27,6 +27,21 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Ubuntu 24 (imagem mínima) pode não trazer sudo; o instalador usa sudo em várias etapas
+mf_garantir_sudo() {
+  command -v sudo >/dev/null 2>&1 && return 0
+  printf "${YELLOW} >> Pacote sudo não encontrado. Instalando (comum em Ubuntu 24 minimal)...${WHITE}\n"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y || return 1
+  apt-get install -y sudo || return 1
+  printf "${GREEN} >> sudo instalado com sucesso.${WHITE}\n"
+}
+
+mf_garantir_sudo || {
+  printf "${RED} >> ERRO: não foi possível instalar sudo. Execute como root: apt update && apt install -y sudo${WHITE}\n"
+  exit 1
+}
+
 banner() {
   printf " ${BLUE}"
   printf "\n\n"
