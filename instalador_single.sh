@@ -42,6 +42,44 @@ mf_garantir_sudo || {
   exit 1
 }
 
+# Codename APT (noble, jammy, trixie…) sem depender só de lsb-release (Ubuntu 24 minimal / Debian)
+mf_detectar_codename_apt() {
+  local codename id ver
+
+  codename="$(lsb_release -cs 2>/dev/null || true)"
+  if [ -n "$codename" ]; then
+    printf '%s\n' "$codename"
+    return 0
+  fi
+
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    id="${ID:-}"
+    ver="${VERSION_ID:-}"
+
+    if [ -n "${VERSION_CODENAME:-}" ] && [ "${VERSION_CODENAME}" != "n/a" ] && [ "${VERSION_CODENAME}" != "unknown" ]; then
+      printf '%s\n' "$VERSION_CODENAME"
+      return 0
+    fi
+    if [ -n "${UBUNTU_CODENAME:-}" ]; then
+      printf '%s\n' "$UBUNTU_CODENAME"
+      return 0
+    fi
+
+    case "${id}:${ver}" in
+      ubuntu:24.04|ubuntu:24.04*) printf '%s\n' noble; return 0 ;;
+      ubuntu:22.04|ubuntu:22.04*) printf '%s\n' jammy; return 0 ;;
+      ubuntu:20.04|ubuntu:20.04*) printf '%s\n' focal; return 0 ;;
+      debian:13|debian:13.*)      printf '%s\n' trixie; return 0 ;;
+      debian:12|debian:12.*)      printf '%s\n' bookworm; return 0 ;;
+      debian:11|debian:11.*)      printf '%s\n' bullseye; return 0 ;;
+    esac
+  fi
+
+  return 1
+}
+
 banner() {
   printf " ${BLUE}"
   printf "\n\n"
@@ -2651,7 +2689,7 @@ atualiza_vps_base() {
       fi
     fi
     
-    sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && sudo DEBIAN_FRONTEND=noninteractive apt-get install build-essential -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apparmor-utils
+    sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" && sudo DEBIAN_FRONTEND=noninteractive apt-get install build-essential lsb-release -y && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apparmor-utils
     touch "${UPDATE_FILE}"
     sleep 2
   } || trata_erro "atualiza_vps_base"
@@ -2829,10 +2867,20 @@ instala_postgres_base() {
     return 1
   fi
 
-  local ubuntu_codename
-  ubuntu_codename="$(lsb_release -cs 2>/dev/null || true)"
-  if [ -n "$ubuntu_codename" ]; then
-    sudo sh -c "echo 'deb http://apt.postgresql.org/pub/repos/apt ${ubuntu_codename}-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
+  local distro_codename distro_id distro_ver
+  distro_codename="$(mf_detectar_codename_apt 2>/dev/null || true)"
+  distro_id="?"
+  distro_ver="?"
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    distro_id="${NAME:-${ID:-?}}"
+    distro_ver="${VERSION_ID:-?}"
+  fi
+
+  if [ -n "$distro_codename" ]; then
+    printf "${WHITE} >> Repositório PGDG: ${distro_codename}-pgdg (${distro_id} ${distro_ver})${WHITE}\n"
+    sudo sh -c "echo 'deb http://apt.postgresql.org/pub/repos/apt ${distro_codename}-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
     wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - >/dev/null 2>&1 || true
 
     if sudo apt-get update -y && sudo apt-get -y install postgresql-17; then
@@ -2841,16 +2889,18 @@ instala_postgres_base() {
     else
       printf "${RED} >> ERRO: não foi possível instalar PostgreSQL 17 via PGDG.${WHITE}\n"
       sudo rm -f /etc/apt/sources.list.d/pgdg.list
-      if [ "$ubuntu_codename" = "focal" ]; then
+      if [ "$distro_codename" = "focal" ]; then
         printf "${YELLOW} >> Ubuntu 20.04 (focal) instala PostgreSQL 12 pelos repositórios padrão.${WHITE}\n"
-        printf "${YELLOW} >> Como o sistema exige PostgreSQL 17, use Ubuntu 22.04/24.04 ou a opção Alta Performance (Docker Postgres 17).${WHITE}\n"
+        printf "${YELLOW} >> Como o sistema exige PostgreSQL 17, use Ubuntu 22.04/24.04, Debian 12+ ou Alta Performance (Docker Postgres 17).${WHITE}\n"
       else
-        printf "${YELLOW} >> Verifique o repositório apt.postgresql.org para ${ubuntu_codename}-pgdg.${WHITE}\n"
+        printf "${YELLOW} >> Verifique o repositório apt.postgresql.org para ${distro_codename}-pgdg.${WHITE}\n"
+        printf "${YELLOW} >> Em SO muito novo, use Ubuntu 22.04/24.04 ou Alta Performance (Docker).${WHITE}\n"
       fi
       return 1
     fi
   else
-    printf "${RED} >> Não foi possível detectar codename do Ubuntu para instalar PostgreSQL 17.${WHITE}\n"
+    printf "${RED} >> Não foi possível detectar codename do SO (${distro_id} ${distro_ver}) para instalar PostgreSQL 17.${WHITE}\n"
+    printf "${YELLOW} >> Tente: apt install -y lsb-release  |  ou use a opção Alta Performance (Docker Postgres 17).${WHITE}\n"
     return 1
   fi
 
