@@ -1713,6 +1713,139 @@ main() {
   sleep 5
 }
 
+# Resolver ARQUIVO_VARIAVEIS pela empresa (sem menu).
+whatsmeow_carregar_variaveis_por_empresa() {
+  local emp="$1"
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local arq=""
+
+  [ -n "$emp" ] || return 1
+
+  if [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    # shellcheck source=/dev/null
+    source "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" 2>/dev/null
+    if [ "${empresa:-}" = "$emp" ]; then
+      ARQUIVO_VARIAVEIS="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+      empresa="$emp"
+      return 0
+    fi
+  fi
+
+  shopt -s nullglob
+  for arq in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+    [ -f "$arq" ] || continue
+    local e2=""
+    e2=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+    if [ "$e2" = "$emp" ]; then
+      ARQUIVO_VARIAVEIS="$arq"
+      # shellcheck source=/dev/null
+      source "$arq" 2>/dev/null
+      empresa="$emp"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+
+  empresa="$emp"
+  ARQUIVO_VARIAVEIS=""
+  return 0
+}
+
+# Git pull no wuzapi; retorna 0 se HEAD mudou, 1 se não mudou.
+whatsmeow_git_pull_verificar_mudanca() {
+  local wuz_dir="/home/deploy/${empresa}/wuzapi"
+  local git_user="deploy"
+  local head_antes head_depois branch remoto_ref
+
+  WHATSMEOW_GIT_MUDOU=0
+  [ -d "${wuz_dir}/.git" ] || return 1
+  id "$git_user" >/dev/null 2>&1 || return 1
+
+  git config --global --add safe.directory "$wuz_dir" 2>/dev/null || true
+  sudo -u "$git_user" git config --global --add safe.directory "$wuz_dir" 2>/dev/null || true
+
+  if [ -f "${wuz_dir}/.env" ]; then
+    cp -a "${wuz_dir}/.env" "${wuz_dir}/.env.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+  fi
+
+  head_antes=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse HEAD 2>/dev/null || echo "")
+  [ -n "$head_antes" ] || return 1
+
+  sudo -u "$git_user" git -C "$wuz_dir" fetch origin 2>&1 || true
+
+  branch=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+    branch=""
+    for branch in main master; do
+      if sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
+        break
+      fi
+      branch=""
+    done
+    [ -z "$branch" ] && branch="main"
+  fi
+  remoto_ref="origin/${branch}"
+  if ! sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/${remoto_ref}" 2>/dev/null; then
+    for branch in main master; do
+      if sudo -u "$git_user" git -C "$wuz_dir" show-ref --verify --quiet "refs/remotes/origin/${branch}" 2>/dev/null; then
+        remoto_ref="origin/${branch}"
+        break
+      fi
+    done
+  fi
+
+  if ! sudo -u "$git_user" git -C "$wuz_dir" reset --hard "${remoto_ref}" 2>&1; then
+    return 1
+  fi
+  sudo -u "$git_user" git -C "$wuz_dir" pull --ff-only origin "${branch}" 2>&1 || \
+    sudo -u "$git_user" git -C "$wuz_dir" pull origin "${branch}" 2>&1 || true
+
+  head_depois=$(sudo -u "$git_user" git -C "$wuz_dir" rev-parse HEAD 2>/dev/null || echo "")
+  chown -R deploy:deploy "$wuz_dir" 2>/dev/null || true
+
+  if [ -n "$head_depois" ] && [ "$head_antes" != "$head_depois" ]; then
+    WHATSMEOW_GIT_MUDOU=1
+    printf "${GREEN} >> WuzAPI: código atualizado (${head_antes:0:7} → ${head_depois:0:7}).${WHITE}\n"
+    return 0
+  fi
+
+  printf "${WHITE} >> WuzAPI: sem alterações no repositório (${head_depois:0:7}).${WHITE}\n"
+  return 1
+}
+
+# Modo automático (atualizador_fast_sistema): sem perguntas; rebuild só se git mudou.
+main_atualizar_whatsmeow_sistema() {
+  local emp="${1:-}"
+
+  [ -n "$emp" ] || {
+    printf "${RED} >> Empresa não informada (--atualizar-sistema <empresa>).${WHITE}\n"
+    exit 1
+  }
+
+  if [ ! -d "/home/deploy/${emp}/wuzapi" ] || [ ! -f "/home/deploy/${emp}/wuzapi/docker-compose.yml" ]; then
+    printf "${WHITE} >> WhatsMeow não instalado em ${emp}; etapa ignorada.${WHITE}\n"
+    exit 0
+  fi
+
+  whatsmeow_carregar_variaveis_por_empresa "$emp" || true
+  carregar_variaveis
+  whatsmeow_remover_stack_orfao
+
+  if whatsmeow_git_pull_verificar_mudanca; then
+    whatsmeow_reaplicar_compose_instalador
+    corrigir_dockerfile_wuzapi
+    rebuild_containers_whatsmeow_atualizacao
+    whatsmeow_remover_stack_orfao
+    reiniciar_servicos
+    reiniciar_pm2_backend
+    printf "${GREEN} >> WhatsMeow (${empresa}) atualizado.${WHITE}\n"
+  else
+    printf "${GREEN} >> WhatsMeow (${emp}): nenhum rebuild necessário.${WHITE}\n"
+  fi
+  exit 0
+}
+
 # Atualizar WhatsMeow já instalado: git pull + rebuild wuzapi-server (sem reinstalar do zero).
 main_atualizar_whatsmeow() {
   banner
@@ -1755,7 +1888,9 @@ main_atualizar_whatsmeow() {
   sleep 3
 }
 
-if [ "${1:-}" = "--atualizar" ]; then
+if [ "${1:-}" = "--atualizar-sistema" ]; then
+  main_atualizar_whatsmeow_sistema "${2:-}"
+elif [ "${1:-}" = "--atualizar" ]; then
   main_atualizar_whatsmeow
 else
   main
