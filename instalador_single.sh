@@ -1605,6 +1605,286 @@ restaurar_backup_banco_alta_performance_ferramentas() {
   sleep 2
 }
 
+# --- WhatsMeow (WuzAPI): backup/restore PostgreSQL Docker (RabbitMQ não necessário) ---
+ferramentas_whatsmeow_dir_backup() {
+  printf '/home/deploy/backup-%s/whatsmeow' "${empresa}"
+}
+
+whatsmeow_ferramentas_ler_credenciais() {
+  local emp="${1:-$empresa}"
+  local env_file="/home/deploy/${emp}/wuzapi/.env"
+  WHATSMEOW_DB_USER=""
+  WHATSMEOW_DB_PASSWORD=""
+  WHATSMEOW_DB_NAME=""
+  WHATSMEOW_DB_CONTAINER=""
+  WHATSMEOW_SERVER_CONTAINER=""
+
+  [ -f "$env_file" ] || return 1
+  WHATSMEOW_DB_USER=$(grep -m1 '^DB_USER=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  WHATSMEOW_DB_PASSWORD=$(grep -m1 '^DB_PASSWORD=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  WHATSMEOW_DB_NAME=$(grep -m1 '^DB_NAME=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  WHATSMEOW_DB_USER="${WHATSMEOW_DB_USER:-wuzapi}"
+  WHATSMEOW_DB_NAME="${WHATSMEOW_DB_NAME:-${WHATSMEOW_DB_USER}}"
+  [ -n "$WHATSMEOW_DB_PASSWORD" ] && [ -n "$WHATSMEOW_DB_NAME" ] || return 1
+  return 0
+}
+
+whatsmeow_ferramentas_resolver_containers() {
+  local emp="${1:-$empresa}"
+  local wuz_dir="/home/deploy/${emp}/wuzapi"
+  local names proj="" c patterns_db patterns_srv
+
+  WHATSMEOW_DB_CONTAINER=""
+  WHATSMEOW_SERVER_CONTAINER=""
+  names=$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
+
+  patterns_db=(
+    "wuzapi_${emp}-db"
+    "wuzapi-db"
+  )
+  patterns_srv=(
+    "wuzapi_${emp}-wuzapi-server"
+    "wuzapi_${emp}-server"
+    "wuzapi-wuzapi-server"
+    "wuzapi-server"
+  )
+
+  for c in "${patterns_db[@]}"; do
+    WHATSMEOW_DB_CONTAINER=$(echo "$names" | grep -E "^${c}(-[0-9]+)?$" | head -1)
+    [ -n "$WHATSMEOW_DB_CONTAINER" ] && break
+  done
+
+  if [ -z "$WHATSMEOW_DB_CONTAINER" ] && [ -f "${wuz_dir}/docker-compose.yml" ]; then
+    proj=$(grep -m1 '^name:' "${wuz_dir}/docker-compose.yml" 2>/dev/null | sed -E 's/^name:[[:space:]]*//; s/["'"'"']//g; s/[[:space:]]+$//')
+    if [ -n "$proj" ]; then
+      WHATSMEOW_DB_CONTAINER=$(echo "$names" | grep -E "^${proj}-db(-[0-9]+)?$" | head -1)
+    fi
+  fi
+
+  if [ -z "$WHATSMEOW_DB_CONTAINER" ] && [ -f "${wuz_dir}/docker-compose.yml" ]; then
+    local cid
+    cid=$(cd "$wuz_dir" && docker compose ps -q db 2>/dev/null | head -1)
+    if [ -n "$cid" ]; then
+      WHATSMEOW_DB_CONTAINER=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')
+    fi
+  fi
+
+  for c in "${patterns_srv[@]}"; do
+    WHATSMEOW_SERVER_CONTAINER=$(echo "$names" | grep -E "^${c}(-[0-9]+)?$" | head -1)
+    [ -n "$WHATSMEOW_SERVER_CONTAINER" ] && break
+  done
+
+  if [ -z "$WHATSMEOW_SERVER_CONTAINER" ] && [ -n "$proj" ]; then
+    WHATSMEOW_SERVER_CONTAINER=$(echo "$names" | grep -E "^${proj}-(wuzapi-server|server)(-[0-9]+)?$" | head -1)
+  fi
+
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$WHATSMEOW_DB_CONTAINER" || return 1
+  return 0
+}
+
+whatsmeow_ferramentas_parar_api() {
+  local emp="${1:-$empresa}"
+  local wuz_dir="/home/deploy/${emp}/wuzapi"
+  if [ -n "$WHATSMEOW_SERVER_CONTAINER" ]; then
+    docker stop "$WHATSMEOW_SERVER_CONTAINER" 2>/dev/null || true
+    return 0
+  fi
+  [ -f "${wuz_dir}/docker-compose.yml" ] && (cd "$wuz_dir" && docker compose stop wuzapi-server 2>/dev/null) || true
+}
+
+whatsmeow_ferramentas_iniciar_api() {
+  local emp="${1:-$empresa}"
+  local wuz_dir="/home/deploy/${emp}/wuzapi"
+  if [ -n "$WHATSMEOW_SERVER_CONTAINER" ]; then
+    docker start "$WHATSMEOW_SERVER_CONTAINER" 2>/dev/null && return 0
+  fi
+  [ -f "${wuz_dir}/docker-compose.yml" ] && (cd "$wuz_dir" && docker compose up -d wuzapi-server 2>/dev/null) && return 0
+  return 1
+}
+
+backup_whatsmeow_ferramentas() {
+  banner
+  printf "${WHITE} >> Backup do banco WhatsMeow (WuzAPI)...${WHITE}\n"
+  printf "${WHITE} >> Inclui sessões WhatsApp, usuários e dados no PostgreSQL.${WHITE}\n"
+  printf "${YELLOW} >> RabbitMQ não entra no backup (fila de eventos transitória; recria ao subir a API).${WHITE}\n"
+  echo
+  if ! selecionar_instancia_atualizar "fazer backup do WhatsMeow"; then
+    return 1
+  fi
+  if [ ! -d "/home/deploy/${empresa}/wuzapi" ] || [ ! -f "/home/deploy/${empresa}/wuzapi/docker-compose.yml" ]; then
+    printf "${RED} >> WhatsMeow não instalado em ${empresa}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if ! whatsmeow_ferramentas_ler_credenciais "${empresa}"; then
+    printf "${RED} >> Não foi possível ler DB_USER/DB_PASSWORD/DB_NAME em wuzapi/.env${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if ! whatsmeow_ferramentas_resolver_containers "${empresa}"; then
+    printf "${RED} >> Container PostgreSQL do WuzAPI não está em execução.${WHITE}\n"
+    printf "${YELLOW} >> Suba a stack: cd /home/deploy/${empresa}/wuzapi && docker compose up -d db${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  local backup_dir arquivo ts
+  backup_dir=$(ferramentas_whatsmeow_dir_backup)
+  mkdir -p "$backup_dir"
+  chown deploy:deploy "$backup_dir" 2>/dev/null || true
+  ts=$(date +%Y%m%d_%H%M%S)
+  arquivo="${backup_dir}/wuzapi_${WHATSMEOW_DB_NAME}_${ts}.sql.gz"
+  printf "${WHITE} >> Container: ${WHATSMEOW_DB_CONTAINER} | Banco: ${WHATSMEOW_DB_NAME}${WHITE}\n"
+  printf "${WHITE} >> Destino: ${backup_dir}${WHITE}\n"
+  printf "${WHITE} >> Gerando backup...${WHITE}\n"
+  if docker exec "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+    pg_dump -U "${WHATSMEOW_DB_USER}" "${WHATSMEOW_DB_NAME}" 2>/dev/null | gzip > "$arquivo"; then
+    if [ -s "$arquivo" ]; then
+      chown deploy:deploy "$arquivo" 2>/dev/null || true
+      printf "${GREEN} >> Backup salvo: ${arquivo}${WHITE}\n"
+    else
+      rm -f "$arquivo"
+      printf "${RED} >> Backup vazio ou falhou.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  else
+    [ -f "$arquivo" ] && rm -f "$arquivo"
+    printf "${RED} >> Erro ao executar pg_dump no container ${WHATSMEOW_DB_CONTAINER}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  echo
+  sleep 2
+}
+
+restaurar_whatsmeow_ferramentas() {
+  banner
+  printf "${WHITE} >> Restaurar backup do banco WhatsMeow (WuzAPI)...${WHITE}\n"
+  echo
+  if ! selecionar_instancia_atualizar "restaurar backup do WhatsMeow"; then
+    return 1
+  fi
+  if [ ! -d "/home/deploy/${empresa}/wuzapi" ] || [ ! -f "/home/deploy/${empresa}/wuzapi/docker-compose.yml" ]; then
+    printf "${RED} >> WhatsMeow não instalado em ${empresa}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if ! whatsmeow_ferramentas_ler_credenciais "${empresa}"; then
+    printf "${RED} >> Não foi possível ler credenciais em wuzapi/.env${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if ! whatsmeow_ferramentas_resolver_containers "${empresa}"; then
+    printf "${RED} >> Container PostgreSQL do WuzAPI não está em execução.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  local backup_dir BACKUPS_WZ=() f i arquivo_escolhido nome_arquivo
+  backup_dir=$(ferramentas_whatsmeow_dir_backup)
+  if [ ! -d "$backup_dir" ]; then
+    printf "${RED} >> Pasta não encontrada: ${backup_dir}${WHITE}\n"
+    printf "${YELLOW} >> Faça backup pela opção 22 ou coloque .sql/.sql.gz nesta pasta.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] && BACKUPS_WZ+=("$f")
+  done < <(find "$backup_dir" -maxdepth 1 -type f \( -name "*.sql.gz" -o -name "*.sql" \) 2>/dev/null | sort -r)
+  if [ ${#BACKUPS_WZ[@]} -eq 0 ]; then
+    printf "${RED} >> Nenhum backup em ${backup_dir}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Backups disponíveis:${WHITE}\n"
+  echo
+  i=1
+  for f in "${BACKUPS_WZ[@]}"; do
+    printf "   [${BLUE}%s${WHITE}] %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "   [${BLUE}0${WHITE}] Cancelar\n"
+  echo
+  printf "${YELLOW} >> Escolha o backup para restaurar:${WHITE}\n"
+  read -p "> " op_backup
+  if [ "$op_backup" = "0" ] || [ -z "$op_backup" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  arquivo_escolhido=""
+  i=1
+  for f in "${BACKUPS_WZ[@]}"; do
+    if [ "$i" = "$op_backup" ]; then
+      arquivo_escolhido="$f"
+      break
+    fi
+    ((i++))
+  done
+  if [ -z "$arquivo_escolhido" ] || [ ! -f "$arquivo_escolhido" ]; then
+    printf "${RED} >> Opção inválida.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  nome_arquivo=$(basename "$arquivo_escolhido")
+  printf "${WHITE} >> Backup: ${nome_arquivo}${WHITE}\n"
+  printf "${WHITE} >> Banco de destino: ${WHATSMEOW_DB_NAME}${WHITE}\n"
+  echo
+  printf "${YELLOW} >> ATENÇÃO: o banco ${WHATSMEOW_DB_NAME} será substituído. A API WuzAPI será parada durante a restauração.${WHITE}\n"
+  printf "${RED} >> Continuar? (s/N):${WHITE}\n"
+  read -p "> " conf
+  if [ "$conf" != "s" ] && [ "$conf" != "S" ]; then
+    printf "${YELLOW} >> Cancelado.${WHITE}\n"
+    sleep 2
+    return 0
+  fi
+  printf "${WHITE} >> Parando wuzapi-server...${WHITE}\n"
+  whatsmeow_ferramentas_parar_api "${empresa}"
+  sleep 2
+  printf "${WHITE} >> Encerrando conexões com ${WHATSMEOW_DB_NAME}...${WHITE}\n"
+  docker exec "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+    psql -U "${WHATSMEOW_DB_USER}" -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${WHATSMEOW_DB_NAME}' AND pid <> pg_backend_pid();" \
+    >/dev/null 2>&1 || true
+  sleep 1
+  printf "${WHITE} >> Recriando banco ${WHATSMEOW_DB_NAME}...${WHITE}\n"
+  docker exec "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+    psql -U "${WHATSMEOW_DB_USER}" -d postgres -c "DROP DATABASE IF EXISTS \"${WHATSMEOW_DB_NAME}\";" >/dev/null 2>&1 || true
+  if ! docker exec "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+    psql -U "${WHATSMEOW_DB_USER}" -d postgres -c "CREATE DATABASE \"${WHATSMEOW_DB_NAME}\" OWNER \"${WHATSMEOW_DB_USER}\";" >/dev/null 2>&1; then
+    printf "${RED} >> Erro ao recriar o banco ${WHATSMEOW_DB_NAME}.${WHITE}\n"
+    whatsmeow_ferramentas_iniciar_api "${empresa}" || true
+    sleep 2
+    return 1
+  fi
+  printf "${WHITE} >> Restaurando backup...${WHITE}\n"
+  if [[ "$arquivo_escolhido" == *.sql.gz ]]; then
+    if ! gunzip -c "$arquivo_escolhido" | docker exec -i "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+      psql -U "${WHATSMEOW_DB_USER}" -d "${WHATSMEOW_DB_NAME}" >/dev/null 2>&1; then
+      printf "${RED} >> Erro ao restaurar backup compactado.${WHITE}\n"
+      whatsmeow_ferramentas_iniciar_api "${empresa}" || true
+      sleep 2
+      return 1
+    fi
+  else
+    if ! cat "$arquivo_escolhido" | docker exec -i "${WHATSMEOW_DB_CONTAINER}" env PGPASSWORD="${WHATSMEOW_DB_PASSWORD}" \
+      psql -U "${WHATSMEOW_DB_USER}" -d "${WHATSMEOW_DB_NAME}" >/dev/null 2>&1; then
+      printf "${RED} >> Erro ao restaurar backup.${WHITE}\n"
+      whatsmeow_ferramentas_iniciar_api "${empresa}" || true
+      sleep 2
+      return 1
+    fi
+  fi
+  printf "${GREEN} >> Banco restaurado com sucesso.${WHITE}\n"
+  printf "${WHITE} >> Reiniciando wuzapi-server...${WHITE}\n"
+  if whatsmeow_ferramentas_iniciar_api "${empresa}"; then
+    printf "${GREEN} >> WhatsMeow (${empresa}) reiniciado.${WHITE}\n"
+  else
+    printf "${YELLOW} >> Inicie manualmente: cd /home/deploy/${empresa}/wuzapi && docker compose up -d wuzapi-server${WHITE}\n"
+  fi
+  echo
+  sleep 2
+}
+
 # Ferramentas: reinstala Baileys PRO (registry Heineken) no backend e reinicia o PM2 da instância
 atualizar_baileys_pro_heineken_ferramentas() {
   banner
@@ -1779,6 +2059,10 @@ menu_ferramentas() {
     printf "   [${BLUE}13${WHITE}] Listar Bancos Existentes\n"
     printf "   [${BLUE}14${WHITE}] Restaurar backup do Banco Alta Performance (Docker)\n"
     echo
+    printf "  ${BLUE}━━ WhatsMeow (WuzAPI) ━━${WHITE}\n"
+    printf "   [${BLUE}22${WHITE}] Backup do banco WhatsMeow (PostgreSQL Docker)\n"
+    printf "   [${BLUE}23${WHITE}] Restaurar backup do banco WhatsMeow\n"
+    echo
     printf "  ${BLUE}━━ Domínio, SSL e Docker ━━${WHITE}\n"
     printf "   [${BLUE}15${WHITE}] Trocar domínios (URL backend / frontend)\n"
     printf "   [${BLUE}21${WHITE}] Aplicar certificado SSL no Nginx\n"
@@ -1901,6 +2185,16 @@ menu_ferramentas() {
       ;;
     14)
       restaurar_backup_banco_alta_performance_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    22)
+      backup_whatsmeow_ferramentas
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+      ;;
+    23)
+      restaurar_whatsmeow_ferramentas
       printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
       read -r
       ;;
