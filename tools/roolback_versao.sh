@@ -8,8 +8,10 @@ YELLOW='\033[1;33m'
 
 # Variáveis Padrão
 ARQUIVO_VARIAVEIS="VARIAVEIS_INSTALACAO"
-INSTALADOR_DIR="/root/instalador_single_oficial"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+ARQUIVO_VARIAVEIS_USADO=""
 
 # Verificar se está rodando como root
 if [ "$EUID" -ne 0 ]; then
@@ -22,12 +24,18 @@ fi
 
 # Carregar variáveis da instalação
 carregar_variaveis() {
-  # Primeiro tenta carregar do diretório do instalador
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "$ARQUIVO_VARIAVEIS_USADO" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS_USADO"
+    printf "${GREEN} >> Variáveis carregadas de: ${ARQUIVO_VARIAVEIS_USADO}\n${WHITE}"
+    return 0
+  fi
   if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
+    # shellcheck source=/dev/null
     source "$ARQUIVO_VARIAVEIS_INSTALADOR"
     printf "${GREEN} >> Variáveis carregadas de: ${ARQUIVO_VARIAVEIS_INSTALADOR}\n${WHITE}"
-  # Depois tenta do diretório atual
   elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    # shellcheck source=/dev/null
     source "$ARQUIVO_VARIAVEIS"
     printf "${GREEN} >> Variáveis carregadas de: ${ARQUIVO_VARIAVEIS}\n${WHITE}"
   else
@@ -35,6 +43,131 @@ carregar_variaveis() {
     empresa="multiflow"
     nome_titulo="MultiFlow"
   fi
+}
+
+# Detectar instâncias instaladas (VARIAVEIS_INSTALACAO + VARIAVEIS_INSTALACAO_INSTANCIA_*)
+detectar_instancias_rollback() {
+  local instancias=()
+  local nomes_empresas=()
+  local temp_empresa=""
+  local empresa_original="${empresa:-}"
+  local subdominio_backend_original="${subdominio_backend:-}"
+  local subdominio_frontend_original="${subdominio_frontend:-}"
+
+  INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  ARQUIVO_VARIAVEIS_INSTALADOR="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+
+  if [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    # shellcheck source=/dev/null
+    source "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+  fi
+
+  shopt -s nullglob
+  local arquivo_instancia
+  for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+    [ -f "$arquivo_instancia" ] || continue
+    # shellcheck source=/dev/null
+    source "$arquivo_instancia" 2>/dev/null
+    temp_empresa="${empresa:-}"
+    if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
+      instancias+=("$arquivo_instancia")
+      nomes_empresas+=("${temp_empresa}")
+    fi
+    empresa="${empresa_original}"
+    subdominio_backend="${subdominio_backend_original}"
+    subdominio_frontend="${subdominio_frontend_original}"
+  done
+  shopt -u nullglob
+
+  declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
+  declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
+}
+
+# Escolher instância antes do rollback
+selecionar_instancia_rollback() {
+  printf "${WHITE} >> Detectando instâncias instaladas...\n"
+  echo
+
+  detectar_instancias_rollback
+
+  local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+
+  if [ "$total_instancias" -eq 0 ]; then
+    printf "${RED} >> ERRO: Nenhuma instância instalada detectada!${WHITE}\n"
+    sleep 3
+    return 1
+  fi
+
+  if [ "$total_instancias" -eq 1 ]; then
+    printf "${GREEN} >> Uma instância detectada: ${BLUE}${NOMES_EMPRESAS_DETECTADAS[0]}${WHITE}\n"
+    echo
+    # shellcheck source=/dev/null
+    source "${INSTANCIAS_DETECTADAS[0]}"
+    declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[0]}"
+    return 0
+  fi
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n"
+  printf "  INSTÂNCIAS DISPONÍVEIS PARA ROLLBACK\n"
+  printf "═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+
+  local index=1
+  local i
+  for i in "${!NOMES_EMPRESAS_DETECTADAS[@]}"; do
+    local empresa_nome="${NOMES_EMPRESAS_DETECTADAS[$i]}"
+    local arquivo_instancia="${INSTANCIAS_DETECTADAS[$i]}"
+    local temp_subdominio_backend="" temp_subdominio_frontend=""
+    local _eo="${empresa:-}" _sb="${subdominio_backend:-}" _sf="${subdominio_frontend:-}"
+
+    # shellcheck source=/dev/null
+    source "$arquivo_instancia" 2>/dev/null
+    temp_subdominio_backend="${subdominio_backend:-}"
+    temp_subdominio_frontend="${subdominio_frontend:-}"
+    empresa="${_eo}"
+    subdominio_backend="${_sb}"
+    subdominio_frontend="${_sf}"
+
+    printf "${BLUE}  [$index]${WHITE} Empresa: ${GREEN}${empresa_nome}${WHITE}\n"
+    [ -n "${temp_subdominio_backend}" ] && printf "      Backend: ${YELLOW}${temp_subdominio_backend}${WHITE}\n"
+    [ -n "${temp_subdominio_frontend}" ] && printf "      Frontend: ${YELLOW}${temp_subdominio_frontend}${WHITE}\n"
+    echo
+    ((index++))
+  done
+
+  printf "${WHITE}═══════════════════════════════════════════════════════════\n${WHITE}"
+  echo
+  printf "${YELLOW} >> Qual instância deseja fazer rollback? (1-${total_instancias}):${WHITE}\n"
+  read -p "> " escolha_instancia
+
+  if ! [[ "$escolha_instancia" =~ ^[0-9]+$ ]]; then
+    printf "${RED} >> ERRO: Entrada inválida. Digite um número.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  if [ "$escolha_instancia" -lt 1 ] || [ "$escolha_instancia" -gt "$total_instancias" ]; then
+    printf "${RED} >> ERRO: Opção inválida. Escolha entre 1 e ${total_instancias}.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  local indice_selecionado=$((escolha_instancia - 1))
+  # shellcheck source=/dev/null
+  source "${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+  declare -g ARQUIVO_VARIAVEIS_USADO="${INSTANCIAS_DETECTADAS[$indice_selecionado]}"
+
+  printf "\n${GREEN} >> Instância selecionada: ${BLUE}${empresa}${WHITE}\n"
+  echo
+  return 0
 }
 
 # Banner
@@ -181,12 +314,13 @@ validar_e_atualizar_token_rollback() {
   sed -i "s|^[[:space:]]*url[[:space:]]*=.*|  url = ${nova_url_sed}|" "$git_config"
   printf "${GREEN} >> Token atualizado em: ${git_config}${WHITE}\n"
 
-  if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_INSTALADOR"; then
+  local arq_vars="${ARQUIVO_VARIAVEIS_USADO:-$ARQUIVO_VARIAVEIS_INSTALADOR}"
+  if [ -f "$arq_vars" ]; then
+    if grep -q "^github_token=" "$arq_vars"; then
       novo_token_sed="${novo_token//&/\\&}"
-      sed -i "s|^github_token=.*|github_token=${novo_token_sed}|" "$ARQUIVO_VARIAVEIS_INSTALADOR"
+      sed -i "s|^github_token=.*|github_token=${novo_token_sed}|" "$arq_vars"
     else
-      echo "github_token=${novo_token}" >> "$ARQUIVO_VARIAVEIS_INSTALADOR"
+      echo "github_token=${novo_token}" >> "$arq_vars"
     fi
     printf "${GREEN} >> Token atualizado no arquivo de variáveis.${WHITE}\n"
   fi
@@ -365,19 +499,17 @@ selecionar_versao() {
 # Função principal de rollback
 rollback_versao() {
   banner
-  
-  # Carregar variáveis
+
+  if ! selecionar_instancia_rollback; then
+    printf "${RED} >> Erro ao selecionar instância. Encerrando.${WHITE}\n"
+    exit 1
+  fi
+
   carregar_variaveis
-  
-  # Verificar se a variável empresa está definida
+
   if [ -z "${empresa}" ]; then
     printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
-    printf "${YELLOW} >> Por favor, informe o nome da empresa:${WHITE}\n"
-    read -p "> " empresa
-    if [ -z "${empresa}" ]; then
-      printf "${RED} >> ERRO: Nome da empresa não pode ser vazio. Abortando.\n${WHITE}"
-      exit 1
-    fi
+    exit 1
   fi
   
   # Definir diretório da aplicação
@@ -718,19 +850,17 @@ RESTARTPM2
 # Função para retornar à versão principal
 retornar_versao_principal() {
   banner
-  
-  # Carregar variáveis
+
+  if ! selecionar_instancia_rollback; then
+    printf "${RED} >> Erro ao selecionar instância. Encerrando.${WHITE}\n"
+    exit 1
+  fi
+
   carregar_variaveis
-  
-  # Verificar se a variável empresa está definida
+
   if [ -z "${empresa}" ]; then
     printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
-    printf "${YELLOW} >> Por favor, informe o nome da empresa:${WHITE}\n"
-    read -p "> " empresa
-    if [ -z "${empresa}" ]; then
-      printf "${RED} >> ERRO: Nome da empresa não pode ser vazio. Abortando.\n${WHITE}"
-      exit 1
-    fi
+    exit 1
   fi
   
   # Definir diretório da aplicação
