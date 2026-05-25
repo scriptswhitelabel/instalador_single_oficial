@@ -5395,7 +5395,7 @@ STOPPM2
 
   sleep 2
 
-  otimiza_banco_atualizar
+  # otimiza_banco_atualizar  # desativado: VACUUM FULL bloqueia o banco e prolonga a atualização
 
   verificar_e_adicionar_max_buffer
   verificar_e_adicionar_whatsapp_web_version
@@ -5679,41 +5679,41 @@ EOF
   menu
 }
 
-otimiza_banco_atualizar() {
-  # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
-  if [ -z "${empresa}" ]; then
-    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
-    return 0
-  fi
-  
-  # Usar arquivo da instância SELECIONADA para não sobrescrever empresa com a primária (ex.: chat em vez de chat2)
-  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
-    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
-  elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
-    source "$ARQUIVO_VARIAVEIS" 2>/dev/null
-  fi
-  if [ "${ALTA_PERFORMANCE}" = "1" ]; then
-    db_host_opt="127.0.0.1"
-    db_port_opt="7532"
-  else
-    db_host_opt="localhost"
-    db_port_opt="5432"
-  fi
-  
-  banner
-  printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
-  echo
-  {
-    db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
-    sudo su - root <<EOF
-    PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
-    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
-    PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "ANALYZE;"
-EOF
-
-    sleep 2
-  } || trata_erro "otimiza_banco_atualizar"
-}
+# otimiza_banco_atualizar() {
+#   # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
+#   if [ -z "${empresa}" ]; then
+#     printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+#     return 0
+#   fi
+#
+#   # Usar arquivo da instância SELECIONADA para não sobrescrever empresa com a primária (ex.: chat em vez de chat2)
+#   if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+#     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+#   elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
+#     source "$ARQUIVO_VARIAVEIS" 2>/dev/null
+#   fi
+#   if [ "${ALTA_PERFORMANCE}" = "1" ]; then
+#     db_host_opt="127.0.0.1"
+#     db_port_opt="7532"
+#   else
+#     db_host_opt="localhost"
+#     db_port_opt="5432"
+#   fi
+#
+#   banner
+#   printf "${WHITE} >> Realizando Manutenção do Banco de Dados da empresa ${empresa}... \n"
+#   echo
+#   {
+#     db_password=$(grep "DB_PASS=" /home/deploy/${empresa}/backend/.env | cut -d '=' -f2)
+#     sudo su - root <<EOF
+#     PGPASSWORD="$db_password" vacuumdb -U "${empresa}" -h ${db_host_opt} -p ${db_port_opt} -d "${empresa}" --full --analyze
+#     PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "REINDEX DATABASE ${empresa};"
+#     PGPASSWORD="$db_password" psql -U ${empresa} -h ${db_host_opt} -p ${db_port_opt} -d ${empresa} -c "ANALYZE;"
+# EOF
+#
+#     sleep 2
+#   } || trata_erro "otimiza_banco_atualizar"
+# }
 
 # Após qualquer alteração ao .env feita como root (sed -i, mktemp+mv), o arquivo pode ficar root:root;
 # o PM2 roda como deploy e o dotenv não lê variáveis — garantir dono deploy.
