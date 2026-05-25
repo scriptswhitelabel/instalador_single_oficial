@@ -190,6 +190,60 @@ trata_erro() {
   exit 1
 }
 
+# PM2 apenas da instância selecionada (nunca stop/restart all)
+pm2_parar_instancia() {
+  local emp="${1:-$empresa}"
+  sudo su - deploy <<STOPPM2
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+for _p in "${emp}-backend" "${emp}-frontend" "${emp}-transcricao" "transc-${emp}" "api_oficial_${emp}"; do
+  pm2 describe "\$_p" >/dev/null 2>&1 && pm2 stop "\$_p" 2>/dev/null || true
+done
+if pm2 describe api_oficial >/dev/null 2>&1; then
+  _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
+  echo "\$_cwd" | grep -q "/home/deploy/${emp}/" && pm2 stop api_oficial 2>/dev/null || true
+fi
+STOPPM2
+}
+
+pm2_reiniciar_instancia() {
+  local emp="${1:-$empresa}"
+  sudo su - deploy <<RESTARTPM2
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+for _p in "${emp}-backend" "${emp}-frontend" "${emp}-transcricao" "transc-${emp}" "api_oficial_${emp}"; do
+  if pm2 describe "\$_p" >/dev/null 2>&1; then
+    pm2 restart "\$_p" 2>/dev/null || true
+    pm2 reset "\$_p" 2>/dev/null || true
+    pm2 flush "\$_p" 2>/dev/null || true
+  fi
+done
+if pm2 describe api_oficial >/dev/null 2>&1; then
+  _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
+  if echo "\$_cwd" | grep -q "/home/deploy/${emp}/"; then
+    pm2 restart api_oficial 2>/dev/null || true
+    pm2 reset api_oficial 2>/dev/null || true
+    pm2 flush api_oficial 2>/dev/null || true
+  fi
+fi
+pm2 save
+RESTARTPM2
+}
+
 # Garante WHATSAPP_WEB_VERSION no .env do backend se a linha ainda não existir (não sobrescreve valor manual).
 garantir_whatsapp_web_version_env_backend() {
   local env_file="$1"
@@ -669,21 +723,10 @@ CHECKOUT
   printf "${GREEN} ✓ Checkout concluído (branch: ${BRANCH_ROLLBACK})\n${WHITE}"
   echo
   
-  # 7) Parar aplicações PM2
-  printf "${WHITE} [7/11] Parando instâncias PM2...\n"
-  sudo su - deploy <<STOPPM2
-export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-elif [ -d /usr/local/n/versions/node ]; then
-  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-  fi
-fi
-pm2 stop all || true
-STOPPM2
-  printf "${GREEN} ✓ PM2 parado\n${WHITE}"
+  # 7) Parar aplicações PM2 da instância
+  printf "${WHITE} [7/11] Parando PM2 da instância ${empresa}...\n"
+  pm2_parar_instancia "${empresa}"
+  printf "${GREEN} ✓ PM2 da instância ${empresa} parado\n${WHITE}"
   echo
   
   # 8) Reinstalar dependências do Backend
@@ -808,21 +851,9 @@ FRONTEND
   fi
   echo
   
-  # 10) Reiniciar PM2
-  printf "${WHITE} [10/11] Reiniciando aplicações no PM2...\n"
-  sudo su - deploy <<RESTARTPM2
-# Configura PATH para Node.js e PM2
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
-fi
-pm2 flush
-pm2 restart all
-pm2 reset all
-pm2 save
-pm2 startup
-RESTARTPM2
+  # 10) Reiniciar PM2 da instância
+  printf "${WHITE} [10/11] Reiniciando PM2 da instância ${empresa}...\n"
+  pm2_reiniciar_instancia "${empresa}"
   if [ $? -ne 0 ]; then
     printf "${YELLOW} >> Aviso: Algum problema ao reiniciar PM2. Verifique manualmente.\n${WHITE}"
   else
@@ -974,21 +1005,10 @@ PULL
   printf "${GREEN} ✓ Código atualizado\n${WHITE}"
   echo
   
-  # 4) Parar aplicações PM2
-  printf "${WHITE} [4/9] Parando instâncias PM2...\n"
-  sudo su - deploy <<STOPPM2
-export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-elif [ -d /usr/local/n/versions/node ]; then
-  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-  fi
-fi
-pm2 stop all || true
-STOPPM2
-  printf "${GREEN} ✓ PM2 parado\n${WHITE}"
+  # 4) Parar aplicações PM2 da instância
+  printf "${WHITE} [4/9] Parando PM2 da instância ${empresa}...\n"
+  pm2_parar_instancia "${empresa}"
+  printf "${GREEN} ✓ PM2 da instância ${empresa} parado\n${WHITE}"
   echo
   
   # 5) Reinstalar dependências do Backend
@@ -1113,21 +1133,9 @@ FRONTEND
   fi
   echo
   
-  # 7) Reiniciar PM2
-  printf "${WHITE} [7/9] Reiniciando aplicações no PM2...\n"
-  sudo su - deploy <<RESTARTPM2
-# Configura PATH para Node.js e PM2
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
-fi
-pm2 flush
-pm2 restart all
-pm2 reset all
-pm2 save
-pm2 startup
-RESTARTPM2
+  # 7) Reiniciar PM2 da instância
+  printf "${WHITE} [7/9] Reiniciando PM2 da instância ${empresa}...\n"
+  pm2_reiniciar_instancia "${empresa}"
   if [ $? -ne 0 ]; then
     printf "${YELLOW} >> Aviso: Algum problema ao reiniciar PM2. Verifique manualmente.\n${WHITE}"
   else
