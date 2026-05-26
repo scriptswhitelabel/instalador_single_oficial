@@ -4,6 +4,11 @@
 
 set -uo pipefail
 
+BLUE="${BLUE:-}"
+GREEN="${GREEN:-}"
+RED="${RED:-}"
+WHITE="${WHITE:-}"
+
 INSTALADOR_DIR="${INSTALADOR_DIR:-/root/instalador_single_oficial}"
 # shellcheck source=/dev/null
 source "${INSTALADOR_DIR}/tools/mf_transcricao_manutencao.sh"
