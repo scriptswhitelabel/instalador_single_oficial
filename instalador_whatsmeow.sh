@@ -895,7 +895,9 @@ WUZAPI_GLOBAL_WEBHOOK=https://${subdominio_limpo}/webhook
 WEBHOOK_FORMAT=json
 
 # WuzAPI Session Configuration
-SESSION_DEVICE_NAME=WuzAPI
+# Chrome no Windows — nome em Dispositivos vinculados (WhatsApp)
+SESSION_DEVICE_NAME=Windows - Wuz
+SESSION_PLATFORM_TYPE=CHROME
 
 # Database configuration
 DB_USER=${db_user}
@@ -949,6 +951,39 @@ whatsmeow_atualizar_env_portas_rabbit() {
   chown deploy:deploy "$env_file" 2>/dev/null || true
 }
 
+# Garante SESSION_DEVICE_NAME e SESSION_PLATFORM_TYPE no .env (instalações antigas).
+# Não sobrescreve nome customizado; só troca o padrão legado WuzAPI.
+whatsmeow_atualizar_env_sessao_dispositivo() {
+  local env_file="/home/deploy/${empresa}/wuzapi/.env"
+  [ -f "$env_file" ] || return 0
+
+  if grep -q '^SESSION_DEVICE_NAME=' "$env_file" 2>/dev/null; then
+    if grep -qE '^SESSION_DEVICE_NAME=WuzAPI[[:space:]]*$' "$env_file" 2>/dev/null; then
+      sed -i 's|^SESSION_DEVICE_NAME=WuzAPI[[:space:]]*$|SESSION_DEVICE_NAME=Windows - Wuz|' "$env_file"
+      printf "${GREEN} >> .env: SESSION_DEVICE_NAME atualizado (WuzAPI → Windows - Wuz).${WHITE}\n"
+    fi
+  else
+    {
+      echo ""
+      echo "# WuzAPI Session Configuration"
+      echo "# Chrome no Windows — nome em Dispositivos vinculados (WhatsApp)"
+      echo "SESSION_DEVICE_NAME=Windows - Wuz"
+    } >>"$env_file"
+    printf "${GREEN} >> .env: SESSION_DEVICE_NAME adicionado.${WHITE}\n"
+  fi
+
+  if ! grep -q '^SESSION_PLATFORM_TYPE=' "$env_file" 2>/dev/null; then
+    if grep -q '^SESSION_DEVICE_NAME=' "$env_file" 2>/dev/null; then
+      sed -i '/^SESSION_DEVICE_NAME=/a SESSION_PLATFORM_TYPE=CHROME' "$env_file"
+    else
+      echo "SESSION_PLATFORM_TYPE=CHROME" >>"$env_file"
+    fi
+    printf "${GREEN} >> .env: SESSION_PLATFORM_TYPE=CHROME adicionado.${WHITE}\n"
+  fi
+
+  chown deploy:deploy "$env_file" 2>/dev/null || true
+}
+
 # Reaplica docker-compose.yml do instalador (git sobrescreve com 5672 padrão do upstream).
 whatsmeow_reaplicar_compose_instalador() {
   banner
@@ -965,6 +1000,7 @@ whatsmeow_reaplicar_compose_instalador() {
   fi
   configurar_docker_compose
   whatsmeow_atualizar_env_portas_rabbit
+  whatsmeow_atualizar_env_sessao_dispositivo
 }
 
 # Verificar e corrigir DNS antes do build
@@ -1110,7 +1146,8 @@ ${cn_server}
       - DB_PORT=\${DB_PORT:-5432}
       - TZ=\${TZ:-America/Sao_Paulo}
       - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT:-json}
-      - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME:-WuzAPI}
+      - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME:-Windows - Wuz}
+      - SESSION_PLATFORM_TYPE=\${SESSION_PLATFORM_TYPE:-CHROME}
       # RabbitMQ configuration Optional
       - RABBITMQ_URL=amqp://${db_user}:\${DB_PASSWORD}@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events_${empresa}
@@ -1884,6 +1921,9 @@ main_atualizar_whatsmeow() {
   echo
   printf "${WHITE}   URL: ${YELLOW}https://${subdominio_limpo}${WHITE}\n"
   printf "${WHITE}   Logs: ${YELLOW}cd /home/deploy/${empresa}/wuzapi && docker compose -p ${WUZAPI_COMPOSE_PROJECT} logs wuzapi-server --tail 50${WHITE}\n"
+  echo
+  printf "${YELLOW} >> Nome no celular (Dispositivos vinculados): após mudar SESSION_* no .env,${WHITE}\n"
+  printf "${YELLOW}    desvincule no WhatsApp, faça logout da sessão (/session/logout) e pareie de novo.${WHITE}\n"
   echo
   sleep 3
 }
