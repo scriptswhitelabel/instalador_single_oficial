@@ -475,21 +475,20 @@ sleep 2
 STOPPM2
 }
 
-# Porta da transcrição por instância (TRANSCRIBE_URL / porta_transcricao) — evita conflito na 4002 após git reset
+# Porta da transcrição: sempre por instância (backend/.env da pasta /home/deploy/EMPRESA)
 roolback_resolver_porta_transcricao() {
   local emp="${1:-$empresa}"
-  local porta="" env_backend="/home/deploy/${emp}/backend/.env"
+  local _inst="${INSTALADOR_DIR:-/root/instalador_single_oficial}"
 
-  if [ -n "${porta_transcricao:-}" ]; then
-    porta="${porta_transcricao}"
-  elif [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
-    porta=$(grep -m1 '^porta_transcricao=' "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+  roolback_carregar_lib_transcricao 2>/dev/null || true
+  if declare -F mf_resolver_porta_transcricao_instancia >/dev/null 2>&1; then
+    mf_resolver_porta_transcricao_instancia "$emp" "$_inst"
+    return 0
   fi
-  if [ -z "$porta" ] && [ -f "$env_backend" ]; then
-    local _url
-    _url=$(grep -m1 '^TRANSCRIBE_URL=' "$env_backend" 2>/dev/null | cut -d= -f2- | tr -d '\r')
-    porta=$(echo "$_url" | sed -nE 's|.*:([0-9]+).*|\1|p' | head -1)
-  fi
+
+  local porta=""
+  porta=$(grep -m1 '^TRANSCRIBE_URL=' "/home/deploy/${emp}/backend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' \
+    | sed -nE 's|.*:([0-9]+)(/|$)|\1|p' | head -1)
   porta=${porta:-4002}
   printf '%s' "$porta"
 }
@@ -932,6 +931,13 @@ VERIFY
   printf "${GREEN} ✓ Commit encontrado\n${WHITE}"
   echo
   
+  # 3b) Salvar porta da transcrição desta instância (antes do git apagar main.py)
+  roolback_carregar_lib_transcricao 2>/dev/null || true
+  if declare -F mf_transcricao_salvar_porta_antes_git >/dev/null 2>&1; then
+    mf_transcricao_salvar_porta_antes_git "${empresa}"
+    printf "${GREEN} >> Porta da transcrição salva para ${empresa} (api_transcricao/.mf_porta_transcricao)\n${WHITE}"
+  fi
+
   # 4) Limpar alterações locais
   printf "${WHITE} [4/11] Limpando alterações locais (git reset --hard)...\n"
   sudo su - deploy <<CLEAN
@@ -1171,6 +1177,11 @@ retornar_versao_principal() {
   fi
   echo
   
+  roolback_carregar_lib_transcricao 2>/dev/null || true
+  if declare -F mf_transcricao_salvar_porta_antes_git >/dev/null 2>&1; then
+    mf_transcricao_salvar_porta_antes_git "${empresa}"
+  fi
+
   # 2) Fazer checkout para branch oficial (fetch + reset --hard evita "local changes would be overwritten")
   printf "${WHITE} [2/9] Fazendo checkout para branch MULTI100-OFICIAL-u21...\n"
   sudo su - deploy <<CHECKOUT

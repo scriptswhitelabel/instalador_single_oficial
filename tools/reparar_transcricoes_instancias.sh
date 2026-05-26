@@ -1,35 +1,16 @@
 #!/usr/bin/env bash
-# Repara porta e PM2 da transcrição em todas as instâncias em /home/deploy/*
-# Use após rollback que deixou várias transcrições na porta 4002 (Address already in use).
+# Repara porta e PM2 da transcrição em cada instância em /home/deploy/*
+# Cada instância usa SUA porta (TRANSCRIBE_URL do backend/.env da pasta).
 
-set -euo pipefail
+set -uo pipefail
 
 INSTALADOR_DIR="${INSTALADOR_DIR:-/root/instalador_single_oficial}"
 # shellcheck source=/dev/null
 source "${INSTALADOR_DIR}/tools/mf_transcricao_manutencao.sh"
 
-reparar_porta_de_env() {
-  local emp="$1"
-  local porta="" env_backend="/home/deploy/${emp}/backend/.env"
-  local vars_file=""
+declare -A PORTAS_USADAS=()
 
-  for vars_file in "/home/deploy/${emp}/VARIAVEIS_INSTALACAO" "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"; do
-    if [ -f "$vars_file" ]; then
-      porta=$(grep -m1 '^porta_transcricao=' "$vars_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
-      [ -n "$porta" ] && break
-    fi
-  done
-
-  if [ -z "$porta" ] && [ -f "$env_backend" ]; then
-    local _url
-    _url=$(grep -m1 '^TRANSCRIBE_URL=' "$env_backend" 2>/dev/null | cut -d= -f2- | tr -d '\r')
-    porta=$(echo "$_url" | sed -nE 's|.*:([0-9]+).*|\1|p' | head -1)
-  fi
-  porta=${porta:-4002}
-  printf '%s' "$porta"
-}
-
-printf " >> Reparando transcrições em /home/deploy/* ...\n\n"
+printf " >> Reparando transcrições (uma porta por instância)...\n\n"
 
 ok=0
 skip=0
@@ -39,18 +20,36 @@ for deploy_dir in /home/deploy/*/; do
   [ -d "$deploy_dir" ] || continue
   emp=$(basename "$deploy_dir")
   main_py="${deploy_dir}api_transcricao/main.py"
+  env_backend="${deploy_dir}backend/.env"
+
   if [ ! -f "$main_py" ]; then
     skip=$((skip + 1))
     continue
   fi
 
-  porta=$(reparar_porta_de_env "$emp")
-  printf " >> [%s] porta %s ... " "$emp" "$porta"
+  porta=$(mf_resolver_porta_transcricao_instancia "$emp" "$INSTALADOR_DIR")
+  url_ref=""
+  if [ -f "$env_backend" ]; then
+    url_ref=$(grep -m1 '^TRANSCRIBE_URL=' "$env_backend" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+  fi
+
+  if [ -n "${PORTAS_USADAS[$porta]:-}" ] && [ "${PORTAS_USADAS[$porta]}" != "$emp" ]; then
+    printf "${RED} >> [%s] ERRO: porta %s já usada por %s (conflito). Ajuste TRANSCRIBE_URL em %s${WHITE}\n" \
+      "$emp" "$porta" "${PORTAS_USADAS[$porta]}" "$env_backend"
+    fail=$((fail + 1))
+    continue
+  fi
+  PORTAS_USADAS[$porta]="$emp"
+
+  printf " >> [%s] porta ${BLUE}%s${WHITE}" "$emp" "$porta"
+  [ -n "$url_ref" ] && printf " (TRANSCRIBE_URL=%s)" "$url_ref"
+  printf " ... "
+
   if mf_transcricao_pos_atualizacao_git "$emp" "$porta"; then
-    printf "OK\n"
+    printf "${GREEN}OK${WHITE}\n"
     ok=$((ok + 1))
   else
-    printf "FALHOU\n"
+    printf "${RED}FALHOU${WHITE}\n"
     fail=$((fail + 1))
   fi
 done
