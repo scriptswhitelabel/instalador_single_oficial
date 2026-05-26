@@ -225,13 +225,14 @@ elif [ -d /usr/local/n/versions/node ]; then
     export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
   fi
 fi
-for _p in "${emp}-backend" "${emp}-frontend" "${emp}-transcricao" "transc-${emp}" "api_oficial_${emp}"; do
+for _p in "${emp}-backend" "${emp}-frontend" "api_oficial_${emp}"; do
   if pm2 describe "\$_p" >/dev/null 2>&1; then
     pm2 restart "\$_p" 2>/dev/null || true
     pm2 reset "\$_p" 2>/dev/null || true
     pm2 flush "\$_p" 2>/dev/null || true
   fi
 done
+# Transcrição: reiniciada por roolback_manutencao_transcricao_pos_git (porta correta + delete/start)
 if pm2 describe api_oficial >/dev/null 2>&1; then
   _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
   if echo "\$_cwd" | grep -q "/home/deploy/${emp}/"; then
@@ -460,14 +461,95 @@ elif [ -d /usr/local/n/versions/node ]; then
     export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
   fi
 fi
-for _p in "${emp}-backend" "${emp}-transcricao" "transc-${emp}" "api_oficial_${emp}"; do
+for _p in "${emp}-backend" "api_oficial_${emp}"; do
   pm2 stop "\$_p" 2>/dev/null || true
+done
+for _p in "${emp}-transcricao" "transc-${emp}"; do
+  pm2 delete "\$_p" 2>/dev/null || pm2 stop "\$_p" 2>/dev/null || true
 done
 if pm2 describe api_oficial >/dev/null 2>&1; then
   _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
   echo "\$_cwd" | grep -q "/home/deploy/${emp}/" && pm2 stop api_oficial 2>/dev/null || true
 fi
+sleep 2
 STOPPM2
+}
+
+# Porta da transcrição por instância (TRANSCRIBE_URL / porta_transcricao) — evita conflito na 4002 após git reset
+roolback_resolver_porta_transcricao() {
+  local emp="${1:-$empresa}"
+  local porta="" env_backend="/home/deploy/${emp}/backend/.env"
+
+  if [ -n "${porta_transcricao:-}" ]; then
+    porta="${porta_transcricao}"
+  elif [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    porta=$(grep -m1 '^porta_transcricao=' "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+  fi
+  if [ -z "$porta" ] && [ -f "$env_backend" ]; then
+    local _url
+    _url=$(grep -m1 '^TRANSCRIBE_URL=' "$env_backend" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+    porta=$(echo "$_url" | sed -nE 's|.*:([0-9]+).*|\1|p' | head -1)
+  fi
+  porta=${porta:-4002}
+  printf '%s' "$porta"
+}
+
+roolback_carregar_lib_transcricao() {
+  local lib
+  lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_transcricao_manutencao.sh"
+  [ -f "$lib" ] || lib="/root/instalador_single_oficial/tools/mf_transcricao_manutencao.sh"
+  [ -f "$lib" ] || lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/mf_transcricao_manutencao.sh"
+  if [ -f "$lib" ]; then
+    # shellcheck source=/dev/null
+    source <(sed '1s/^\xEF\xBB\xBF//' "$lib")
+    if declare -F mf_transcricao_pos_atualizacao_git >/dev/null 2>&1; then
+      return 0
+    fi
+    printf "${RED} >> ERRO: Lib transcrição carregada, mas funções não encontradas (${lib}).${WHITE}\n"
+    return 1
+  fi
+  printf "${YELLOW} >> Aviso: mf_transcricao_manutencao.sh não encontrado.${WHITE}\n"
+  return 1
+}
+
+roolback_aplicar_porta_transcricao_main_py() {
+  local emp="${1:-$empresa}"
+  local porta main_py="/home/deploy/${emp}/api_transcricao/main.py"
+
+  [ -f "$main_py" ] || return 0
+  porta=$(roolback_resolver_porta_transcricao "$emp")
+  if roolback_carregar_lib_transcricao 2>/dev/null; then
+    mf_transcricao_aplicar_porta_main_py "$main_py" "$porta"
+  else
+    sed -i -E "s|port[[:space:]]*=[[:space:]]*[0-9]+|port=${porta}|g" "$main_py" 2>/dev/null || true
+    sed -i -E "s|porta[[:space:]]+[0-9]+|porta ${porta}|g" "$main_py" 2>/dev/null || true
+  fi
+  chown deploy:deploy "$main_py" 2>/dev/null || true
+  return 0
+}
+
+# Igual atualização FAST: porta no main.py, run_transcricao.sh e PM2 (delete + start)
+roolback_manutencao_transcricao_pos_git() {
+  local emp="${1:-$empresa}"
+  local porta main_py="/home/deploy/${emp}/api_transcricao/main.py"
+
+  [ -f "$main_py" ] || return 0
+
+  porta=$(roolback_resolver_porta_transcricao "$emp")
+  printf "${WHITE} >> Transcrição: porta ${BLUE}${porta}${WHITE} (instância ${emp})...\n"
+
+  if ! roolback_carregar_lib_transcricao; then
+    roolback_aplicar_porta_transcricao_main_py "$emp"
+    printf "${YELLOW} >> Aviso: PM2 da transcrição não reconfigurado automaticamente.${WHITE}\n"
+    return 1
+  fi
+
+  if ! mf_transcricao_pos_atualizacao_git "$emp" "$porta"; then
+    printf "${YELLOW} >> Aviso: falha ao reconfigurar transcrição (porta ${porta}).${WHITE}\n"
+    return 1
+  fi
+  printf "${GREEN} ✓ Transcrição ativa na porta ${porta}${WHITE}\n"
+  return 0
 }
 
 # Igual atualização FAST: tela de manutenção no build/ + PM2 do frontend ativo
@@ -885,6 +967,8 @@ CHECKOUT
   printf "${GREEN} ✓ Checkout concluído (branch: ${BRANCH_ROLLBACK})\n${WHITE}"
   # Git pode restaurar frontend/build do commit — reaplicar tela de manutenção
   roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
+  # Git restaura api_transcricao/main.py com porta 4002 — reaplicar porta desta instância
+  roolback_aplicar_porta_transcricao_main_py "${empresa}" 2>/dev/null || true
   echo
   
   # 7) Parar PM2 (backend/API/transcrição; frontend permanece na tela de manutenção)
@@ -972,7 +1056,12 @@ MIGRATE
   fi
   echo
   
-  # 10) Reiniciar PM2 da instância
+  # 9b) Transcrição: porta correta + PM2 (evita conflito 4002 entre instâncias)
+  printf "${WHITE} >> Reconfigurando API de transcrição...\n"
+  roolback_manutencao_transcricao_pos_git "${empresa}" || printf "${YELLOW} >> Aviso: transcrição pode precisar de ajuste manual (tools/reparar_transcricoes_instancias.sh).${WHITE}\n"
+  echo
+  
+  # 10) Reiniciar PM2 da instância (backend/frontend/API; transcrição já tratada acima)
   printf "${WHITE} [10/11] Reiniciando PM2 da instância ${empresa}...\n"
   pm2_reiniciar_instancia "${empresa}"
   if [ $? -ne 0 ]; then
@@ -1101,6 +1190,7 @@ CHECKOUT
   fi
   printf "${GREEN} ✓ Checkout para branch oficial concluído\n${WHITE}"
   roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
+  roolback_aplicar_porta_transcricao_main_py "${empresa}" 2>/dev/null || true
   echo
   
   # 3) Atualizar código com git pull (com loop: se falhar, pede token novamente até sucesso ou usuário desistir)
@@ -1130,6 +1220,7 @@ PULL
   done
   printf "${GREEN} ✓ Código atualizado\n${WHITE}"
   roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
+  roolback_aplicar_porta_transcricao_main_py "${empresa}" 2>/dev/null || true
   echo
   
   # 4) Parar PM2 (exceto frontend em manutenção)
@@ -1217,7 +1308,11 @@ MIGRATE
   fi
   echo
   
-  # 7) Reiniciar PM2 da instância
+  printf "${WHITE} >> Reconfigurando API de transcrição...\n"
+  roolback_manutencao_transcricao_pos_git "${empresa}" || printf "${YELLOW} >> Aviso: transcrição pode precisar de ajuste manual.${WHITE}\n"
+  echo
+  
+  # 7) Reiniciar PM2 da instância (backend/frontend/API; transcrição já tratada acima)
   printf "${WHITE} [7/9] Reiniciando PM2 da instância ${empresa}...\n"
   pm2_reiniciar_instancia "${empresa}"
   if [ $? -ne 0 ]; then
