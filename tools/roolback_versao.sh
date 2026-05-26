@@ -412,7 +412,12 @@ roolback_carregar_lib_tela_frontend() {
   if [ -f "$lib" ]; then
     # shellcheck source=/dev/null
     source "$lib"
-    return 0
+    # Garantia: o lib precisa definir as funcoes usadas no roolback.
+    if declare -F publicar_build_frontend_atualizado >/dev/null 2>&1 && declare -F restaurar_build_frontend_anterior >/dev/null 2>&1; then
+      return 0
+    fi
+    printf "${RED} >> ERRO: Lib frontend carregada, mas funcoes nao foram encontradas (${lib}).${WHITE}\n"
+    return 1
   fi
   printf "${YELLOW} >> Aviso: mf_tela_atualizacao_frontend.sh nao encontrado.${WHITE}\n"
   return 1
@@ -481,7 +486,10 @@ roolback_build_e_publicar_frontend() {
     return 0
   fi
 
-  roolback_carregar_lib_tela_frontend || true
+  if ! roolback_carregar_lib_tela_frontend; then
+    printf "${RED} >> Nao foi possivel carregar mf_tela_atualizacao_frontend.sh. Encerrando frontend build do rollback.${WHITE}\n"
+    return 1
+  fi
 
   if ! sudo su - deploy <<FRONTEND
 export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
