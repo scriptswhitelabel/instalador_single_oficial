@@ -409,6 +409,8 @@ aplicar_token_baileys_package_json() {
 roolback_carregar_lib_tela_frontend() {
   local lib
   lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_tela_atualizacao_frontend.sh"
+  [ -f "$lib" ] || lib="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  [ -f "$lib" ] || lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/mf_tela_atualizacao_frontend.sh"
   if [ -f "$lib" ]; then
     # shellcheck source=/dev/null
     source "$lib"
@@ -435,7 +437,11 @@ elif [ -d /usr/local/n/versions/node ]; then
     export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
   fi
 fi
-pm2 restart "${emp}-frontend" 2>/dev/null || true
+if pm2 describe "${emp}-frontend" >/dev/null 2>&1; then
+  pm2 restart "${emp}-frontend" 2>/dev/null || true
+else
+  cd "/home/deploy/${emp}/frontend" && pm2 start server.js --name "${emp}-frontend" 2>/dev/null || true
+fi
 pm2 save 2>/dev/null || true
 RESTARTFE
 }
@@ -463,16 +469,35 @@ fi
 STOPPM2
 }
 
-roolback_exibir_tela_atualizacao_frontend() {
-  [ -d "/home/deploy/${empresa}/frontend" ] || return 0
-  roolback_carregar_lib_tela_frontend || return 0
+# Igual atualização FAST: tela de manutenção no build/ + PM2 do frontend ativo
+roolback_aplicar_tela_atualizacao_frontend() {
+  local emp="${1:-$empresa}"
+
+  if [ ! -d "/home/deploy/${emp}/frontend" ]; then
+    printf "${YELLOW} >> Frontend não encontrado; tela de atualização ignorada.${WHITE}\n"
+    return 0
+  fi
+
+  if ! roolback_carregar_lib_tela_frontend; then
+    printf "${RED} >> ERRO: não foi possível carregar mf_tela_atualizacao_frontend.sh${WHITE}\n"
+    printf "${YELLOW} >> Execute: cd /root/instalador_single_oficial && git pull${WHITE}\n"
+    return 1
+  fi
+
   if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
     # shellcheck source=/dev/null
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  elif [ -f "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" ]; then
+    # shellcheck source=/dev/null
+    source "${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO" 2>/dev/null
   fi
+  empresa="$emp"
+
   exportar_vars_frontend_env_seguro
   ativar_tela_atualizacao_frontend
-  pm2_reiniciar_frontend_instancia "${empresa}"
+  pm2_reiniciar_frontend_instancia "$emp"
+  printf "${GREEN} >> Tela de atualização publicada em /home/deploy/${emp}/frontend/build${WHITE}\n"
+  return 0
 }
 
 # Build em .build_nova + publicar (igual atualizacao FAST)
@@ -739,6 +764,11 @@ rollback_versao() {
   echo
   printf "${WHITE} >> Iniciando rollback de versão...\n"
   echo
+
+  # Tela de manutenção ANTES do git (igual FAST) — usuário vê durante todo o processo
+  printf "${WHITE} >> Ativando tela de atualização no frontend...\n"
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" || printf "${YELLOW} >> Aviso: tela de atualização não pôde ser ativada; continuando rollback.${WHITE}\n"
+  echo
   
   # 1) Entrar na pasta do projeto e corrigir permissões
   printf "${WHITE} [1/11] Entrando na pasta do projeto e corrigindo permissões...\n"
@@ -829,6 +859,7 @@ CLEAN
     trata_erro "git reset --hard"
   fi
   printf "${GREEN} ✓ Alterações locais removidas\n${WHITE}"
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
   echo
   
   # 5) Limpar arquivos não rastreados (git clean desativado — preserva arquivos locais da instância)
@@ -851,15 +882,9 @@ CHECKOUT
     trata_erro "git checkout"
   fi
   printf "${GREEN} ✓ Checkout concluído (branch: ${BRANCH_ROLLBACK})\n${WHITE}"
+  # Git pode restaurar frontend/build do commit — reaplicar tela de manutenção
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
   echo
-
-  # Tela de manutenção no frontend (igual atualização FAST)
-  if [ -d "${APP_DIR}/frontend" ]; then
-    printf "${WHITE} >> Exibindo tela de atualização no frontend...\n"
-    roolback_exibir_tela_atualizacao_frontend
-    printf "${GREEN} ✓ Tela de atualização ativa no frontend\n${WHITE}"
-    echo
-  fi
   
   # 7) Parar PM2 (backend/API/transcrição; frontend permanece na tela de manutenção)
   printf "${WHITE} [7/11] Parando PM2 da instância ${empresa} (exceto frontend)...\n"
@@ -1018,6 +1043,10 @@ retornar_versao_principal() {
   echo
   printf "${WHITE} >> Iniciando retorno para versão principal...\n"
   echo
+
+  printf "${WHITE} >> Ativando tela de atualização no frontend...\n"
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" || printf "${YELLOW} >> Aviso: tela de atualização não pôde ser ativada; continuando.${WHITE}\n"
+  echo
   
   # 1) Entrar na pasta do projeto e corrigir permissões
   printf "${WHITE} [1/9] Entrando na pasta do projeto e corrigindo permissões...\n"
@@ -1070,6 +1099,7 @@ CHECKOUT
     trata_erro "git checkout"
   fi
   printf "${GREEN} ✓ Checkout para branch oficial concluído\n${WHITE}"
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
   echo
   
   # 3) Atualizar código com git pull (com loop: se falhar, pede token novamente até sucesso ou usuário desistir)
@@ -1098,14 +1128,8 @@ PULL
     fi
   done
   printf "${GREEN} ✓ Código atualizado\n${WHITE}"
+  roolback_aplicar_tela_atualizacao_frontend "${empresa}" 2>/dev/null || true
   echo
-
-  if [ -d "${APP_DIR}/frontend" ]; then
-    printf "${WHITE} >> Exibindo tela de atualização no frontend...\n"
-    roolback_exibir_tela_atualizacao_frontend
-    printf "${GREEN} ✓ Tela de atualização ativa no frontend\n${WHITE}"
-    echo
-  fi
   
   # 4) Parar PM2 (exceto frontend em manutenção)
   printf "${WHITE} [4/9] Parando PM2 da instância ${empresa} (exceto frontend)...\n"
