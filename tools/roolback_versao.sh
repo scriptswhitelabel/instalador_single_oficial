@@ -413,7 +413,8 @@ roolback_carregar_lib_tela_frontend() {
   [ -f "$lib" ] || lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/mf_tela_atualizacao_frontend.sh"
   if [ -f "$lib" ]; then
     # shellcheck source=/dev/null
-    source "$lib"
+    # Remove BOM UTF-8 (Windows/editor) que quebra o source no bash
+    source <(sed '1s/^\xEF\xBB\xBF//' "$lib")
     # Garantia: o lib precisa definir as funcoes usadas no roolback.
     if declare -F publicar_build_frontend_atualizado >/dev/null 2>&1 && declare -F restaurar_build_frontend_anterior >/dev/null 2>&1; then
       return 0

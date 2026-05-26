@@ -1,4 +1,5 @@
-﻿# Shared: tela de manutencao no frontend (atualizacao FAST / rollback)
+﻿#!/usr/bin/env bash
+# Shared: tela de manutencao no frontend (atualizacao FAST / rollback)
 # Requer variavel global: empresa
 
 # Exporta apenas chaves necessarias do frontend/.env (sem source).
