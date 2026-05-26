@@ -406,6 +406,128 @@ aplicar_token_baileys_package_json() {
   return 0
 }
 
+roolback_carregar_lib_tela_frontend() {
+  local lib
+  lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_tela_atualizacao_frontend.sh"
+  if [ -f "$lib" ]; then
+    # shellcheck source=/dev/null
+    source "$lib"
+    return 0
+  fi
+  printf "${YELLOW} >> Aviso: mf_tela_atualizacao_frontend.sh nao encontrado.${WHITE}\n"
+  return 1
+}
+
+pm2_reiniciar_frontend_instancia() {
+  local emp="${1:-$empresa}"
+  sudo su - deploy <<RESTARTFE
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+pm2 restart "${emp}-frontend" 2>/dev/null || true
+pm2 save 2>/dev/null || true
+RESTARTFE
+}
+
+# Para backend/API/transcricao; mantem frontend com tela de manutencao
+pm2_parar_instancia_sem_frontend() {
+  local emp="${1:-$empresa}"
+  sudo su - deploy <<STOPPM2
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+for _p in "${emp}-backend" "${emp}-transcricao" "transc-${emp}" "api_oficial_${emp}"; do
+  pm2 stop "\$_p" 2>/dev/null || true
+done
+if pm2 describe api_oficial >/dev/null 2>&1; then
+  _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
+  echo "\$_cwd" | grep -q "/home/deploy/${emp}/" && pm2 stop api_oficial 2>/dev/null || true
+fi
+STOPPM2
+}
+
+roolback_exibir_tela_atualizacao_frontend() {
+  [ -d "/home/deploy/${empresa}/frontend" ] || return 0
+  roolback_carregar_lib_tela_frontend || return 0
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+  exportar_vars_frontend_env_seguro
+  ativar_tela_atualizacao_frontend
+  pm2_reiniciar_frontend_instancia "${empresa}"
+}
+
+# Build em .build_nova + publicar (igual atualizacao FAST)
+roolback_build_e_publicar_frontend() {
+  local FRONTEND_DIR="$1"
+  local frontend_port="${2:-3000}"
+  local build_ok=0 mem
+
+  if [ ! -d "$FRONTEND_DIR" ]; then
+    printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
+    return 0
+  fi
+
+  roolback_carregar_lib_tela_frontend || true
+
+  if ! sudo su - deploy <<FRONTEND
+export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+elif [ -d /usr/local/n/versions/node ]; then
+  _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+  if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+    export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
+  fi
+fi
+FRONTEND_DIR="$FRONTEND_DIR"
+cd "\$FRONTEND_DIR" || exit 1
+[ -f package.json ] || { echo "ERRO: package.json nao encontrado"; exit 1; }
+npm prune --force > /dev/null 2>&1
+rm -rf node_modules 2>/dev/null || true
+rm -f package-lock.json 2>/dev/null || true
+npm install --force
+[ -f server.js ] && sed -i 's/3000/'"$frontend_port"'/g' server.js
+rm -rf .build_nova
+build_ok=0
+for mem in 4096 3072 2048; do
+  if BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=\${mem} --openssl-legacy-provider" npm run build; then
+    build_ok=1
+    break
+  fi
+done
+[ "\$build_ok" -eq 1 ] || exit 1
+FRONTEND
+  then
+    printf "${RED} >> ERRO ao instalar dependências ou build do frontend\n${WHITE}"
+    if command -v restaurar_build_frontend_anterior >/dev/null 2>&1; then
+      restaurar_build_frontend_anterior
+    fi
+    return 1
+  fi
+
+  if ! publicar_build_frontend_atualizado; then
+    printf "${RED} >> Falha ao publicar novo build do frontend.\n${WHITE}"
+    restaurar_build_frontend_anterior
+    return 1
+  fi
+  printf "${GREEN} ✓ Frontend instalado e buildado\n${WHITE}"
+  return 0
+}
+
 # Lista de versões: tools/versoes_multiflow_pro.conf (editar lá; formato versao|commit)
 definir_versoes() {
   local _mf_loader
@@ -722,11 +844,19 @@ CHECKOUT
   fi
   printf "${GREEN} ✓ Checkout concluído (branch: ${BRANCH_ROLLBACK})\n${WHITE}"
   echo
+
+  # Tela de manutenção no frontend (igual atualização FAST)
+  if [ -d "${APP_DIR}/frontend" ]; then
+    printf "${WHITE} >> Exibindo tela de atualização no frontend...\n"
+    roolback_exibir_tela_atualizacao_frontend
+    printf "${GREEN} ✓ Tela de atualização ativa no frontend\n${WHITE}"
+    echo
+  fi
   
-  # 7) Parar aplicações PM2 da instância
-  printf "${WHITE} [7/11] Parando PM2 da instância ${empresa}...\n"
-  pm2_parar_instancia "${empresa}"
-  printf "${GREEN} ✓ PM2 da instância ${empresa} parado\n${WHITE}"
+  # 7) Parar PM2 (backend/API/transcrição; frontend permanece na tela de manutenção)
+  printf "${WHITE} [7/11] Parando PM2 da instância ${empresa} (exceto frontend)...\n"
+  pm2_parar_instancia_sem_frontend "${empresa}"
+  printf "${GREEN} ✓ Serviços parados (frontend em manutenção)\n${WHITE}"
   echo
   
   # 8) Reinstalar dependências do Backend
@@ -798,56 +928,13 @@ MIGRATE
   garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
   echo
   
-  # 9) Reinstalar dependências e build do Frontend
+  # 9) Reinstalar dependências e build do Frontend (.build_nova + publicar)
   printf "${WHITE} [9/11] Reinstalando dependências e build do Frontend...\n"
   FRONTEND_DIR="${APP_DIR}/frontend"
-  
-  # Carregar porta do frontend do .env se existir
   source "$FRONTEND_DIR/.env" 2>/dev/null || true
   frontend_port=${SERVER_PORT:-3000}
-  
-  if [ ! -d "$FRONTEND_DIR" ]; then
-    printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
-  else
-    sudo su - deploy <<FRONTEND
-# Configura PATH para Node.js
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
-fi
-
-FRONTEND_DIR="$FRONTEND_DIR"
-
-if [ ! -d "\$FRONTEND_DIR" ]; then
-  echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
-  exit 1
-fi
-
-cd "\$FRONTEND_DIR"
-
-if [ ! -f "package.json" ]; then
-  echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
-  exit 1
-fi
-
-npm prune --force > /dev/null 2>&1
-rm -rf node_modules 2>/dev/null || true
-rm -f package-lock.json 2>/dev/null || true
-npm install --force
-
-if [ -f "server.js" ]; then
-  sed -i 's/3000/'"$frontend_port"'/g' server.js
-fi
-
-NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
-sleep 2
-FRONTEND
-    if [ $? -ne 0 ]; then
-      printf "${RED} >> ERRO ao instalar dependências ou build do frontend\n${WHITE}"
-      trata_erro "npm install/build frontend"
-    fi
-    printf "${GREEN} ✓ Frontend instalado e buildado\n${WHITE}"
+  if ! roolback_build_e_publicar_frontend "$FRONTEND_DIR" "$frontend_port"; then
+    trata_erro "npm install/build frontend"
   fi
   echo
   
@@ -1004,11 +1091,18 @@ PULL
   done
   printf "${GREEN} ✓ Código atualizado\n${WHITE}"
   echo
+
+  if [ -d "${APP_DIR}/frontend" ]; then
+    printf "${WHITE} >> Exibindo tela de atualização no frontend...\n"
+    roolback_exibir_tela_atualizacao_frontend
+    printf "${GREEN} ✓ Tela de atualização ativa no frontend\n${WHITE}"
+    echo
+  fi
   
-  # 4) Parar aplicações PM2 da instância
-  printf "${WHITE} [4/9] Parando PM2 da instância ${empresa}...\n"
-  pm2_parar_instancia "${empresa}"
-  printf "${GREEN} ✓ PM2 da instância ${empresa} parado\n${WHITE}"
+  # 4) Parar PM2 (exceto frontend em manutenção)
+  printf "${WHITE} [4/9] Parando PM2 da instância ${empresa} (exceto frontend)...\n"
+  pm2_parar_instancia_sem_frontend "${empresa}"
+  printf "${GREEN} ✓ Serviços parados (frontend em manutenção)\n${WHITE}"
   echo
   
   # 5) Reinstalar dependências do Backend
@@ -1080,56 +1174,13 @@ MIGRATE
   garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
   echo
   
-  # 6) Reinstalar dependências e build do Frontend
+  # 6) Reinstalar dependências e build do Frontend (.build_nova + publicar)
   printf "${WHITE} [6/9] Reinstalando dependências e build do Frontend...\n"
   FRONTEND_DIR="${APP_DIR}/frontend"
-  
-  # Carregar porta do frontend do .env se existir
   source "$FRONTEND_DIR/.env" 2>/dev/null || true
   frontend_port=${SERVER_PORT:-3000}
-  
-  if [ ! -d "$FRONTEND_DIR" ]; then
-    printf "${YELLOW} >> Aviso: Diretório frontend não encontrado. Pulando...\n${WHITE}"
-  else
-    sudo su - deploy <<FRONTEND
-# Configura PATH para Node.js
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
-else
-  export PATH=/usr/bin:/usr/local/bin:\$PATH
-fi
-
-FRONTEND_DIR="$FRONTEND_DIR"
-
-if [ ! -d "\$FRONTEND_DIR" ]; then
-  echo "ERRO: Diretório do frontend não existe: \$FRONTEND_DIR"
-  exit 1
-fi
-
-cd "\$FRONTEND_DIR"
-
-if [ ! -f "package.json" ]; then
-  echo "ERRO: package.json não encontrado em \$FRONTEND_DIR"
-  exit 1
-fi
-
-npm prune --force > /dev/null 2>&1
-rm -rf node_modules 2>/dev/null || true
-rm -f package-lock.json 2>/dev/null || true
-npm install --force
-
-if [ -f "server.js" ]; then
-  sed -i 's/3000/'"$frontend_port"'/g' server.js
-fi
-
-NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
-sleep 2
-FRONTEND
-    if [ $? -ne 0 ]; then
-      printf "${RED} >> ERRO ao instalar dependências ou build do frontend\n${WHITE}"
-      trata_erro "npm install/build frontend"
-    fi
-    printf "${GREEN} ✓ Frontend instalado e buildado\n${WHITE}"
+  if ! roolback_build_e_publicar_frontend "$FRONTEND_DIR" "$frontend_port"; then
+    trata_erro "npm install/build frontend"
   fi
   echo
   
