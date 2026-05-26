@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Shared: tela de manutencao no frontend (atualizacao FAST / rollback)
 # Requer variavel global: empresa
 
