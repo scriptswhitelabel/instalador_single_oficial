@@ -230,13 +230,62 @@ carregar_variaveis() {
   whatsmeow_detectar_compose_project
 }
 
+# Containers legados wuzapi-* no servidor (podem pertencer a outra instância).
+whatsmeow_servidor_tem_stack_legada() {
+  local names_all="$1"
+  echo "$names_all" | grep -qE '^wuzapi-(db|rabbitmq|wuzapi-server)(-|$)'
+}
+
+# Porta WuzAPI registrada para esta instância (.env ou VARIAVEIS), não o default genérico.
+whatsmeow_porta_registrada_instancia() {
+  local wuz_dir="/home/deploy/${empresa}/wuzapi"
+  local p=""
+
+  if [ -f "${wuz_dir}/.env" ]; then
+    p=$(grep -m1 '^WUZAPI_PORT=' "${wuz_dir}/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  fi
+  if [ -z "$p" ] && [ -n "${ARQUIVO_VARIAVEIS:-}" ] && [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    p=$(grep -m1 '^wuzapi_port=' "$ARQUIVO_VARIAVEIS" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
+  fi
+  [ -n "$p" ] && printf '%s' "$p"
+}
+
+# Stack legada "wuzapi" pertence à instância atual (não a outra no mesmo servidor).
+whatsmeow_instancia_usa_stack_legada() {
+  local wuz_dir="/home/deploy/${empresa}/wuzapi"
+  local names_all nm porta_reg holder
+
+  [ -d "$wuz_dir" ] || return 1
+
+  names_all=$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
+  whatsmeow_servidor_tem_stack_legada "$names_all" || return 1
+
+  nm=""
+  if [ -f "${wuz_dir}/docker-compose.yml" ]; then
+    nm=$(grep -m1 '^name:' "${wuz_dir}/docker-compose.yml" 2>/dev/null | sed -E 's/^name:[[:space:]]*//; s/["'"'"']//g; s/[[:space:]]+$//')
+    if [ -z "$nm" ] || [ "$nm" = "wuzapi" ]; then
+      return 0
+    fi
+  fi
+
+  porta_reg=$(whatsmeow_porta_registrada_instancia)
+  [ -n "$porta_reg" ] || return 1
+
+  holder=$(docker ps --filter "publish=${porta_reg}" --format '{{.Names}}' 2>/dev/null | head -1)
+  case "$holder" in
+    wuzapi-wuzapi-server-*|wuzapi-server|wuzapi-wuzapi-server) return 0 ;;
+  esac
+  return 1
+}
+
 # Detecta o projeto Docker Compose já em uso (evita duplicar stack na atualização).
 # Instalações antigas: projeto "wuzapi" (nome da pasta). Novas: "wuzapi_<empresa>".
+# A stack legada só é considerada se pertencer à instância selecionada.
 whatsmeow_detectar_compose_project() {
   local wuz_dir="/home/deploy/${empresa}/wuzapi"
   local proj_novo="wuzapi_${empresa}"
   local port_host="${wuzapi_port:-$default_wuzapi_port}"
-  local holder names_all
+  local holder names_all porta_reg
   WHATSMEOW_COMPOSE_LEGACY=0
 
   if [ -f "${wuz_dir}/.env" ]; then
@@ -246,37 +295,32 @@ whatsmeow_detectar_compose_project() {
   fi
 
   names_all=$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)
-
-  # Stack legada (compose sem "name:" — projeto = pasta wuzapi)
-  if echo "$names_all" | grep -qE '^wuzapi-(db|rabbitmq|wuzapi-server)(-|$)'; then
-    WUZAPI_COMPOSE_PROJECT="wuzapi"
-    WHATSMEOW_COMPOSE_LEGACY=1
-    printf "${GREEN} >> Stack Docker existente: projeto ${BLUE}wuzapi${GREEN} (instalação anterior).${WHITE}\n\n"
-    return 0
-  fi
-
-  # API já publicada na porta da instância (ex.: 8090) — usa o container que está na porta
-  holder=$(docker ps --filter "publish=${port_host}" --format '{{.Names}}' 2>/dev/null | head -1)
-  if [ -n "$holder" ]; then
-    case "$holder" in
-      wuzapi-wuzapi-server-*|wuzapi-server|wuzapi-wuzapi-server)
-        WUZAPI_COMPOSE_PROJECT="wuzapi"
-        WHATSMEOW_COMPOSE_LEGACY=1
-        printf "${GREEN} >> Stack na porta ${port_host}: projeto ${BLUE}wuzapi${GREEN} (${holder}).${WHITE}\n\n"
-        return 0
-        ;;
-      ${proj_novo}-wuzapi-server-*|${proj_novo}-server)
-        WUZAPI_COMPOSE_PROJECT="${proj_novo}"
-        printf "${GREEN} >> Stack na porta ${port_host}: projeto ${BLUE}${proj_novo}${GREEN}.${WHITE}\n\n"
-        return 0
-        ;;
-    esac
-  fi
+  porta_reg=$(whatsmeow_porta_registrada_instancia)
 
   if echo "$names_all" | grep -qE "^${proj_novo}-(db|rabbitmq|server|wuzapi-server)(-|$)"; then
     WUZAPI_COMPOSE_PROJECT="${proj_novo}"
     printf "${GREEN} >> Stack Docker existente: projeto ${BLUE}${proj_novo}${GREEN}.${WHITE}\n\n"
     return 0
+  fi
+
+  if whatsmeow_instancia_usa_stack_legada; then
+    WUZAPI_COMPOSE_PROJECT="wuzapi"
+    WHATSMEOW_COMPOSE_LEGACY=1
+    printf "${GREEN} >> Stack Docker existente: projeto ${BLUE}wuzapi${GREEN} (instalação legada desta instância).${WHITE}\n\n"
+    return 0
+  fi
+
+  if [ -n "$porta_reg" ] && [ "$port_host" = "$porta_reg" ]; then
+    holder=$(docker ps --filter "publish=${port_host}" --format '{{.Names}}' 2>/dev/null | head -1)
+    if [ -n "$holder" ]; then
+      case "$holder" in
+        ${proj_novo}-wuzapi-server-*|${proj_novo}-server)
+          WUZAPI_COMPOSE_PROJECT="${proj_novo}"
+          printf "${GREEN} >> Stack na porta ${port_host}: projeto ${BLUE}${proj_novo}${GREEN}.${WHITE}\n\n"
+          return 0
+          ;;
+      esac
+    fi
   fi
 
   if [ -f "${wuz_dir}/docker-compose.yml" ]; then
@@ -288,17 +332,19 @@ whatsmeow_detectar_compose_project() {
       printf "${GREEN} >> Projeto no docker-compose.yml: ${BLUE}${nm}${GREEN}.${WHITE}\n\n"
       return 0
     fi
-    # name: wuzapi_multiflow no YAML mas stack real é wuzapi — ignorar YAML se legado existir
-    if [ "$nm" = "${proj_novo}" ] && echo "$names_all" | grep -qE '^wuzapi-'; then
+    if [ "$nm" = "${proj_novo}" ] && whatsmeow_instancia_usa_stack_legada; then
       WUZAPI_COMPOSE_PROJECT="wuzapi"
       WHATSMEOW_COMPOSE_LEGACY=1
-      printf "${YELLOW} >> docker-compose.yml com ${proj_novo}, mas containers ${BLUE}wuzapi-*${YELLOW} ativos — usando projeto ${BLUE}wuzapi${YELLOW}.${WHITE}\n\n"
+      printf "${YELLOW} >> docker-compose.yml com ${proj_novo}, mas stack legada ${BLUE}wuzapi-*${YELLOW} é desta instância — usando projeto ${BLUE}wuzapi${YELLOW}.${WHITE}\n\n"
       return 0
     fi
     [ -n "$nm" ] && WUZAPI_COMPOSE_PROJECT="$nm" && [ "$nm" = "wuzapi" ] && WHATSMEOW_COMPOSE_LEGACY=1 && return 0
   fi
 
   WUZAPI_COMPOSE_PROJECT="${proj_novo}"
+  if [ ! -d "$wuz_dir" ] && whatsmeow_servidor_tem_stack_legada "$names_all"; then
+    printf "${GREEN} >> Nova instância: projeto ${BLUE}${proj_novo}${GREEN} (stack legada de outra instância não será alterada).${WHITE}\n\n"
+  fi
 }
 
 # Remove stack duplicada criada por atualização com projeto errado (ex.: wuzapi_multiflow junto de wuzapi).
@@ -515,11 +561,11 @@ verificar_instalacao_existente() {
     printf "${WHITE} >> Iniciando reinstalação...${WHITE}\n"
     echo
     
-    # Parar e remover containers Docker se existirem
+    # Parar e remover containers Docker se existirem (projeto detectado: legado ou wuzapi_<empresa>)
     if [ -f "/home/deploy/${empresa}/wuzapi/docker-compose.yml" ]; then
-      printf "${WHITE} >> Parando containers Docker do WhatsMeow...${WHITE}\n"
+      printf "${WHITE} >> Parando containers Docker do WhatsMeow (projeto ${WUZAPI_COMPOSE_PROJECT:-wuzapi_${empresa}})...${WHITE}\n"
       cd /home/deploy/${empresa}/wuzapi
-      local proj="wuzapi_${empresa}"
+      local proj="${WUZAPI_COMPOSE_PROJECT:-wuzapi_${empresa}}"
       docker compose -p "$proj" down -v 2>/dev/null || docker-compose -p "$proj" down -v 2>/dev/null || true
       echo
       sleep 2
@@ -528,6 +574,8 @@ verificar_instalacao_existente() {
     # Remover a pasta wuzapi
     printf "${WHITE} >> Removendo pasta wuzapi existente...${WHITE}\n"
     rm -rf /home/deploy/${empresa}/wuzapi
+    WUZAPI_COMPOSE_PROJECT="wuzapi_${empresa}"
+    WHATSMEOW_COMPOSE_LEGACY=0
     printf "${GREEN} >> Pasta removida com sucesso!${WHITE}\n"
     echo
     sleep 2
