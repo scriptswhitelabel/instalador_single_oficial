@@ -1069,9 +1069,24 @@ baixa_codigo_atualizar() {
   fi
   # ==== FIM PASTA ESTÁTICA ====
 
-  git fetch origin
-  git checkout MULTI100-OFICIAL-u21
-  git reset --hard origin/MULTI100-OFICIAL-u21
+  chmod -R u+w .git 2>/dev/null || true
+  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
+  DEPLOY_BRANCH=""
+  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+    DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    DEPLOY_BRANCH="main"
+  elif git show-ref --verify --quiet refs/remotes/origin/master; then
+    DEPLOY_BRANCH="master"
+  fi
+  if [ -z "\$DEPLOY_BRANCH" ]; then
+    echo "ERRO: Nenhuma branch remota conhecida em origin."
+    exit 1
+  fi
+  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (reset + pull)...\n"
+  git reset --hard "origin/\$DEPLOY_BRANCH"
+  git checkout -B "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH" 2>/dev/null || true
+  git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
   
   if [ ! -d "\$BACKEND_DIR" ]; then
     echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
