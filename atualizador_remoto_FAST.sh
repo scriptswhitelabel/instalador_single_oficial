@@ -929,41 +929,20 @@ printf "${WHITE} >> Atualizando código (git)...\n"
 echo
 cd /home/deploy/${empresa}
 
-if [ -n "${commit_atualizacao}" ]; then
-  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
-  printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
-  if ! git cat-file -e "${commit_atualizacao}^{commit}" 2>/dev/null; then
-    echo "ERRO: Commit ${commit_atualizacao} não encontrado após fetch."
-    exit 1
-  fi
-  _BR_ATU="atualizacao-fast-${versao_atualizacao}-\$(date +%Y%m%d-%H%M%S)"
-  git checkout -f "${commit_atualizacao}"
-  git reset --hard "${commit_atualizacao}"
-  # git clean -fd -e api_transcricao/run_transcricao.sh  # desativado: apaga arquivos locais (ex.: run_transcricao.sh)
-  git checkout -b "\$_BR_ATU" 2>/dev/null || git checkout "\$_BR_ATU"
-  _HEAD_ATU=\$(git rev-parse HEAD 2>/dev/null)
-  if [ "\$_HEAD_ATU" != "${commit_atualizacao}" ]; then
-    echo "ERRO: Checkout falhou. Esperado ${commit_atualizacao}, atual \$_HEAD_ATU"
-    exit 1
-  fi
+if [ -f /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh ]; then
+  . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
 else
-  DEPLOY_BRANCH=""
-  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
-    DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
-  elif git show-ref --verify --quiet refs/remotes/origin/main; then
-    DEPLOY_BRANCH="main"
-  elif git show-ref --verify --quiet refs/remotes/origin/master; then
-    DEPLOY_BRANCH="master"
-  fi
-  if [ -z "\$DEPLOY_BRANCH" ]; then
-    echo "ERRO: Nenhuma branch remota conhecida em origin."
-    exit 1
-  fi
-  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (Mais Recente: reset + pull)...${WHITE}\n"
-  git reset --hard "origin/\$DEPLOY_BRANCH"
-  printf "${WHITE} >> Executando git pull origin \$DEPLOY_BRANCH...${WHITE}\n"
-  git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
-  # git clean -fd -e api_transcricao/run_transcricao.sh  # desativado: apaga arquivos locais (ex.: run_transcricao.sh)
+  echo "ERRO: tools/git_sincronizar_repositorio.sh não encontrado em /root/instalador_single_oficial."
+  exit 1
+fi
+
+if [ -n "${commit_atualizacao}" ]; then
+  printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
+  mf_git_sincronizar_repositorio "${commit_atualizacao}" "atualizacao-fast-${versao_atualizacao}" || exit 1
+else
+  printf "${WHITE} >> Sincronizando com origin (Mais Recente: fetch + reset)...${WHITE}\n"
+  mf_git_sincronizar_repositorio "" || exit 1
+  printf "${WHITE} >> Branch sincronizada: \${MF_GIT_DEPLOY_BRANCH}${WHITE}\n"
 fi
 
 if [ -d "/home/deploy/${empresa}/api_transcricao" ] && [ -f "/home/deploy/${empresa}/api_transcricao/main.py" ]; then

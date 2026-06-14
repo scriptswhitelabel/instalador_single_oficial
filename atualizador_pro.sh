@@ -1069,24 +1069,14 @@ baixa_codigo_atualizar() {
   fi
   # ==== FIM PASTA ESTÁTICA ====
 
-  chmod -R u+w .git 2>/dev/null || true
-  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
-  DEPLOY_BRANCH=""
-  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
-    DEPLOY_BRANCH="MULTI100-OFICIAL-u21"
-  elif git show-ref --verify --quiet refs/remotes/origin/main; then
-    DEPLOY_BRANCH="main"
-  elif git show-ref --verify --quiet refs/remotes/origin/master; then
-    DEPLOY_BRANCH="master"
-  fi
-  if [ -z "\$DEPLOY_BRANCH" ]; then
-    echo "ERRO: Nenhuma branch remota conhecida em origin."
+  if [ -f /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh ]; then
+    . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
+  else
+    echo "ERRO: tools/git_sincronizar_repositorio.sh não encontrado em /root/instalador_single_oficial."
     exit 1
   fi
-  printf "${WHITE} >> Sincronizando com origin/\$DEPLOY_BRANCH (reset + pull)...\n"
-  git reset --hard "origin/\$DEPLOY_BRANCH"
-  git checkout -B "\$DEPLOY_BRANCH" "origin/\$DEPLOY_BRANCH" 2>/dev/null || true
-  git pull origin "\$DEPLOY_BRANCH" --ff-only 2>/dev/null || git pull origin "\$DEPLOY_BRANCH"
+  printf "${WHITE} >> Sincronizando com origin (fetch + reset)...\n"
+  mf_git_sincronizar_repositorio "" || exit 1
   
   if [ ! -d "\$BACKEND_DIR" ]; then
     echo "ERRO: Diretório do backend não existe: \$BACKEND_DIR"
