@@ -914,9 +914,13 @@ baixa_codigo_atualizar() {
   fi
   porta_transcricao=${porta_transcricao:-4002}
   ativar_tela_atualizacao_frontend
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if ! sudo su - deploy <<EOF
 set -e
-if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+_MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
+if [ -f "\$_MF_PATH_NODE" ]; then
+  . "\$_MF_PATH_NODE"
+elif [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
   . /root/instalador_single_oficial/tools/path_node_deploy.sh
 else
   export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
@@ -924,17 +928,14 @@ else
     export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
   fi
 fi
+if ! command -v mf_git_sincronizar_repositorio >/dev/null 2>&1; then
+  echo "ERRO: mf_git_sincronizar_repositorio não disponível. Atualize tools/path_node_deploy.sh no instalador."
+  exit 1
+fi
 
 printf "${WHITE} >> Atualizando código (git)...\n"
 echo
 cd /home/deploy/${empresa}
-
-if [ -f /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh ]; then
-  . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
-else
-  echo "ERRO: tools/git_sincronizar_repositorio.sh não encontrado em /root/instalador_single_oficial."
-  exit 1
-fi
 
 if [ -n "${commit_atualizacao}" ]; then
   printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"

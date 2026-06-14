@@ -5419,9 +5419,13 @@ STOPPM2
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
   fi
   porta_transcricao=${porta_transcricao:-4002}
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if ! sudo su - deploy <<UPDATEAPP
-  # Configura PATH para Node.js e PM2
-  if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
+  # Configura PATH para Node.js e PM2 (+ git sync via path_node_deploy.sh)
+  _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
+  if [ -f "\$_MF_PATH_NODE" ]; then
+    . "\$_MF_PATH_NODE"
+  elif [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
     . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
     export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
@@ -5435,10 +5439,13 @@ STOPPM2
     fi
     if ! command -v npm >/dev/null 2>&1; then
       echo "ERRO: npm não encontrado no PATH do usuário deploy."
-      echo "      Atualize o instalador em /root/instalador_single_oficial (inclua tools/path_node_deploy.sh) ou, como root: n 20.19.4"
-      echo "      Verifique: ls /usr/local/n/versions/node/  e  sudo ls -la /usr/bin/npm"
+      echo "      Atualize o instalador (tools/path_node_deploy.sh) ou, como root: n 20.19.4"
       exit 1
     fi
+  fi
+  if ! command -v mf_git_sincronizar_repositorio >/dev/null 2>&1; then
+    echo "ERRO: mf_git_sincronizar_repositorio não disponível. Atualize tools/path_node_deploy.sh no instalador."
+    exit 1
   fi
   
   APP_DIR="/home/deploy/${empresa}"
@@ -5486,13 +5493,6 @@ STOPPM2
     printf "${GREEN} >> Pasta de personalizações encontrada: \$CUSTOM_DIR${WHITE}\n"
   fi
   # ==== FIM PASTA ESTÁTICA ====
-
-  if [ -f /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh ]; then
-    . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
-  else
-    echo "ERRO: tools/git_sincronizar_repositorio.sh não encontrado em /root/instalador_single_oficial."
-    exit 1
-  fi
 
   if [ -n "${commit_atualizacao}" ]; then
     printf "${WHITE} >> Atualizando para commit fixo (versão pinada)...\n"
