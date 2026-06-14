@@ -5420,8 +5420,62 @@ STOPPM2
   fi
   porta_transcricao=${porta_transcricao:-4002}
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+    MF_GIT_SYNC_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh")
+  else
+    MF_GIT_SYNC_BODY=$(cat <<'MF_GIT_SYNC_INLINE'
+
+mf_git_clean_preservando_locais() {
+  git clean -fd -e api_transcricao/run_transcricao.sh 2>/dev/null || true
+}
+mf_git_detectar_deploy_branch() {
+  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+    printf '%s\n' MULTI100-OFICIAL-u21
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    printf '%s\n' main
+  elif git show-ref --verify --quiet refs/remotes/origin/master; then
+    printf '%s\n' master
+  fi
+}
+mf_git_sincronizar_repositorio() {
+  local commit_alvo="\${1:-}"
+  local branch_prefix="\${2:-atualizacao}"
+  chmod -R u+w .git 2>/dev/null || true
+  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
+  mf_git_clean_preservando_locais
+  if [ -n "\$commit_alvo" ]; then
+    if ! git cat-file -e "\${commit_alvo}^{commit}" 2>/dev/null; then
+      echo "ERRO: Commit \${commit_alvo} não encontrado após fetch."
+      return 1
+    fi
+    git checkout -f "\${commit_alvo}" || return 1
+    git reset --hard "\${commit_alvo}" || return 1
+    local _br_atu="\${branch_prefix}-\$(date +%Y%m%d-%H%M%S)"
+    git checkout -b "\$_br_atu" 2>/dev/null || git checkout "\$_br_atu" 2>/dev/null || true
+    local _head_atu
+    _head_atu=\$(git rev-parse HEAD 2>/dev/null)
+    if [ "\$_head_atu" != "\$commit_alvo" ]; then
+      echo "ERRO: Checkout falhou. Esperado \${commit_alvo}, atual \$_head_atu"
+      return 1
+    fi
+    return 0
+  fi
+  MF_GIT_DEPLOY_BRANCH=\$(mf_git_detectar_deploy_branch)
+  if [ -z "\$MF_GIT_DEPLOY_BRANCH" ]; then
+    echo "ERRO: Nenhuma branch remota conhecida em origin."
+    return 1
+  fi
+  git reset --hard "origin/\${MF_GIT_DEPLOY_BRANCH}" || return 1
+  git checkout -B "\${MF_GIT_DEPLOY_BRANCH}" "origin/\${MF_GIT_DEPLOY_BRANCH}" 2>/dev/null || true
+  mf_git_clean_preservando_locais
+  git reset --hard "origin/\${MF_GIT_DEPLOY_BRANCH}" || return 1
+  return 0
+}
+MF_GIT_SYNC_INLINE
+)
+  fi
   if ! sudo su - deploy <<UPDATEAPP
-  # Configura PATH para Node.js e PM2 (+ git sync via path_node_deploy.sh)
+  # Configura PATH para Node.js e PM2
   _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
   if [ -f "\$_MF_PATH_NODE" ]; then
     . "\$_MF_PATH_NODE"
@@ -5443,10 +5497,7 @@ STOPPM2
       exit 1
     fi
   fi
-  if ! command -v mf_git_sincronizar_repositorio >/dev/null 2>&1; then
-    echo "ERRO: mf_git_sincronizar_repositorio não disponível. Atualize tools/path_node_deploy.sh no instalador."
-    exit 1
-  fi
+${MF_GIT_SYNC_BODY}
   
   APP_DIR="/home/deploy/${empresa}"
   BACKEND_DIR="\${APP_DIR}/backend"
