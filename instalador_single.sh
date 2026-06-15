@@ -4878,39 +4878,20 @@ config_cron_base() {
     wget -O /home/deploy/atualiza_public.sh https://raw.githubusercontent.com/FilipeCamillo/busca_tamaho_pasta/main/busca_tamaho_pasta.sh >/dev/null 2>&1
     chmod +x /home/deploy/atualiza_public.sh >/dev/null 2>&1
     chown deploy:deploy /home/deploy/atualiza_public.sh >/dev/null 2>&1
-    echo '#!/bin/bash
-# Configura PATH para Node.js e PM2
-if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-  export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:$PATH
-elif [ -f /usr/bin/node ]; then
-  export PATH=/usr/bin:/usr/local/bin:$PATH
-else
-  # Tenta encontrar node no sistema
-  NODE_DIR=$(find /usr -type d -name "node" -o -type f -name "node" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-  if [ -n "$NODE_DIR" ]; then
-    export PATH=$NODE_DIR:/usr/bin:$PATH
-  fi
-fi
-pm2 restart all' >/home/deploy/reinicia_instancia.sh
-    chmod +x /home/deploy/reinicia_instancia.sh
-    chown deploy:deploy /home/deploy/reinicia_instancia.sh >/dev/null 2>&1
+    # Cron de pm2 restart às 1h removido — causava instabilidade (queda de sessões Wuzapi/Baileys)
+    rm -f /home/deploy/reinicia_instancia.sh
     sudo su - deploy <<'EOF'
         CRON_JOB1="0 3 * * * wget -O /home/deploy/atualiza_public.sh https://raw.githubusercontent.com/FilipeCamillo/busca_tamaho_pasta/main/busca_tamaho_pasta.sh && bash /home/deploy/atualiza_public.sh >> /home/deploy/cron.log 2>&1"
-        CRON_JOB2="0 1 * * * /bin/bash /home/deploy/reinicia_instancia.sh >> /home/deploy/cron.log 2>&1"
-        CRON_EXISTS1=$(crontab -l 2>/dev/null | grep -F "${CRON_JOB1}")
-        CRON_EXISTS2=$(crontab -l 2>/dev/null | grep -F "${CRON_JOB2}")
-
-        if [[ -z "${CRON_EXISTS1}" ]] || [[ -z "${CRON_EXISTS2}" ]]; then
-            printf "${GREEN} >> Cron não detectado, agendando agora...${WHITE} "
-            {
-                crontab -l 2>/dev/null
-                [[ -z "${CRON_EXISTS1}" ]] && echo "${CRON_JOB1}"
-                [[ -z "${CRON_EXISTS2}" ]] && echo "${CRON_JOB2}"
-            } | crontab -
-        else
-            printf "${GREEN} >> Crons já existem, continuando...${WHITE} \n"
+        TMP_CRON=$(mktemp)
+        crontab -l 2>/dev/null | grep -v 'reinicia_instancia.sh' | grep -v 'atualiza_public.sh' | grep -v '^$' > "${TMP_CRON}" || true
+        if ! grep -qF "${CRON_JOB1}" "${TMP_CRON}" 2>/dev/null; then
+            echo "${CRON_JOB1}" >> "${TMP_CRON}"
         fi
+        crontab "${TMP_CRON}"
+        rm -f "${TMP_CRON}"
 EOF
+    # Remove também do crontab root (instalações antigas duplicavam o job)
+    crontab -l 2>/dev/null | grep -v 'reinicia_instancia.sh' | grep -v '^$' | crontab - 2>/dev/null || true
 
     sleep 2
   } || trata_erro "config_cron_base"

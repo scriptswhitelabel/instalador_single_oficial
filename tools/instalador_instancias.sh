@@ -1848,20 +1848,18 @@ config_cron_instancia() {
     fi
     sleep 2
     
+    rm -f /home/deploy/reinicia_instancia.sh
     sudo su - deploy <<'EOF'
         CRON_JOB1="0 3 * * * wget -O /home/deploy/atualiza_public.sh https://raw.githubusercontent.com/FilipeCamillo/busca_tamaho_pasta/main/busca_tamaho_pasta.sh && bash /home/deploy/atualiza_public.sh >> /home/deploy/cron.log 2>&1"
-        CRON_JOB2="0 1 * * * /bin/bash /home/deploy/reinicia_instancia.sh >> /home/deploy/cron.log 2>&1"
-        CRON_EXISTS1=$(crontab -l 2>/dev/null | grep -F "${CRON_JOB1}")
-        CRON_EXISTS2=$(crontab -l 2>/dev/null | grep -F "${CRON_JOB2}")
-
-        if [[ -z "${CRON_EXISTS1}" ]] || [[ -z "${CRON_EXISTS2}" ]]; then
-            {
-                crontab -l 2>/dev/null
-                [[ -z "${CRON_EXISTS1}" ]] && echo "${CRON_JOB1}"
-                [[ -z "${CRON_EXISTS2}" ]] && echo "${CRON_JOB2}"
-            } | crontab -
+        TMP_CRON=$(mktemp)
+        crontab -l 2>/dev/null | grep -v 'reinicia_instancia.sh' | grep -v 'atualiza_public.sh' | grep -v '^$' > "${TMP_CRON}" || true
+        if ! grep -qF "${CRON_JOB1}" "${TMP_CRON}" 2>/dev/null; then
+            echo "${CRON_JOB1}" >> "${TMP_CRON}"
         fi
+        crontab "${TMP_CRON}"
+        rm -f "${TMP_CRON}"
 EOF
+    crontab -l 2>/dev/null | grep -v 'reinicia_instancia.sh' | grep -v '^$' | crontab - 2>/dev/null || true
 
     sleep 2
   } || trata_erro "config_cron_instancia"
