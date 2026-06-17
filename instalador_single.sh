@@ -375,6 +375,10 @@ ferramentas_redis_dir_backup_instancia() {
   printf '/home/deploy/backup-%s/redis' "${empresa}"
 }
 
+ferramentas_dir_backup_banco_instancia() {
+  printf '/home/deploy/backup-%s' "$1"
+}
+
 ferramentas_carregar_redis_instancia() {
   local env_file="/home/deploy/${empresa}/backend/.env"
   REDIS_SENHA="${senha_deploy:-}"
@@ -815,6 +819,93 @@ ferramentas_carregar_credenciais_pg_por_nome() {
   empresa="${nome_instancia}"
   ferramentas_carregar_credenciais_pg_instancia
   empresa="${empresa_salva}"
+}
+
+# Localiza pasta da instância pelo nome do banco.
+# Prioridade: arquivos VARIAVEIS_INSTALACAO* do instalador → .env no servidor.
+# Define FERRAMENTAS_INSTANCIA_POR_DB (ex.: oficialweb → web via apioficial_db_name).
+ferramentas_resolver_instancia_por_db_name() {
+  local db_name="$1"
+  local instalador_dir="${2:-}"
+  local dir env_file db_env db_user nome_inst arq temp_emp apiof_db
+  FERRAMENTAS_INSTANCIA_POR_DB=""
+
+  if [ -z "$instalador_dir" ]; then
+    instalador_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  fi
+
+  # 1) Variáveis de instalação registradas no instalador
+  for arq in "${instalador_dir}/${ARQUIVO_VARIAVEIS:-VARIAVEIS_INSTALACAO}" \
+             "${instalador_dir}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
+    [ -f "$arq" ] || continue
+    temp_emp=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    [ -n "$temp_emp" ] || continue
+
+    if [ "$db_name" = "$temp_emp" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="$temp_emp"
+      return 0
+    fi
+
+    apiof_db=$(grep -m1 '^apioficial_db_name=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    if [ -n "$apiof_db" ] && [ "$db_name" = "$apiof_db" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="$temp_emp"
+      return 0
+    fi
+
+    if [ "$db_name" = "oficial${temp_emp}" ] || [ "$db_name" = "oficial_${temp_emp}" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="$temp_emp"
+      return 0
+    fi
+
+    if [ -f "/home/deploy/${temp_emp}/backend/.env" ]; then
+      db_env=$(grep -m1 '^DB_NAME=' "/home/deploy/${temp_emp}/backend/.env" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+      if [ "$db_name" = "$db_env" ]; then
+        FERRAMENTAS_INSTANCIA_POR_DB="$temp_emp"
+        return 0
+      fi
+    fi
+  done
+
+  # 2) Fallback: pastas em /home/deploy (api_oficial, backend, convenções)
+  if [ -d "/home/deploy/${db_name}/backend" ] && [ -f "/home/deploy/${db_name}/backend/.env" ]; then
+    FERRAMENTAS_INSTANCIA_POR_DB="${db_name}"
+    return 0
+  fi
+
+  for dir in /home/deploy/*/api_oficial; do
+    [ -d "$dir" ] || continue
+    env_file="${dir}/.env"
+    [ -f "$env_file" ] || continue
+    db_env=$(grep -m1 '^DATABASE_NAME=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    if [ "$db_env" = "$db_name" ]; then
+      nome_inst=$(basename "$(dirname "$dir")")
+      FERRAMENTAS_INSTANCIA_POR_DB="${nome_inst}"
+      return 0
+    fi
+  done
+
+  for dir in /home/deploy/*/backend; do
+    [ -d "$dir" ] || continue
+    nome_inst=$(basename "$(dirname "$dir")")
+    if [ "$db_name" = "oficial${nome_inst}" ] || [ "$db_name" = "oficial_${nome_inst}" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="${nome_inst}"
+      return 0
+    fi
+    env_file="${dir}/.env"
+    [ -f "$env_file" ] || continue
+    db_env=$(grep -m1 '^DB_NAME=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    if [ "$db_env" = "$db_name" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="${nome_inst}"
+      return 0
+    fi
+    db_user=$(grep -m1 '^DB_USER=' "$env_file" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
+    if [ "$db_user" = "$db_name" ]; then
+      FERRAMENTAS_INSTANCIA_POR_DB="${nome_inst}"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 # Preenche FERRAMENTAS_LISTA_DB com bancos do cluster (PostgreSQL nativo).
@@ -1396,7 +1487,7 @@ importar_backup_banco_api_oficial_ferramentas() {
   sleep 2
 }
 
-# Backup do banco nativo (PostgreSQL): lista bancos, escolhe, salva em /home/deploy/backup-<nome_do_banco>/
+# Backup do banco nativo (PostgreSQL): lista bancos, salva em /home/deploy/backup-<instância>/
 backup_banco_ferramentas() {
   banner
   printf "${WHITE} >> Backup do banco (PostgreSQL nativo)...\n"
@@ -1467,35 +1558,52 @@ backup_banco_ferramentas() {
     return 1
   fi
 
-  # Pasta e credenciais seguem o banco/instância escolhido (ex.: web → backup-web/)
-  local instancia_backup="${db_escolhido}"
-  local BACKUP_DIR="/home/deploy/backup-${instancia_backup}"
-  mkdir -p "$BACKUP_DIR"
-  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
-
+  # Pasta sempre da instância (ex.: banco web ou oficialweb → /home/deploy/backup-web/)
+  local instancia_resolvida=""
+  local BACKUP_DIR=""
   local pg_host="127.0.0.1"
   local pg_port="5432"
-  if [ -d "/home/deploy/${db_escolhido}/backend" ]; then
-    ferramentas_carregar_credenciais_pg_por_nome "${db_escolhido}"
+
+  if ferramentas_resolver_instancia_por_db_name "${db_escolhido}" "${INSTALADOR_DIR}"; then
+    instancia_resolvida="${FERRAMENTAS_INSTANCIA_POR_DB}"
+    ferramentas_carregar_credenciais_pg_por_nome "${instancia_resolvida}"
     usuario_db="${PG_USUARIO:-$db_escolhido}"
     senha_db="${PG_SENHA:-$senha_db}"
     pg_host="${PG_HOST:-127.0.0.1}"
     pg_port="${PG_PORT:-5432}"
-  else
+    BACKUP_DIR=$(ferramentas_dir_backup_banco_instancia "${instancia_resolvida}")
+    printf "${GREEN} >> Instância: ${instancia_resolvida} (banco ${db_escolhido})${WHITE}\n"
+  elif PGPASSWORD="${senha_db}" psql -U "${db_escolhido}" -h localhost -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
     usuario_db="${db_escolhido}"
-    if [ -z "$senha_db" ] || [ "$usuario_db" != "${empresa_listagem}" ]; then
-      printf "${YELLOW} >> Instância /home/deploy/${db_escolhido} não encontrada. Informe usuário e senha do banco ${db_escolhido}:${WHITE}\n"
-      read -p "   Usuário [${db_escolhido}]: " input_user
-      [ -n "$input_user" ] && usuario_db="$input_user"
-      read -s -p "   Senha: " senha_db
-      echo
-    fi
+    BACKUP_DIR=$(ferramentas_dir_backup_banco_instancia "${db_escolhido}")
+    printf "${WHITE} >> Usando credenciais do usuário PostgreSQL ${db_escolhido}.${WHITE}\n"
+  elif PGPASSWORD="${senha_db}" psql -U "${usuario_db}" -h localhost -d "${db_escolhido}" -c "SELECT 1;" >/dev/null 2>&1; then
+    BACKUP_DIR=$(ferramentas_dir_backup_banco_instancia "${empresa_listagem}")
+    printf "${WHITE} >> Usando credenciais de listagem (usuário ${usuario_db}).${WHITE}\n"
+  else
+    printf "${YELLOW} >> Não foi possível localizar a instância do banco ${db_escolhido}.${WHITE}\n"
+    printf "${YELLOW} >> Informe o nome da pasta da instância em /home/deploy (ex.: web):${WHITE}\n"
+    read -p "> " instancia_resolvida
+    [ -z "$instancia_resolvida" ] && printf "${RED} >> Instância não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+    BACKUP_DIR=$(ferramentas_dir_backup_banco_instancia "${instancia_resolvida}")
+    printf "${YELLOW} >> Informe usuário e senha do banco ${db_escolhido}:${WHITE}\n"
+    read -p "   Usuário [${db_escolhido}]: " input_user
+    usuario_db="${input_user:-$db_escolhido}"
+    read -s -p "   Senha: " senha_db
+    echo
+    [ -z "$senha_db" ] && printf "${RED} >> Senha não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
   fi
 
+  mkdir -p "$BACKUP_DIR"
+  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
+
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-  ARQUIVO_BACKUP="${BACKUP_DIR}/${db_escolhido}_${TIMESTAMP}.sql"
+  local arquivo_nome="${db_escolhido}_${TIMESTAMP}.sql"
+  local ARQUIVO_BACKUP="${BACKUP_DIR}/${arquivo_nome}"
+
   printf "${WHITE} >> Gerando backup de ${db_escolhido}...${WHITE}\n"
   printf "${WHITE} >> Pasta de destino: ${BACKUP_DIR}${WHITE}\n"
+
   PGPASSWORD="${senha_db}" pg_dump -U "${usuario_db}" -h "${pg_host}" -p "${pg_port}" "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
   if [ $? -eq 0 ] && [ -s "$ARQUIVO_BACKUP" ]; then
     chown deploy:deploy "$ARQUIVO_BACKUP" 2>/dev/null || true
