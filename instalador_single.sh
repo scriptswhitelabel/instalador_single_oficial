@@ -415,6 +415,173 @@ ferramentas_redis_cli_docker() {
   fi
 }
 
+ferramentas_redis_nativo_ping() {
+  if [ -n "${REDIS_SENHA}" ]; then
+    redis-cli -a "${REDIS_SENHA}" -p "${REDIS_PORT}" ping 2>/dev/null | grep -q PONG
+  else
+    redis-cli -p "${REDIS_PORT}" ping 2>/dev/null | grep -q PONG
+  fi
+}
+
+ferramentas_redis_fonte_nativo_disponivel() {
+  if ferramentas_redis_nativo_ping; then
+    return 0
+  fi
+  if [ "${REDIS_PORT}" = "6379" ] && systemctl is-active --quiet redis-server 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+ferramentas_montar_lista_fontes_redis() {
+  FERRAMENTAS_REDIS_FONTES=()
+  FERRAMENTAS_REDIS_FONTES_LABELS=()
+  local c uri_host uri_port
+  uri_host=""
+  uri_port=""
+  if [ -n "${REDIS_URI_RAW}" ]; then
+    if [[ "$REDIS_URI_RAW" =~ redis://([^:/@]+):([0-9]+) ]]; then
+      uri_host="${BASH_REMATCH[1]}"
+      uri_port="${BASH_REMATCH[2]}"
+    elif [[ "$REDIS_URI_RAW" =~ redis://:([^@]+)@([^:/]+):([0-9]+) ]]; then
+      uri_host="${BASH_REMATCH[2]}"
+      uri_port="${BASH_REMATCH[3]}"
+    elif [[ "$REDIS_URI_RAW" =~ redis://([^:/@]+)/ ]]; then
+      uri_host="${BASH_REMATCH[1]}"
+      uri_port="6379"
+    fi
+  fi
+
+  ferramentas_listar_containers_redis_docker
+  for c in "${FERRAMENTAS_REDIS_CONTAINERS[@]}"; do
+    FERRAMENTAS_REDIS_FONTES+=("docker:${c}")
+    if [ "$c" = "${REDIS_CONTAINER_PADRAO}" ]; then
+      FERRAMENTAS_REDIS_FONTES_LABELS+=("${c} (Docker — sugerido para ${empresa})")
+    else
+      FERRAMENTAS_REDIS_FONTES_LABELS+=("${c} (Docker)")
+    fi
+  done
+
+  if ferramentas_redis_fonte_nativo_disponivel; then
+    FERRAMENTAS_REDIS_FONTES+=("native:${REDIS_PORT}")
+    if [ "$uri_port" = "${REDIS_PORT}" ] && { [ "$uri_host" = "127.0.0.1" ] || [ "$uri_host" = "localhost" ] || [ -z "$uri_host" ]; }; then
+      FERRAMENTAS_REDIS_FONTES_LABELS+=("127.0.0.1:${REDIS_PORT} (Redis nativo local — instância ${empresa})")
+    else
+      FERRAMENTAS_REDIS_FONTES_LABELS+=("127.0.0.1:${REDIS_PORT} (Redis nativo local, porta ${REDIS_PORT})")
+    fi
+  fi
+}
+
+ferramentas_escolher_fonte_redis() {
+  local prompt_msg="${1:-Escolha a fonte do Redis}"
+  ferramentas_montar_lista_fontes_redis
+  if [ ${#FERRAMENTAS_REDIS_FONTES[@]} -eq 0 ]; then
+    return 1
+  fi
+  if [ ${#FERRAMENTAS_REDIS_FONTES[@]} -eq 1 ]; then
+    FERRAMENTAS_REDIS_FONTE="${FERRAMENTAS_REDIS_FONTES[0]}"
+    printf "${GREEN} >> Fonte Redis: ${FERRAMENTAS_REDIS_FONTES_LABELS[0]}${WHITE}\n"
+    return 0
+  fi
+  if ferramentas_escolher_item_lista "$prompt_msg" "${FERRAMENTAS_REDIS_FONTES_LABELS[@]}"; then
+    local i
+    for i in "${!FERRAMENTAS_REDIS_FONTES_LABELS[@]}"; do
+      if [ "${FERRAMENTAS_REDIS_FONTES_LABELS[$i]}" = "${FERRAMENTAS_ESCOLHA}" ]; then
+        FERRAMENTAS_REDIS_FONTE="${FERRAMENTAS_REDIS_FONTES[$i]}"
+        return 0
+      fi
+    done
+  fi
+  return 1
+}
+
+ferramentas_backup_redis_nativo() {
+  local backup_dir="$1"
+  local redis_dir="/var/lib/redis"
+  local redis_conf="/etc/redis/redis.conf"
+  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  local dump_rdb="${redis_dir}/dump.rdb"
+  local aof_file="${redis_dir}/appendonly.aof"
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  printf "${WHITE} >> Gerando snapshot no Redis nativo (porta ${REDIS_PORT})...${WHITE}\n"
+  if [ -n "${REDIS_SENHA}" ]; then
+    redis-cli -a "${REDIS_SENHA}" -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
+  else
+    redis-cli -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
+  fi
+  sleep 2
+  if [ -f "$dump_rdb" ]; then
+    cp "$dump_rdb" "${backup_dir}/dump_${ts}.rdb"
+    chown deploy:deploy "${backup_dir}/dump_${ts}.rdb" 2>/dev/null || true
+    printf "${GREEN} >> Backup RDB: ${backup_dir}/dump_${ts}.rdb${WHITE}\n"
+  else
+    printf "${YELLOW} >> dump.rdb não encontrado em ${dump_rdb}.${WHITE}\n"
+    return 1
+  fi
+  if [ -f "$aof_file" ]; then
+    cp "$aof_file" "${backup_dir}/appendonly_${ts}.aof"
+    chown deploy:deploy "${backup_dir}/appendonly_${ts}.aof" 2>/dev/null || true
+    printf "${GREEN} >> Backup AOF: ${backup_dir}/appendonly_${ts}.aof${WHITE}\n"
+  fi
+  return 0
+}
+
+ferramentas_executar_backup_redis_fonte() {
+  local backup_dir="$1"
+  case "${FERRAMENTAS_REDIS_FONTE}" in
+    docker:*)
+      ferramentas_backup_redis_docker "${FERRAMENTAS_REDIS_FONTE#docker:}" "$backup_dir"
+      ;;
+    native:*)
+      ferramentas_backup_redis_nativo "$backup_dir"
+      ;;
+    *)
+      printf "${RED} >> Fonte Redis inválida: ${FERRAMENTAS_REDIS_FONTE}${WHITE}\n"
+      return 1
+      ;;
+  esac
+}
+
+ferramentas_restaurar_redis_nativo() {
+  local arquivo_rdb="$1"
+  local redis_dir="/var/lib/redis"
+  local redis_conf="/etc/redis/redis.conf"
+  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
+  local dump_rdb="${redis_dir}/dump.rdb"
+  local aof_file="${redis_dir}/appendonly.aof"
+  systemctl stop redis-server 2>/dev/null || true
+  sleep 2
+  cp "$arquivo_rdb" "$dump_rdb"
+  chown redis:redis "$dump_rdb" 2>/dev/null || true
+  chmod 660 "$dump_rdb" 2>/dev/null || true
+  [ -f "$aof_file" ] && mv "$aof_file" "${aof_file}.bak_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+  systemctl start redis-server 2>/dev/null || true
+  sleep 2
+  if systemctl is-active --quiet redis-server 2>/dev/null || ferramentas_redis_nativo_ping; then
+    printf "${GREEN} >> Redis nativo (porta ${REDIS_PORT}) reiniciado. Restauração concluída.${WHITE}\n"
+    return 0
+  fi
+  printf "${RED} >> Redis nativo não respondeu após restauração.${WHITE}\n"
+  return 1
+}
+
+ferramentas_executar_restaurar_redis_fonte() {
+  local arquivo_rdb="$1"
+  case "${FERRAMENTAS_REDIS_FONTE}" in
+    docker:*)
+      ferramentas_restaurar_redis_docker "${FERRAMENTAS_REDIS_FONTE#docker:}" "$arquivo_rdb"
+      ;;
+    native:*)
+      ferramentas_restaurar_redis_nativo "$arquivo_rdb"
+      ;;
+    *)
+      printf "${RED} >> Destino Redis inválido: ${FERRAMENTAS_REDIS_FONTE}${WHITE}\n"
+      return 1
+      ;;
+  esac
+}
+
 ferramentas_escolher_container_redis_docker() {
   local prompt_msg="${1:-Escolha o container Redis}"
   ferramentas_listar_containers_redis_docker
@@ -516,54 +683,14 @@ backup_redis_ferramentas() {
   printf "${WHITE} >> Pasta de destino: ${backup_dir}${WHITE}\n"
   echo
 
-  if command -v docker >/dev/null 2>&1; then
-    ferramentas_listar_containers_redis_docker
-    if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -gt 0 ]; then
-      if ! ferramentas_escolher_container_redis_docker "Container Redis para backup:"; then
-        printf "${YELLOW} >> Cancelado.${WHITE}\n"
-        sleep 2
-        return 0
-      fi
-      ferramentas_backup_redis_docker "${FERRAMENTAS_REDIS_CONTAINER}" "$backup_dir" || return 1
-      printf "${GREEN} >> Backup concluído em ${backup_dir}${WHITE}\n"
-      echo
-      sleep 2
-      return 0
-    fi
-  fi
-
-  # Fallback: Redis nativo (systemd)
-  local redis_dir="/var/lib/redis"
-  local redis_conf="/etc/redis/redis.conf"
-  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
-  local dump_rdb="${redis_dir}/dump.rdb"
-  local aof_file="${redis_dir}/appendonly.aof"
-  if ! systemctl is-active --quiet redis-server 2>/dev/null; then
-    printf "${RED} >> Nenhum container Redis em execução e redis-server nativo inativo.${WHITE}\n"
+  if ! ferramentas_escolher_fonte_redis "Fonte do Redis para backup (instância ${empresa}):"; then
+    printf "${RED} >> Nenhuma fonte Redis disponível (Docker ou nativo local).${WHITE}\n"
     sleep 2
     return 1
   fi
-  printf "${WHITE} >> Usando Redis nativo (redis-server)...${WHITE}\n"
-  local ts
-  ts=$(date +%Y%m%d_%H%M%S)
-  if [ -n "${REDIS_SENHA}" ]; then
-    redis-cli -a "${REDIS_SENHA}" -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
-  else
-    redis-cli -p "${REDIS_PORT}" BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true
-  fi
-  sleep 2
-  if [ -f "$dump_rdb" ]; then
-    cp "$dump_rdb" "${backup_dir}/dump_${ts}.rdb"
-    chown deploy:deploy "${backup_dir}/dump_${ts}.rdb" 2>/dev/null || true
-    printf "${GREEN} >> Backup RDB: ${backup_dir}/dump_${ts}.rdb${WHITE}\n"
-  else
-    printf "${YELLOW} >> dump.rdb não encontrado em ${dump_rdb}.${WHITE}\n"
-  fi
-  if [ -f "$aof_file" ]; then
-    cp "$aof_file" "${backup_dir}/appendonly_${ts}.aof"
-    chown deploy:deploy "${backup_dir}/appendonly_${ts}.aof" 2>/dev/null || true
-    printf "${GREEN} >> Backup AOF: ${backup_dir}/appendonly_${ts}.aof${WHITE}\n"
-  fi
+
+  ferramentas_executar_backup_redis_fonte "$backup_dir" || return 1
+  printf "${GREEN} >> Backup concluído em ${backup_dir}${WHITE}\n"
   echo
   sleep 2
   return 0
@@ -634,54 +761,26 @@ restaurar_redis_ferramentas() {
   printf "${GREEN} >> Backup selecionado: $(basename "$arquivo_rdb")${WHITE}\n"
   echo
 
-  if command -v docker >/dev/null 2>&1; then
-    ferramentas_listar_containers_redis_docker
-    if [ ${#FERRAMENTAS_REDIS_CONTAINERS[@]} -gt 0 ]; then
-      if ! ferramentas_escolher_container_redis_docker "Container Redis de DESTINO (dados serão substituídos):"; then
-        printf "${YELLOW} >> Cancelado.${WHITE}\n"
-        sleep 2
-        return 0
-      fi
-      printf "${YELLOW} >> ATENÇÃO: o Redis no container '${FERRAMENTAS_REDIS_CONTAINER}' será substituído pelo backup. Continuar? (s/N):${WHITE}\n"
-      read -p "> " confirma
-      if [ "$confirma" != "s" ] && [ "$confirma" != "S" ]; then
-        printf "${YELLOW} >> Cancelado.${WHITE}\n"
-        sleep 2
-        return 0
-      fi
-      ferramentas_restaurar_redis_docker "${FERRAMENTAS_REDIS_CONTAINER}" "$arquivo_rdb"
-      echo
-      sleep 2
-      return 0
-    fi
+  if ! ferramentas_escolher_fonte_redis "Destino do Redis para restauração (instância ${empresa}):"; then
+    printf "${RED} >> Nenhum destino Redis disponível (Docker ou nativo local).${WHITE}\n"
+    sleep 2
+    return 1
   fi
 
-  # Fallback: nativo
-  local redis_dir="/var/lib/redis"
-  local redis_conf="/etc/redis/redis.conf"
-  [ -f "$redis_conf" ] && redis_dir=$(grep "^dir " "$redis_conf" 2>/dev/null | awk '{print $2}' || echo "/var/lib/redis")
-  local dump_rdb="${redis_dir}/dump.rdb"
-  local aof_file="${redis_dir}/appendonly.aof"
-  printf "${YELLOW} >> Nenhum container Redis em execução. Restaurar no Redis nativo? (s/N):${WHITE}\n"
-  read -p "> " conf_nat
-  if [ "$conf_nat" != "s" ] && [ "$conf_nat" != "S" ]; then
+  local destino_msg
+  case "${FERRAMENTAS_REDIS_FONTE}" in
+    docker:*) destino_msg="container '${FERRAMENTAS_REDIS_FONTE#docker:}'" ;;
+    native:*) destino_msg="Redis nativo local (porta ${REDIS_PORT})" ;;
+    *) destino_msg="${FERRAMENTAS_REDIS_FONTE}" ;;
+  esac
+  printf "${YELLOW} >> ATENÇÃO: o ${destino_msg} será substituído pelo backup. Continuar? (s/N):${WHITE}\n"
+  read -p "> " confirma
+  if [ "$confirma" != "s" ] && [ "$confirma" != "S" ]; then
     printf "${YELLOW} >> Cancelado.${WHITE}\n"
     sleep 2
     return 0
   fi
-  systemctl stop redis-server 2>/dev/null || true
-  sleep 2
-  cp "$arquivo_rdb" "$dump_rdb"
-  chown redis:redis "$dump_rdb" 2>/dev/null || true
-  chmod 660 "$dump_rdb" 2>/dev/null || true
-  [ -f "$aof_file" ] && mv "$aof_file" "${aof_file}.bak_$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-  systemctl start redis-server 2>/dev/null || true
-  sleep 2
-  if systemctl is-active --quiet redis-server 2>/dev/null; then
-    printf "${GREEN} >> Redis nativo reiniciado. Restauração concluída.${WHITE}\n"
-  else
-    printf "${RED} >> Redis nativo não iniciou.${WHITE}\n"
-  fi
+  ferramentas_executar_restaurar_redis_fonte "$arquivo_rdb"
   echo
   sleep 2
   return 0
