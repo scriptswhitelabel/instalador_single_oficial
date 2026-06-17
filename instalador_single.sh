@@ -808,6 +808,15 @@ ferramentas_carregar_credenciais_pg_instancia() {
   [ -z "$PG_PORT" ] && PG_PORT="5432"
 }
 
+# Carrega credenciais PG a partir do nome da instância/banco (ex.: web → /home/deploy/web/backend/.env).
+ferramentas_carregar_credenciais_pg_por_nome() {
+  local nome_instancia="$1"
+  local empresa_salva="${empresa:-}"
+  empresa="${nome_instancia}"
+  ferramentas_carregar_credenciais_pg_instancia
+  empresa="${empresa_salva}"
+}
+
 # Preenche FERRAMENTAS_LISTA_DB com bancos do cluster (PostgreSQL nativo).
 ferramentas_listar_bancos_pg_nativo() {
   FERRAMENTAS_LISTA_DB=()
@@ -1387,7 +1396,7 @@ importar_backup_banco_api_oficial_ferramentas() {
   sleep 2
 }
 
-# Backup do banco nativo (PostgreSQL): usa usuário empresa e senha_deploy (sem postgres). Lista bancos, escolhe, salva em /home/deploy/backup-${empresa}/
+# Backup do banco nativo (PostgreSQL): lista bancos, escolhe, salva em /home/deploy/backup-<nome_do_banco>/
 backup_banco_ferramentas() {
   banner
   printf "${WHITE} >> Backup do banco (PostgreSQL nativo)...\n"
@@ -1397,18 +1406,15 @@ backup_banco_ferramentas() {
   if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
     source "$ARQUIVO_VARIAVEIS_INSTALADOR" 2>/dev/null
   fi
-  if [ -z "${empresa}" ]; then
-    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o nome da empresa (ex: multiflow):${WHITE}\n"
-    read -p "> " empresa
-    [ -z "$empresa" ] && printf "${RED} >> Empresa não informada. Cancelado.${WHITE}\n" && sleep 2 && return 1
+  local empresa_listagem="${empresa:-}"
+  if [ -z "${empresa_listagem}" ]; then
+    printf "${YELLOW} >> Empresa não encontrada nas variáveis. Informe o usuário PostgreSQL para listar bancos (ex: app):${WHITE}\n"
+    read -p "> " empresa_listagem
+    [ -z "$empresa_listagem" ] && printf "${RED} >> Usuário não informado. Cancelado.${WHITE}\n" && sleep 2 && return 1
   fi
-  BACKUP_DIR="/home/deploy/backup-${empresa}"
-  mkdir -p "$BACKUP_DIR"
-  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
-  # Usuário e senha: empresa + senha_deploy (ou .env). Se falhar, pedir usuário e senha.
-  local usuario_db="${empresa}"
+  local usuario_db="${empresa_listagem}"
   local senha_db="${senha_deploy}"
-  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa}/backend/.env" 2>/dev/null | cut -d '=' -f2)
+  [ -z "$senha_db" ] && [ -f "/home/deploy/${empresa_listagem}/backend/.env" ] && senha_db=$(grep "DB_PASS=" "/home/deploy/${empresa_listagem}/backend/.env" 2>/dev/null | cut -d '=' -f2)
   # Listar bancos com usuário empresa (sem postgres)
   LISTA_DB=()
   while IFS= read -r line; do
@@ -1460,10 +1466,37 @@ backup_banco_ferramentas() {
     sleep 2
     return 1
   fi
+
+  # Pasta e credenciais seguem o banco/instância escolhido (ex.: web → backup-web/)
+  local instancia_backup="${db_escolhido}"
+  local BACKUP_DIR="/home/deploy/backup-${instancia_backup}"
+  mkdir -p "$BACKUP_DIR"
+  chown deploy:deploy "$BACKUP_DIR" 2>/dev/null || true
+
+  local pg_host="127.0.0.1"
+  local pg_port="5432"
+  if [ -d "/home/deploy/${db_escolhido}/backend" ]; then
+    ferramentas_carregar_credenciais_pg_por_nome "${db_escolhido}"
+    usuario_db="${PG_USUARIO:-$db_escolhido}"
+    senha_db="${PG_SENHA:-$senha_db}"
+    pg_host="${PG_HOST:-127.0.0.1}"
+    pg_port="${PG_PORT:-5432}"
+  else
+    usuario_db="${db_escolhido}"
+    if [ -z "$senha_db" ] || [ "$usuario_db" != "${empresa_listagem}" ]; then
+      printf "${YELLOW} >> Instância /home/deploy/${db_escolhido} não encontrada. Informe usuário e senha do banco ${db_escolhido}:${WHITE}\n"
+      read -p "   Usuário [${db_escolhido}]: " input_user
+      [ -n "$input_user" ] && usuario_db="$input_user"
+      read -s -p "   Senha: " senha_db
+      echo
+    fi
+  fi
+
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   ARQUIVO_BACKUP="${BACKUP_DIR}/${db_escolhido}_${TIMESTAMP}.sql"
   printf "${WHITE} >> Gerando backup de ${db_escolhido}...${WHITE}\n"
-  PGPASSWORD="${senha_db}" pg_dump -U "${usuario_db}" -h localhost "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
+  printf "${WHITE} >> Pasta de destino: ${BACKUP_DIR}${WHITE}\n"
+  PGPASSWORD="${senha_db}" pg_dump -U "${usuario_db}" -h "${pg_host}" -p "${pg_port}" "$db_escolhido" > "$ARQUIVO_BACKUP" 2>/dev/null
   if [ $? -eq 0 ] && [ -s "$ARQUIVO_BACKUP" ]; then
     chown deploy:deploy "$ARQUIVO_BACKUP" 2>/dev/null || true
     printf "${GREEN} >> Backup salvo: ${ARQUIVO_BACKUP}${WHITE}\n"
