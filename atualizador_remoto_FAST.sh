@@ -544,7 +544,7 @@ exportar_vars_frontend_env_seguro() {
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 
-# Verificar e adicionar WHATSAPP_WEB_VERSION no .env do backend (Baileys)
+# Verificar e adicionar WHATSAPP_WEB_VERSION e variáveis LID/Baileys no .env do backend
 verificar_e_adicionar_whatsapp_web_version() {
   if [ -z "${empresa}" ]; then
     printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
@@ -554,7 +554,7 @@ verificar_e_adicionar_whatsapp_web_version() {
   ENV_FILE="/home/deploy/${empresa}/backend/.env"
 
   if [ ! -f "$ENV_FILE" ]; then
-    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de WHATSAPP_WEB_VERSION.\n${WHITE}"
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de WHATSAPP_WEB_VERSION e variáveis LID/Baileys.\n${WHITE}"
     return 0
   fi
 
@@ -567,6 +567,64 @@ verificar_e_adicionar_whatsapp_web_version() {
   else
     printf "${GREEN} >> WHATSAPP_WEB_VERSION já definida no .env do backend (não alterado).${WHITE}\n"
   fi
+
+  local _mf_lid_baileys_header=0
+  if ! grep -q '^ENABLE_LID_DEBUG=' "$ENV_FILE" || \
+     ! grep -q '^FIX_LID_JOB_ENABLED=' "$ENV_FILE" || \
+     ! grep -q '^FIX_LID_JOB_CRON=' "$ENV_FILE" || \
+     ! grep -q '^LOG_MESSAGE_UPSERT=' "$ENV_FILE" || \
+     ! grep -q '^BAILEYS_OUTBOUND_LID_FIRST=' "$ENV_FILE" || \
+     ! grep -q '^BAILEYS_SESSION_RESET_ENABLED=' "$ENV_FILE" || \
+     ! grep -q '^BAILEYS_STUB400_AUTO_RETRY=' "$ENV_FILE" || \
+     ! grep -q '^BAILEYS_LOG_LEVEL=' "$ENV_FILE"; then
+    printf "${WHITE} >> Verificando variáveis LID/Baileys no .env do backend...\n"
+  fi
+
+  if ! grep -q '^ENABLE_LID_DEBUG=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "ENABLE_LID_DEBUG=true" >> "$ENV_FILE"
+    printf "${GREEN} >> ENABLE_LID_DEBUG adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^FIX_LID_JOB_ENABLED=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "FIX_LID_JOB_ENABLED=true" >> "$ENV_FILE"
+    printf "${GREEN} >> FIX_LID_JOB_ENABLED adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^FIX_LID_JOB_CRON=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "# Opcional: horário do job (padrão: 3h da manhã)" >> "$ENV_FILE"
+    echo "FIX_LID_JOB_CRON=0 3 * * *" >> "$ENV_FILE"
+    printf "${GREEN} >> FIX_LID_JOB_CRON adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^LOG_MESSAGE_UPSERT=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "# Log opcional: defina LOG_MESSAGE_UPSERT=true no ambiente para linhas [MSG-UPSERT] com wid, stub, renderable, upsertType." >> "$ENV_FILE"
+    echo "# Produção: ative LOG_MESSAGE_UPSERT=true só enquanto analisar; depois desligue para não encher log." >> "$ENV_FILE"
+    echo "LOG_MESSAGE_UPSERT=false" >> "$ENV_FILE"
+    printf "${GREEN} >> LOG_MESSAGE_UPSERT adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^BAILEYS_OUTBOUND_LID_FIRST=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "# [fix LID] envio LID-first p/ contatos migrados (default do codigo ja e true)" >> "$ENV_FILE"
+    echo "BAILEYS_OUTBOUND_LID_FIRST=false" >> "$ENV_FILE"
+    printf "${GREEN} >> BAILEYS_OUTBOUND_LID_FIRST adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^BAILEYS_SESSION_RESET_ENABLED=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_SESSION_RESET_ENABLED=false" >> "$ENV_FILE"
+    printf "${GREEN} >> BAILEYS_SESSION_RESET_ENABLED adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^BAILEYS_STUB400_AUTO_RETRY=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_STUB400_AUTO_RETRY=true" >> "$ENV_FILE"
+    printf "${GREEN} >> BAILEYS_STUB400_AUTO_RETRY adicionada ao .env do backend.${WHITE}\n"
+  fi
+  if ! grep -q '^BAILEYS_LOG_LEVEL=' "$ENV_FILE"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_LOG_LEVEL=warn" >> "$ENV_FILE"
+    printf "${GREEN} >> BAILEYS_LOG_LEVEL adicionada ao .env do backend.${WHITE}\n"
+  fi
+
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 

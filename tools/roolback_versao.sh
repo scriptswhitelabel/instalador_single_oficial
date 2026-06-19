@@ -260,6 +260,62 @@ garantir_whatsapp_web_version_env_backend() {
   chmod 600 "$env_file" 2>/dev/null || true
 }
 
+# Garante variáveis LID/Baileys no .env do backend se ainda não existirem (não sobrescreve valor manual).
+garantir_lid_baileys_env_backend() {
+  local env_file="$1"
+  [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
+
+  local _mf_lid_baileys_header=0
+
+  if ! grep -q '^ENABLE_LID_DEBUG=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "ENABLE_LID_DEBUG=true" >> "$env_file"
+    printf "${WHITE} >> Incluindo ENABLE_LID_DEBUG no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^FIX_LID_JOB_ENABLED=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "FIX_LID_JOB_ENABLED=true" >> "$env_file"
+    printf "${WHITE} >> Incluindo FIX_LID_JOB_ENABLED no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^FIX_LID_JOB_CRON=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "# Opcional: horário do job (padrão: 3h da manhã)" >> "$env_file"
+    echo "FIX_LID_JOB_CRON=0 3 * * *" >> "$env_file"
+    printf "${WHITE} >> Incluindo FIX_LID_JOB_CRON no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^LOG_MESSAGE_UPSERT=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "# Log opcional: defina LOG_MESSAGE_UPSERT=true no ambiente para linhas [MSG-UPSERT] com wid, stub, renderable, upsertType." >> "$env_file"
+    echo "# Produção: ative LOG_MESSAGE_UPSERT=true só enquanto analisar; depois desligue para não encher log." >> "$env_file"
+    echo "LOG_MESSAGE_UPSERT=false" >> "$env_file"
+    printf "${WHITE} >> Incluindo LOG_MESSAGE_UPSERT no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^BAILEYS_OUTBOUND_LID_FIRST=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "# [fix LID] envio LID-first p/ contatos migrados (default do codigo ja e true)" >> "$env_file"
+    echo "BAILEYS_OUTBOUND_LID_FIRST=false" >> "$env_file"
+    printf "${WHITE} >> Incluindo BAILEYS_OUTBOUND_LID_FIRST no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^BAILEYS_SESSION_RESET_ENABLED=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_SESSION_RESET_ENABLED=false" >> "$env_file"
+    printf "${WHITE} >> Incluindo BAILEYS_SESSION_RESET_ENABLED no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^BAILEYS_STUB400_AUTO_RETRY=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_STUB400_AUTO_RETRY=true" >> "$env_file"
+    printf "${WHITE} >> Incluindo BAILEYS_STUB400_AUTO_RETRY no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+  if ! grep -q '^BAILEYS_LOG_LEVEL=' "$env_file"; then
+    [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$env_file"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$env_file"; echo "" >> "$env_file"; _mf_lid_baileys_header=1; }
+    echo "BAILEYS_LOG_LEVEL=warn" >> "$env_file"
+    printf "${WHITE} >> Incluindo BAILEYS_LOG_LEVEL no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+
+  chown deploy:deploy "$env_file" 2>/dev/null || true
+  chmod 600 "$env_file" 2>/dev/null || true
+}
+
 # Codificar token para URL (caracteres especiais em %XX)
 codifica_clone_base() {
   local length="${#1}"
@@ -1050,6 +1106,7 @@ MIGRATE
     fi
   fi
   garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
+  garantir_lid_baileys_env_backend "${APP_DIR}/backend/.env"
   echo
   
   # 9) Reinstalar dependências e build do Frontend (.build_nova + publicar)
@@ -1307,6 +1364,7 @@ MIGRATE
     fi
   fi
   garantir_whatsapp_web_version_env_backend "${APP_DIR}/backend/.env"
+  garantir_lid_baileys_env_backend "${APP_DIR}/backend/.env"
   echo
   
   # 6) Reinstalar dependências e build do Frontend (.build_nova + publicar)

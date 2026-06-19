@@ -1570,6 +1570,23 @@ MAX_BUFFER_SIZE_MB=200
 
 # Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente.
 WHATSAPP_WEB_VERSION=2.3000.1038235667
+
+# DISABLE_PUSH_NOTIFICATIONS=0
+
+ENABLE_LID_DEBUG=true
+FIX_LID_JOB_ENABLED=true
+# Opcional: horário do job (padrão: 3h da manhã)
+FIX_LID_JOB_CRON=0 3 * * *
+
+# Log opcional: defina LOG_MESSAGE_UPSERT=true no ambiente para linhas [MSG-UPSERT] com wid, stub, renderable, upsertType.
+# Produção: ative LOG_MESSAGE_UPSERT=true só enquanto analisar; depois desligue para não encher log.
+LOG_MESSAGE_UPSERT=false
+
+# [fix LID] envio LID-first p/ contatos migrados (default do codigo ja e true)
+BAILEYS_OUTBOUND_LID_FIRST=false
+BAILEYS_SESSION_RESET_ENABLED=false
+BAILEYS_STUB400_AUTO_RETRY=true
+BAILEYS_LOG_LEVEL=warn
 [-]EOF
 EOF
 

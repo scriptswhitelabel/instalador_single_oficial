@@ -1,6 +1,7 @@
 # Environment & secret files
 .env
 .env.*
+!.env.exemplo
 *.env
 *.env.backup
 
