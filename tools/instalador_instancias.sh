@@ -13,6 +13,10 @@ ARQUIVO_VARIAVEIS_BASE="VARIAVEIS_INSTALACAO"
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=instalar_docker_compartilhado.sh
+source "${SCRIPT_DIR}/instalar_docker_compartilhado.sh"
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -794,43 +798,33 @@ verificar_e_instalar_docker() {
   banner
   printf "${WHITE} >> Verificando se o Docker está instalado...\n"
   echo
-  
-  if command -v docker >/dev/null 2>&1; then
+
+  if verificar_docker_funcionando; then
     printf "${GREEN} >> Docker já está instalado.${WHITE}\n"
     docker --version
+    docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || true
     echo
     sleep 2
-  else
-    printf "${YELLOW} >> Docker não encontrado. Iniciando instalação...${WHITE}\n"
-    echo
-    
-    {
-      sudo apt-get update -y >/dev/null 2>&1
-      sudo apt-get install -y ca-certificates curl gnupg lsb-release >/dev/null 2>&1
-      
-      sudo install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg >/dev/null 2>&1
-      sudo chmod a+r /etc/apt/keyrings/docker.gpg
-      
-      echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-      
-      sudo apt-get update -y >/dev/null 2>&1
-      sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
-      
-      printf "${GREEN} >> Docker instalado com sucesso!${WHITE}\n"
-      docker --version
-      echo
-      sleep 2
-    } || trata_erro "verificar_e_instalar_docker"
+    return 0
   fi
-  
-  # Verificar se docker compose está disponível
-  if ! docker compose version >/dev/null 2>&1; then
-    printf "${YELLOW} >> Instalando docker-compose-plugin...${WHITE}\n"
-    sudo apt-get install -y docker-compose-plugin >/dev/null 2>&1
+
+  printf "${YELLOW} >> Docker não encontrado. Iniciando instalação...${WHITE}\n"
+  echo
+
+  if ! instalar_docker_compartilhado; then
+    printf "${RED}❌ ERRO: Docker não está disponível após instalação!${WHITE}\n"
+    trata_erro "verificar_e_instalar_docker"
   fi
+
+  if ! verificar_docker_funcionando; then
+    trata_erro "verificar_e_instalar_docker"
+  fi
+
+  printf "${GREEN} >> Docker instalado com sucesso!${WHITE}\n"
+  docker --version
+  docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || true
+  echo
+  sleep 2
 }
 
 # Instalar Redis em Docker

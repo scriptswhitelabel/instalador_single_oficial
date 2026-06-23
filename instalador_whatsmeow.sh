@@ -11,6 +11,8 @@ ARCH=$(uname -m)
 UBUNTU_VERSION=$(lsb_release -sr)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALADOR_DIR="$SCRIPT_DIR"
+# shellcheck source=tools/instalar_docker_compartilhado.sh
+source "${INSTALADOR_DIR}/tools/instalar_docker_compartilhado.sh"
 ARQUIVO_VARIAVEIS=""
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 default_wuzapi_port=8090
@@ -1308,86 +1310,36 @@ verificar_e_instalar_docker() {
   banner
   printf "${WHITE} >> Verificando se o Docker está instalado...\n"
   echo
-  
-  if command -v docker >/dev/null 2>&1; then
+
+  if verificar_docker_funcionando; then
     printf "${GREEN} >> Docker já está instalado.${WHITE}\n"
     docker --version
+    docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || true
     echo
     sleep 2
-  else
-    printf "${YELLOW} >> Docker não encontrado. Iniciando instalação...${WHITE}\n"
-    echo
-    
-    {
-      # Instalar Docker
-      sudo apt-get update -y >/dev/null 2>&1
-      sudo apt-get install -y ca-certificates curl gnupg lsb-release >/dev/null 2>&1
-      
-      sudo install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg >/dev/null 2>&1
-      sudo chmod a+r /etc/apt/keyrings/docker.gpg
-      
-      echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-      
-      sudo apt-get update -y >/dev/null 2>&1
-      sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1
-      
-      printf "${GREEN} >> Docker instalado com sucesso!${WHITE}\n"
-      docker --version
-      echo
-      sleep 2
-    } || trata_erro "verificar_e_instalar_docker"
+    return 0
   fi
-  
-  # Verificar se docker compose está disponível
-  if ! docker compose version >/dev/null 2>&1; then
-    printf "${YELLOW} >> Instalando docker-compose-plugin...${WHITE}\n"
-    sudo apt-get install -y docker-compose-plugin >/dev/null 2>&1
-  fi
-  
-  # Garantir que Docker está no PATH e funcionando
-  if ! command -v docker >/dev/null 2>&1; then
-    printf "${YELLOW} >> Docker não encontrado no PATH. Tentando atualizar PATH...${WHITE}\n"
-    export PATH=$PATH:/usr/bin:/usr/local/bin
-    # Tentar encontrar docker
-    if [ -f /usr/bin/docker ]; then
-      export PATH=/usr/bin:$PATH
-    elif [ -f /usr/local/bin/docker ]; then
-      export PATH=/usr/local/bin:$PATH
-    fi
-  fi
-  
-  # Verificar novamente se docker está disponível
-  if ! command -v docker >/dev/null 2>&1; then
+
+  printf "${YELLOW} >> Docker não encontrado. Iniciando instalação...${WHITE}\n"
+  echo
+
+  if ! instalar_docker_compartilhado; then
     printf "${RED}❌ ERRO: Docker não está disponível após instalação!${WHITE}\n"
+    printf "${WHITE}   SO detectado: $(. /etc/os-release 2>/dev/null; echo ${PRETTY_NAME:-desconhecido})${WHITE}\n"
     printf "${WHITE}   Tente executar manualmente:${WHITE}\n"
-    printf "${WHITE}   sudo apt-get install -y docker.io docker-compose${WHITE}\n"
+    printf "${WHITE}   curl -fsSL https://get.docker.com | sh${WHITE}\n"
+    printf "${WHITE}   ou: apt-get install -y docker.io docker-compose${WHITE}\n"
     exit 1
   fi
-  
-  # Verificar se serviço Docker está rodando
-  if ! systemctl is-active --quiet docker 2>/dev/null; then
-    printf "${WHITE} >> Iniciando serviço Docker...${WHITE}\n"
-    systemctl start docker
-    sleep 3
+
+  if ! verificar_docker_funcionando; then
+    trata_erro "verificar_e_instalar_docker"
   fi
-  
-  # Verificar se docker compose funciona
-  if ! docker compose version >/dev/null 2>&1; then
-    printf "${YELLOW}⚠️  Aviso: docker compose não está funcionando.${WHITE}\n"
-    printf "${WHITE}   Tentando usar docker-compose (versão antiga)...${WHITE}\n"
-    if command -v docker-compose >/dev/null 2>&1; then
-      printf "${GREEN} >> docker-compose encontrado!${WHITE}\n"
-    else
-      printf "${RED}❌ ERRO: docker compose não está disponível!${WHITE}\n"
-      exit 1
-    fi
-  else
-    printf "${GREEN} >> Docker e docker compose verificados e funcionando!${WHITE}\n"
-  fi
-  
+
+  printf "${GREEN} >> Docker instalado com sucesso!${WHITE}\n"
+  docker --version
+  docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || true
+  printf "${GREEN} >> Docker e docker compose verificados e funcionando!${WHITE}\n"
   echo
   sleep 2
 }
