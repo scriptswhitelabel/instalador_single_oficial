@@ -625,6 +625,14 @@ verificar_e_adicionar_whatsapp_web_version() {
     printf "${GREEN} >> BAILEYS_LOG_LEVEL adicionada ao .env do backend.${WHITE}\n"
   fi
 
+  if ! grep -q '^WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=' "$ENV_FILE"; then
+    echo "" >> "$ENV_FILE"
+    echo "# WhatsMeow / WuzAPI" >> "$ENV_FILE"
+    echo "# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min." >> "$ENV_FILE"
+    echo "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000" >> "$ENV_FILE"
+    printf "${GREEN} >> WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS adicionada ao .env do backend.${WHITE}\n"
+  fi
+
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 

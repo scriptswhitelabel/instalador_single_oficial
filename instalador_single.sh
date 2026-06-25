@@ -4726,6 +4726,10 @@ BAILEYS_OUTBOUND_LID_FIRST=false
 BAILEYS_SESSION_RESET_ENABLED=false
 BAILEYS_STUB400_AUTO_RETRY=true
 BAILEYS_LOG_LEVEL=warn
+
+# WhatsMeow / WuzAPI
+# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min.
+WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000
 [-]EOF
 EOF
 
@@ -6200,6 +6204,14 @@ verificar_e_adicionar_whatsapp_web_version() {
     [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
     echo "BAILEYS_LOG_LEVEL=warn" >> "$ENV_FILE"
     printf "${GREEN} >> BAILEYS_LOG_LEVEL adicionada ao .env do backend.${WHITE}\n"
+  fi
+
+  if ! grep -q '^WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=' "$ENV_FILE"; then
+    echo "" >> "$ENV_FILE"
+    echo "# WhatsMeow / WuzAPI" >> "$ENV_FILE"
+    echo "# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min." >> "$ENV_FILE"
+    echo "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000" >> "$ENV_FILE"
+    printf "${GREEN} >> WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS adicionada ao .env do backend.${WHITE}\n"
   fi
 
   garantir_permissoes_env_backend "$ENV_FILE"

@@ -312,6 +312,14 @@ garantir_lid_baileys_env_backend() {
     printf "${WHITE} >> Incluindo BAILEYS_LOG_LEVEL no .env do backend (padrão do instalador)...\n${WHITE}"
   fi
 
+  if ! grep -q '^WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=' "$env_file"; then
+    echo "" >> "$env_file"
+    echo "# WhatsMeow / WuzAPI" >> "$env_file"
+    echo "# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min." >> "$env_file"
+    echo "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000" >> "$env_file"
+    printf "${WHITE} >> Incluindo WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS no .env do backend (padrão do instalador)...\n${WHITE}"
+  fi
+
   chown deploy:deploy "$env_file" 2>/dev/null || true
   chmod 600 "$env_file" 2>/dev/null || true
 }

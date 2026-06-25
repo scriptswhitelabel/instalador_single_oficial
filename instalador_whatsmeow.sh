@@ -933,10 +933,10 @@ WUZAPI_ADDRESS=0.0.0.0
 WUZAPI_ADMIN_TOKEN=${senha_deploy}
 
 # Encryption key for sensitive data (32 bytes for AES-256)
-WUZAPI_GLOBAL_ENCRYPTION_KEY=${senha_deploy}
+WUZAPI_GLOBAL_ENCRYPTION_KEY=${WUZAPI_GLOBAL_ENCRYPTION_KEY}
 
 # Global HMAC Key for webhook signing (minimum 32 characters)
-WUZAPI_GLOBAL_HMAC_KEY=${senha_deploy}
+WUZAPI_GLOBAL_HMAC_KEY=${WUZAPI_GLOBAL_HMAC_KEY}
 
 # Global webhook URL
 WUZAPI_GLOBAL_WEBHOOK=https://${subdominio_limpo}/webhook
@@ -1208,6 +1208,9 @@ ${cn_server}
         condition: service_healthy
     networks:
       - wuzapi-network
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     restart: always
 
   db:
@@ -1223,6 +1226,9 @@ ${cn_db}
       - db_data:/var/lib/postgresql/data
     networks:
       - wuzapi-network
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \${DB_USER:-wuzapi}"]
       interval: 5s
@@ -1245,6 +1251,9 @@ ${cn_rmq}
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
       - wuzapi-network
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -1297,12 +1306,34 @@ atualizar_env_backend() {
     whatsmeow_set_env_backend "$backend_env" "WUZAPI_URL" "https://${subdominio_limpo}"
     whatsmeow_set_env_backend "$backend_env" "WUZAPI_ADMIN_TOKEN" "${senha_deploy}"
     whatsmeow_set_env_backend "$backend_env" "WUZAPI_TOKEN" "${senha_deploy}"
+    whatsmeow_set_env_backend "$backend_env" "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS" "2700000"
     chown deploy:deploy "$backend_env" 2>/dev/null || true
     chmod 600 "$backend_env" 2>/dev/null || true
     
     printf "${GREEN} >> .env do backend (${empresa}) atualizado com sucesso!${WHITE}\n"
     sleep 2
   } || trata_erro "atualizar_env_backend"
+}
+
+# Corrige init parcial do Postgres (volume sem CREATE DATABASE após falha de socket no Proxmox).
+whatsmeow_garantir_banco_postgres() {
+  # shellcheck source=/dev/null
+  source "$ARQUIVO_VARIAVEIS"
+  local db_user="wuzapi_${empresa}"
+  db_user="${db_user//[^a-zA-Z0-9_]}"
+  local db_container="${WUZAPI_COMPOSE_PROJECT}-db"
+
+  command -v docker >/dev/null 2>&1 || return 0
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$db_container" || return 0
+
+  if docker exec "$db_container" psql -U "$db_user" -d postgres -tAc \
+    "SELECT 1 FROM pg_database WHERE datname='${db_user}'" 2>/dev/null | grep -q 1; then
+    return 0
+  fi
+
+  printf "${YELLOW} >> Banco ${db_user} ausente no Postgres do WuzAPI — criando...${WHITE}\n"
+  docker exec "$db_container" psql -U "$db_user" -d postgres -c \
+    "CREATE DATABASE \"${db_user}\" OWNER \"${db_user}\";" 2>/dev/null || true
 }
 
 # Verificar e instalar Docker
@@ -1458,6 +1489,10 @@ subir_containers_whatsmeow() {
         # Verificar se os containers estão rodando
         printf "${WHITE} >> Aguardando containers iniciarem...\n"
         sleep 10
+        whatsmeow_garantir_banco_postgres
+        docker compose -p "${WUZAPI_COMPOSE_PROJECT}" restart wuzapi-server 2>/dev/null || \
+          $docker_compose_cmd restart wuzapi-server 2>/dev/null || true
+        sleep 5
         
         # Verificar status dos containers
         if $docker_compose_cmd ps | grep -qE "(Healthy|Running|Up)"; then
