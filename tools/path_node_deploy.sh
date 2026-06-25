@@ -84,4 +84,9 @@ else
     return 0
   }
 fi
+
+if [ -f "${_mf_tools_dir}/baileys_hineken_package_json.sh" ]; then
+  # shellcheck source=tools/baileys_hineken_package_json.sh
+  . "${_mf_tools_dir}/baileys_hineken_package_json.sh"
+fi
 unset _mf_tools_dir

@@ -2194,6 +2194,12 @@ atualizar_baileys_pro_heineken_ferramentas() {
       fi
     fi
   fi
+  _MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
+  if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
+    . "\$_MF_BAILEYS_TOOLS"
+  elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
+    . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
+  fi
   cd "${backend_dir}" || exit 1
   if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
@@ -5742,6 +5748,12 @@ MF_GIT_SYNC_INLINE
       echo "      Atualize o instalador (tools/path_node_deploy.sh) ou, como root: n 20.19.4"
       exit 1
     fi
+  fi
+  _MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
+  if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
+    . "\$_MF_BAILEYS_TOOLS"
+  elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
+    . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
   fi
 ${MF_GIT_SYNC_BODY}
   

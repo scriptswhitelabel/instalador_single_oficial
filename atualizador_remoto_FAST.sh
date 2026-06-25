@@ -1044,6 +1044,12 @@ else
     export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
   fi
 fi
+_MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
+if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
+  . "\$_MF_BAILEYS_TOOLS"
+elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
+  . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
+fi
 ${MF_GIT_SYNC_BODY}
 
 printf "${WHITE} >> Atualizando código (git)...\n"
