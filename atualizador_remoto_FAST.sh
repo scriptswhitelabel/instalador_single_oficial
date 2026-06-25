@@ -1044,12 +1044,6 @@ else
     export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
   fi
 fi
-_MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
-if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
-  . "\$_MF_BAILEYS_TOOLS"
-elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
-  . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
-fi
 ${MF_GIT_SYNC_BODY}
 
 printf "${WHITE} >> Atualizando código (git)...\n"
@@ -1087,8 +1081,8 @@ if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
     sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
     echo " >> Token GitHub aplicado no package.json (Baileys)."
   fi
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
-    mf_baileys_fixar_branch_main_package_json package.json
+  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
     echo " >> Baileys/Hineken fixado na branch main no package.json."
   fi
   if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then

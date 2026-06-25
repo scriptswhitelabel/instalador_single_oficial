@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Baileys/Hineken: garante branch main no package.json do backend (MultiFlow-PRO).
+# Uso como root: . tools/baileys_hineken_package_json.sh && mf_baileys_fixar_branch_main_package_json "$pkg"
+# Em heredocs "su - deploy": usar sed inline (deploy não lê /root/instalador_single_oficial).
 
 mf_baileys_fixar_branch_main_package_json() {
   local pkg="${1:-}"

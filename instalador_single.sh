@@ -2194,19 +2194,13 @@ atualizar_baileys_pro_heineken_ferramentas() {
       fi
     fi
   fi
-  _MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
-  if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
-    . "\$_MF_BAILEYS_TOOLS"
-  elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
-    . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
-  fi
   cd "${backend_dir}" || exit 1
   if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
-    mf_baileys_fixar_branch_main_package_json package.json
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
     printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   fi
   rm -rf node_modules/baileys package-lock.json
@@ -5749,12 +5743,6 @@ MF_GIT_SYNC_INLINE
       exit 1
     fi
   fi
-  _MF_BAILEYS_TOOLS="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
-  if [ -f "\$_MF_BAILEYS_TOOLS" ]; then
-    . "\$_MF_BAILEYS_TOOLS"
-  elif [ -f /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh ]; then
-    . /root/instalador_single_oficial/tools/baileys_hineken_package_json.sh
-  fi
 ${MF_GIT_SYNC_BODY}
   
   APP_DIR="/home/deploy/${empresa}"
@@ -5839,8 +5827,10 @@ ${MF_GIT_SYNC_BODY}
       sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
       echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
     fi
-    mf_baileys_fixar_branch_main_package_json package.json
-    echo " >> Baileys/Hineken fixado na branch main no package.json."
+    if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+      sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
+      echo " >> Baileys/Hineken fixado na branch main no package.json."
+    fi
   fi
   
   npm prune --force > /dev/null 2>&1
