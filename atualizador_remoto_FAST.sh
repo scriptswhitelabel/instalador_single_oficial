@@ -1,4 +1,6 @@
 #!/bin/bash
+_mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/baileys_hineken_package_json.sh"
+[ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -335,6 +337,8 @@ aplicar_token_baileys_package_json() {
   sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
   chown deploy:deploy "$pkg" 2>/dev/null || true
   printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  mf_baileys_fixar_branch_main_package_json "$pkg"
+  printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
 }
 
@@ -623,14 +627,6 @@ verificar_e_adicionar_whatsapp_web_version() {
     [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
     echo "BAILEYS_LOG_LEVEL=warn" >> "$ENV_FILE"
     printf "${GREEN} >> BAILEYS_LOG_LEVEL adicionada ao .env do backend.${WHITE}\n"
-  fi
-
-  if ! grep -q '^WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=' "$ENV_FILE"; then
-    echo "" >> "$ENV_FILE"
-    echo "# WhatsMeow / WuzAPI" >> "$ENV_FILE"
-    echo "# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min." >> "$ENV_FILE"
-    echo "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000" >> "$ENV_FILE"
-    printf "${GREEN} >> WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS adicionada ao .env do backend.${WHITE}\n"
   fi
 
   garantir_permissoes_env_backend "$ENV_FILE"
@@ -1084,6 +1080,10 @@ if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
     fi
     sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
     echo " >> Token GitHub aplicado no package.json (Baileys)."
+  fi
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    mf_baileys_fixar_branch_main_package_json package.json
+    echo " >> Baileys/Hineken fixado na branch main no package.json."
   fi
   if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."

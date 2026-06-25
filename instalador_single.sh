@@ -1,4 +1,6 @@
 #!/bin/bash
+_mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/baileys_hineken_package_json.sh"
+[ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -2197,6 +2199,10 @@ atualizar_baileys_pro_heineken_ferramentas() {
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
+  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    mf_baileys_fixar_branch_main_package_json package.json
+    printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
+  fi
   rm -rf node_modules/baileys package-lock.json
   npm i || exit 1
   if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
@@ -4134,6 +4140,8 @@ aplicar_token_baileys_package_json() {
   local tok_sed="${tok//&/\\&}"
   sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
   printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  mf_baileys_fixar_branch_main_package_json "$pkg"
+  printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
 }
 
@@ -4726,10 +4734,6 @@ BAILEYS_OUTBOUND_LID_FIRST=false
 BAILEYS_SESSION_RESET_ENABLED=false
 BAILEYS_STUB400_AUTO_RETRY=true
 BAILEYS_LOG_LEVEL=warn
-
-# WhatsMeow / WuzAPI
-# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min.
-WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000
 [-]EOF
 EOF
 
@@ -5823,6 +5827,8 @@ ${MF_GIT_SYNC_BODY}
       sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
       echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
     fi
+    mf_baileys_fixar_branch_main_package_json package.json
+    echo " >> Baileys/Hineken fixado na branch main no package.json."
   fi
   
   npm prune --force > /dev/null 2>&1
@@ -6204,14 +6210,6 @@ verificar_e_adicionar_whatsapp_web_version() {
     [ "$_mf_lid_baileys_header" -eq 0 ] && { echo "" >> "$ENV_FILE"; echo "# DISABLE_PUSH_NOTIFICATIONS=0" >> "$ENV_FILE"; echo "" >> "$ENV_FILE"; _mf_lid_baileys_header=1; }
     echo "BAILEYS_LOG_LEVEL=warn" >> "$ENV_FILE"
     printf "${GREEN} >> BAILEYS_LOG_LEVEL adicionada ao .env do backend.${WHITE}\n"
-  fi
-
-  if ! grep -q '^WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=' "$ENV_FILE"; then
-    echo "" >> "$ENV_FILE"
-    echo "# WhatsMeow / WuzAPI" >> "$ENV_FILE"
-    echo "# Atraso antes de assinar ReadReceipt após conectar (em milissegundos). Padrão: 45 min." >> "$ENV_FILE"
-    echo "WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000" >> "$ENV_FILE"
-    printf "${GREEN} >> WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS adicionada ao .env do backend.${WHITE}\n"
   fi
 
   garantir_permissoes_env_backend "$ENV_FILE"
