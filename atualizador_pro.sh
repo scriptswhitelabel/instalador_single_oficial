@@ -1191,9 +1191,9 @@ baixa_codigo_atualizar() {
   rm -f package-lock.json 2>/dev/null || true
   npm install --force
   
-  if [ -f "server.js" ]; then
-    sed -i 's/3000/'"$frontend_port"'/g' server.js
-  fi
+  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+  mf_frontend_garantir_porta_env "${frontend_port}"
 
   # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
   if [ -d "\$CUSTOM_DIR" ]; then
@@ -1268,9 +1268,12 @@ UPDATEAPP
       export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
     fi
   fi
-  pm2 restart all
-  pm2 reset all
-  pm2 flush
+  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+  pm2 restart "${empresa}-backend" 2>/dev/null || true
+  mf_frontend_pm2_restart "${frontend_port}"
+  pm2 reset all 2>/dev/null || true
+  pm2 flush 2>/dev/null || true
   pm2 save
 RESTARTPM2ATUALIZACAO
 

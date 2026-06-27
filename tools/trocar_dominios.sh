@@ -361,9 +361,9 @@ else
 fi
 FRDIR="/home/deploy/${empresa}/frontend"
 cd "\$FRDIR" || exit 1
-if [ -f server.js ]; then
-  sed -i 's/3000/'"${frontend_port:-3000}"'/g' server.js 2>/dev/null || true
-fi
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+mf_frontend_garantir_porta_env "${frontend_port:-3000}"
 export NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider"
 npm run build
 REBUILD
@@ -375,7 +375,10 @@ else
   export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH 2>/dev/null
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-pm2 restart ${empresa}-backend ${empresa}-frontend 2>/dev/null || true
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+pm2 restart ${empresa}-backend 2>/dev/null || true
+mf_frontend_pm2_restart "${frontend_port:-3000}"
 pm2 save
 PM2R
 }

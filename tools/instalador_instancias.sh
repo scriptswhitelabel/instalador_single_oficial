@@ -1797,6 +1797,7 @@ REACT_APP_REQUIRE_BUSINESS_MANAGEMENT=TRUE
 REACT_APP_NAME_SYSTEM=${nome_titulo}
 REACT_APP_NUMBER_SUPPORT=${numero_suporte}
 SERVER_PORT=${nova_frontend_port}
+PORT=${nova_frontend_port}
 [-]EOF
 EOF
 
@@ -2082,7 +2083,11 @@ EOF
   else
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
-  pm2 restart ${nova_empresa}-backend ${nova_empresa}-frontend
+  empresa="${nova_empresa}"
+  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+  pm2 restart ${nova_empresa}-backend 2>/dev/null || true
+  mf_frontend_pm2_restart "${nova_frontend_port}"
 RESTARTPM2
 
     sleep 2

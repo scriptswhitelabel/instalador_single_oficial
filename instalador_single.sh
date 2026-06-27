@@ -5866,15 +5866,19 @@ ${MF_GIT_SYNC_BODY}
   npm prune --force > /dev/null 2>&1
   npm install --force
 
-  # Garantir PORT= e SERVER_PORT= no .env do frontend (server.js lê PORT; git reset pode ter revertido)
-  if [ -f ".env" ]; then
+  # Garantir PORT= e SERVER_PORT= no .env do frontend (server.js le PORT; git reset pode ter revertido)
+  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  if [ -f "\$_MF_FE_LIB" ]; then
+    . "\$_MF_FE_LIB"
+    mf_frontend_garantir_porta_env "$frontend_port"
+    printf " >> PORT e SERVER_PORT definidos no .env do frontend: $frontend_port\n"
+  elif [ -f ".env" ]; then
     if grep -q "^PORT=" .env 2>/dev/null; then sed -i "s|^PORT=.*|PORT=$frontend_port|" .env; else echo "PORT=$frontend_port" >> .env; fi
     if grep -q "^SERVER_PORT=" .env 2>/dev/null; then sed -i "s|^SERVER_PORT=.*|SERVER_PORT=$frontend_port|" .env; else echo "SERVER_PORT=$frontend_port" >> .env; fi
     printf " >> PORT e SERVER_PORT definidos no .env do frontend: $frontend_port\n"
-  fi
-
-  if [ -f "server.js" ]; then
-    sed -i 's/3000/'"$frontend_port"'/g' server.js
+    if [ -f "server.js" ]; then
+      sed -i 's/3000/'"$frontend_port"'/g' server.js
+    fi
   fi
 
   # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
@@ -5957,9 +5961,10 @@ UPDATEAPP
     fi
   fi
   # Nomes fixos (pm2 list + awk na tabela com │/cores costuma falhar)
-  for _p in "${empresa}-backend" "${empresa}-frontend"; do
-    pm2 restart "\$_p" 2>/dev/null || true
-  done
+  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+  pm2 restart "${empresa}-backend" 2>/dev/null || true
+  mf_frontend_pm2_restart "$frontend_port"
   pm2 save
 RESTARTPM2ATUALIZACAO
 

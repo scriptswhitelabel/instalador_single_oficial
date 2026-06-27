@@ -2,6 +2,58 @@
 # Shared: tela de manutencao no frontend (atualizacao FAST / rollback)
 # Requer variavel global: empresa
 
+# Le SERVER_PORT ou PORT do frontend/.env da instancia
+mf_frontend_ler_porta() {
+  local fe_env="/home/deploy/${empresa}/frontend/.env"
+  local port=""
+  if [ ! -f "$fe_env" ]; then
+    printf '%s\n' "3000"
+    return 0
+  fi
+  port=$(grep -m1 '^SERVER_PORT=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+  if [ -z "$port" ]; then
+    port=$(grep -m1 '^PORT=' "$fe_env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+  fi
+  printf '%s\n' "${port:-3000}"
+}
+
+# Garante PORT= e SERVER_PORT= no .env (server.js le PORT; git reset reverte server.js)
+mf_frontend_garantir_porta_env() {
+  local port="${1:-}"
+  local fe_dir="/home/deploy/${empresa}/frontend"
+  local fe_env="${fe_dir}/.env"
+  if [ -z "$port" ]; then
+    port=$(mf_frontend_ler_porta)
+  fi
+  if [ -f "$fe_env" ]; then
+    if grep -q "^PORT=" "$fe_env" 2>/dev/null; then
+      sed -i "s|^PORT=.*|PORT=${port}|" "$fe_env"
+    else
+      echo "PORT=${port}" >> "$fe_env"
+    fi
+    if grep -q "^SERVER_PORT=" "$fe_env" 2>/dev/null; then
+      sed -i "s|^SERVER_PORT=.*|SERVER_PORT=${port}|" "$fe_env"
+    else
+      echo "SERVER_PORT=${port}" >> "$fe_env"
+    fi
+  fi
+  if [ -f "${fe_dir}/server.js" ]; then
+    sed -i "s/3000/${port}/g" "${fe_dir}/server.js"
+  fi
+}
+
+# Reinicia frontend no PM2 com PORT correta (--update-env)
+mf_frontend_pm2_restart() {
+  local port="${1:-}"
+  if [ -z "$port" ]; then
+    port=$(mf_frontend_ler_porta)
+  fi
+  mf_frontend_garantir_porta_env "$port"
+  PORT="$port" pm2 restart "${empresa}-frontend" --update-env 2>/dev/null \
+    || pm2 restart "${empresa}-frontend" 2>/dev/null \
+    || true
+}
+
 # Exporta apenas chaves necessarias do frontend/.env (sem source).
 exportar_vars_frontend_env_seguro() {
   local fe_env="/home/deploy/${empresa}/frontend/.env"

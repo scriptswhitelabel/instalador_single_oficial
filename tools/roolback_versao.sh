@@ -225,13 +225,21 @@ elif [ -d /usr/local/n/versions/node ]; then
     export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
   fi
 fi
-for _p in "${emp}-backend" "${emp}-frontend" "api_oficial_${emp}"; do
+for _p in "${emp}-backend" "api_oficial_${emp}"; do
   if pm2 describe "\$_p" >/dev/null 2>&1; then
     pm2 restart "\$_p" 2>/dev/null || true
     pm2 reset "\$_p" 2>/dev/null || true
     pm2 flush "\$_p" 2>/dev/null || true
   fi
 done
+empresa="${emp}"
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+if pm2 describe "${emp}-frontend" >/dev/null 2>&1; then
+  mf_frontend_pm2_restart
+  pm2 reset "${emp}-frontend" 2>/dev/null || true
+  pm2 flush "${emp}-frontend" 2>/dev/null || true
+fi
 # Transcrição: reiniciada por roolback_manutencao_transcricao_pos_git (porta correta + delete/start)
 if pm2 describe api_oficial >/dev/null 2>&1; then
   _cwd=\$(pm2 show api_oficial 2>/dev/null | grep -m1 'exec cwd' | sed 's/│//g' | awk '{print \$NF}')
@@ -679,7 +687,9 @@ npm prune --force > /dev/null 2>&1
 rm -rf node_modules 2>/dev/null || true
 rm -f package-lock.json 2>/dev/null || true
 npm install --force
-[ -f server.js ] && sed -i 's/3000/'"$frontend_port"'/g' server.js
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+mf_frontend_garantir_porta_env "${frontend_port}"
 rm -rf .build_nova
 build_ok=0
 for mem in 4096 3072 2048; do

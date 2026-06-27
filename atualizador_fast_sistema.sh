@@ -1237,7 +1237,9 @@ echo
 cd /home/deploy/${empresa}/frontend
 printf "${WHITE} >> npm install --force no frontend (FAST — instala deps novas sem apagar node_modules)...\n"
 npm install --force
-sed -i 's/3000/'"$frontend_port"'/g' server.js
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+mf_frontend_garantir_porta_env "${frontend_port}"
 rm -rf .build_nova
 build_ok=0
 for mem in 4096 3072 2048; do
@@ -1290,11 +1292,14 @@ if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
 else
   export PATH=/usr/bin:/usr/local/bin:\$PATH
 fi
-for _p in "${empresa}-backend" "${empresa}-frontend"; do
+for _p in "${empresa}-backend"; do
   pm2 restart "\$_p" 2>/dev/null || true
   pm2 reset "\$_p" 2>/dev/null || true
   pm2 flush "\$_p" 2>/dev/null || true
 done
+_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
+[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
+mf_frontend_pm2_restart "${frontend_port}"
 pm2 save
 RESTARTPM2ATUALIZACAO
 
