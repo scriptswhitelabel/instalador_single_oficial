@@ -1067,6 +1067,10 @@ baixa_codigo_atualizar() {
   frontend_port=${SERVER_PORT:-3000}
   ativar_tela_atualizacao_frontend
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
+  [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
+  mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
+    || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
   if ! sudo su - deploy <<UPDATEAPP
   set -e
   _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
@@ -1191,10 +1195,6 @@ baixa_codigo_atualizar() {
   rm -f package-lock.json 2>/dev/null || true
   npm install --force
   
-  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
-  mf_frontend_garantir_porta_env "${frontend_port}"
-
   # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
   if [ -d "\$CUSTOM_DIR" ]; then
     printf "${WHITE} >> Aplicando personalizações de \$CUSTOM_DIR...\n"
@@ -1268,10 +1268,9 @@ UPDATEAPP
       export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
     fi
   fi
-  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
   pm2 restart "${empresa}-backend" 2>/dev/null || true
-  mf_frontend_pm2_restart "${frontend_port}"
+  PORT="${frontend_port}" pm2 restart "${empresa}-frontend" --update-env 2>/dev/null \
+    || pm2 restart "${empresa}-frontend" 2>/dev/null || true
   pm2 reset all 2>/dev/null || true
   pm2 flush 2>/dev/null || true
   pm2 save

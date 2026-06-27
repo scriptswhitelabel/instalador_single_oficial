@@ -215,6 +215,18 @@ STOPPM2
 
 pm2_reiniciar_instancia() {
   local emp="${1:-$empresa}"
+  local fe_port=3000
+
+  if [ -f "/home/deploy/${emp}/frontend/.env" ]; then
+    fe_port=$(grep -m1 '^SERVER_PORT=' "/home/deploy/${emp}/frontend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+    if [ -z "$fe_port" ]; then
+      fe_port=$(grep -m1 '^PORT=' "/home/deploy/${emp}/frontend/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+    fi
+    fe_port=${fe_port:-3000}
+  fi
+
+  roolback_carregar_lib_tela_frontend && mf_frontend_garantir_porta_env "$fe_port" || true
+
   sudo su - deploy <<RESTARTPM2
 export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
 if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
@@ -233,10 +245,9 @@ for _p in "${emp}-backend" "api_oficial_${emp}"; do
   fi
 done
 empresa="${emp}"
-_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
 if pm2 describe "${emp}-frontend" >/dev/null 2>&1; then
-  mf_frontend_pm2_restart
+  PORT="${fe_port}" pm2 restart "${emp}-frontend" --update-env 2>/dev/null \
+    || pm2 restart "${emp}-frontend" 2>/dev/null || true
   pm2 reset "${emp}-frontend" 2>/dev/null || true
   pm2 flush "${emp}-frontend" 2>/dev/null || true
 fi
@@ -669,6 +680,7 @@ roolback_build_e_publicar_frontend() {
     printf "${RED} >> Nao foi possivel carregar mf_tela_atualizacao_frontend.sh. Encerrando frontend build do rollback.${WHITE}\n"
     return 1
   fi
+  mf_frontend_garantir_porta_env "${frontend_port}" || true
 
   if ! sudo su - deploy <<FRONTEND
 export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
@@ -687,9 +699,6 @@ npm prune --force > /dev/null 2>&1
 rm -rf node_modules 2>/dev/null || true
 rm -f package-lock.json 2>/dev/null || true
 npm install --force
-_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
-mf_frontend_garantir_porta_env "${frontend_port}"
 rm -rf .build_nova
 build_ok=0
 for mem in 4096 3072 2048; do

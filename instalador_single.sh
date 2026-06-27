@@ -5720,6 +5720,10 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
+  _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
+  [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
+  mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "$frontend_port" \
+    || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
   if ! sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
   _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
@@ -5866,21 +5870,6 @@ ${MF_GIT_SYNC_BODY}
   npm prune --force > /dev/null 2>&1
   npm install --force
 
-  # Garantir PORT= e SERVER_PORT= no .env do frontend (server.js le PORT; git reset pode ter revertido)
-  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-  if [ -f "\$_MF_FE_LIB" ]; then
-    . "\$_MF_FE_LIB"
-    mf_frontend_garantir_porta_env "$frontend_port"
-    printf " >> PORT e SERVER_PORT definidos no .env do frontend: $frontend_port\n"
-  elif [ -f ".env" ]; then
-    if grep -q "^PORT=" .env 2>/dev/null; then sed -i "s|^PORT=.*|PORT=$frontend_port|" .env; else echo "PORT=$frontend_port" >> .env; fi
-    if grep -q "^SERVER_PORT=" .env 2>/dev/null; then sed -i "s|^SERVER_PORT=.*|SERVER_PORT=$frontend_port|" .env; else echo "SERVER_PORT=$frontend_port" >> .env; fi
-    printf " >> PORT e SERVER_PORT definidos no .env do frontend: $frontend_port\n"
-    if [ -f "server.js" ]; then
-      sed -i 's/3000/'"$frontend_port"'/g' server.js
-    fi
-  fi
-
   # ==== RESTORE DE PERSONALIZAÇÕES (da pasta estática) ====
   if [ -d "\$CUSTOM_DIR" ]; then
     printf "${WHITE} >> Aplicando personalizações de \$CUSTOM_DIR...\n"
@@ -5961,10 +5950,9 @@ UPDATEAPP
     fi
   fi
   # Nomes fixos (pm2 list + awk na tabela com │/cores costuma falhar)
-  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
   pm2 restart "${empresa}-backend" 2>/dev/null || true
-  mf_frontend_pm2_restart "$frontend_port"
+  PORT="$frontend_port" pm2 restart "${empresa}-frontend" --update-env 2>/dev/null \
+    || pm2 restart "${empresa}-frontend" 2>/dev/null || true
   pm2 save
 RESTARTPM2ATUALIZACAO
 

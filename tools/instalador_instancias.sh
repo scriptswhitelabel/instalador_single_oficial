@@ -2077,6 +2077,11 @@ EOF
 
     sleep 2
 
+    _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
+    [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
+    empresa="${nova_empresa}"
+    mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${nova_frontend_port}" || true
+
     sudo su - deploy <<RESTARTPM2
   if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
     export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:/usr/local/bin:\$PATH
@@ -2084,10 +2089,9 @@ EOF
     export PATH=/usr/bin:/usr/local/bin:\$PATH
   fi
   empresa="${nova_empresa}"
-  _MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-  [ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
   pm2 restart ${nova_empresa}-backend 2>/dev/null || true
-  mf_frontend_pm2_restart "${nova_frontend_port}"
+  PORT="${nova_frontend_port}" pm2 restart ${nova_empresa}-frontend --update-env 2>/dev/null \
+    || pm2 restart ${nova_empresa}-frontend 2>/dev/null || true
 RESTARTPM2
 
     sleep 2

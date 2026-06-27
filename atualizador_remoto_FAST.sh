@@ -1031,6 +1031,10 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
+  _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
+  [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
+  mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
+    || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
   if ! sudo su - deploy <<EOF
 set -e
 _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
@@ -1113,9 +1117,6 @@ echo
 cd /home/deploy/${empresa}/frontend
 printf "${WHITE} >> npm install --force no frontend (FAST — instala deps novas sem apagar node_modules)...\n"
 npm install --force
-_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
-mf_frontend_garantir_porta_env "${frontend_port}"
 rm -rf .build_nova
 build_ok=0
 for mem in 4096 3072 2048; do
@@ -1177,9 +1178,8 @@ for _p in "${empresa}-backend" "api_oficial_${empresa}"; do
   pm2 reset "\$_p" 2>/dev/null || true
   pm2 flush "\$_p" 2>/dev/null || true
 done
-_MF_FE_LIB="/root/instalador_single_oficial/tools/mf_tela_atualizacao_frontend.sh"
-[ -f "\$_MF_FE_LIB" ] && . "\$_MF_FE_LIB"
-mf_frontend_pm2_restart "${frontend_port}"
+PORT="${frontend_port}" pm2 restart "${empresa}-frontend" --update-env 2>/dev/null \
+  || pm2 restart "${empresa}-frontend" 2>/dev/null || true
 pm2 save
 RESTARTPM2ATUALIZACAO
 
