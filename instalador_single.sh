@@ -4720,6 +4720,9 @@ WHATSAPP_WEB_VERSION=2.3000.1038235667
 
 # DISABLE_PUSH_NOTIFICATIONS=0
 
+# Cron diário de recálculo de uso de disco (23h). Padrão: ativo. Para desativar: DISABLE_DISK_USAGE_CRON=1
+# DISABLE_DISK_USAGE_CRON=1
+
 ENABLE_LID_DEBUG=true
 FIX_LID_JOB_ENABLED=true
 # Opcional: horário do job (padrão: 3h da manhã)
@@ -5644,6 +5647,7 @@ STOPPM2
   # otimiza_banco_atualizar  # desativado: VACUUM FULL bloqueia o banco e prolonga a atualização
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_whatsapp_web_version
 
   # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
@@ -6122,6 +6126,32 @@ verificar_e_adicionar_max_buffer() {
     printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB adicionada com sucesso!${WHITE}\n"
   else
     printf "${GREEN} >> Variável MAX_BUFFER_SIZE_MB já existe no .env do backend.${WHITE}\n"
+  fi
+  garantir_permissoes_env_backend "$ENV_FILE"
+}
+
+# Verificar e documentar DISABLE_DISK_USAGE_CRON no .env do backend (cron ativo por padrão)
+verificar_e_adicionar_disable_disk_usage_cron() {
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de DISABLE_DISK_USAGE_CRON.\n${WHITE}"
+    return 0
+  fi
+
+  if ! grep -qE '^(# )?DISABLE_DISK_USAGE_CRON=' "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando DISABLE_DISK_USAGE_CRON (comentado, cron ativo por padrão) no .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Cron diário de recálculo de uso de disco (23h). Padrão: ativo. Para desativar: DISABLE_DISK_USAGE_CRON=1" >> "$ENV_FILE"
+    echo "# DISABLE_DISK_USAGE_CRON=1" >> "$ENV_FILE"
+    printf "${GREEN} >> DISABLE_DISK_USAGE_CRON documentado no .env do backend.${WHITE}\n"
+  else
+    printf "${GREEN} >> DISABLE_DISK_USAGE_CRON já existe no .env do backend.${WHITE}\n"
   fi
   garantir_permissoes_env_backend "$ENV_FILE"
 }

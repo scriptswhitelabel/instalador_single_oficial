@@ -1567,6 +1567,9 @@ WHATSAPP_WEB_VERSION=2.3000.1038235667
 
 # DISABLE_PUSH_NOTIFICATIONS=0
 
+# Cron diário de recálculo de uso de disco (23h). Padrão: ativo. Para desativar: DISABLE_DISK_USAGE_CRON=1
+# DISABLE_DISK_USAGE_CRON=1
+
 ENABLE_LID_DEBUG=true
 FIX_LID_JOB_ENABLED=true
 # Opcional: horário do job (padrão: 3h da manhã)

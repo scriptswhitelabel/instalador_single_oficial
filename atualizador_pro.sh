@@ -921,6 +921,34 @@ verificar_e_adicionar_max_buffer() {
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 
+# Verificar e documentar DISABLE_DISK_USAGE_CRON no .env do backend (cron ativo por padrão)
+verificar_e_adicionar_disable_disk_usage_cron() {
+  dummy_carregar_variaveis
+
+  if [ -z "${empresa}" ]; then
+    printf "${RED} >> ERRO: Variável 'empresa' não está definida!\n${WHITE}"
+    return 0
+  fi
+
+  ENV_FILE="/home/deploy/${empresa}/backend/.env"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    printf "${YELLOW} >> AVISO: Arquivo .env não encontrado em $ENV_FILE. Pulando verificação de DISABLE_DISK_USAGE_CRON.\n${WHITE}"
+    return 0
+  fi
+
+  if ! grep -qE '^(# )?DISABLE_DISK_USAGE_CRON=' "$ENV_FILE"; then
+    printf "${WHITE} >> Adicionando DISABLE_DISK_USAGE_CRON (comentado, cron ativo por padrão) no .env do backend...\n"
+    echo "" >> "$ENV_FILE"
+    echo "# Cron diário de recálculo de uso de disco (23h). Padrão: ativo. Para desativar: DISABLE_DISK_USAGE_CRON=1" >> "$ENV_FILE"
+    echo "# DISABLE_DISK_USAGE_CRON=1" >> "$ENV_FILE"
+    printf "${GREEN} >> DISABLE_DISK_USAGE_CRON documentado no .env do backend.${WHITE}\n"
+  else
+    printf "${GREEN} >> DISABLE_DISK_USAGE_CRON já existe no .env do backend.${WHITE}\n"
+  fi
+  garantir_permissoes_env_backend "$ENV_FILE"
+}
+
 # Verificar e adicionar WHATSAPP_WEB_VERSION e variáveis LID/Baileys no .env do backend
 verificar_e_adicionar_whatsapp_web_version() {
   dummy_carregar_variaveis
@@ -1042,6 +1070,7 @@ baixa_codigo_atualizar() {
   otimiza_banco_atualizar
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_whatsapp_web_version
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
