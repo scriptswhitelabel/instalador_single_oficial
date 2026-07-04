@@ -1128,8 +1128,16 @@ npm install --legacy-peer-deps --prefer-offline 2>/dev/null \
   || npm install --legacy-peer-deps 2>/dev/null \
   || npm install --force
 
+_MF_HB_SCRIPT="${INSTALADOR_DIR}/tools/mf_npm_build_heartbeat.sh"
+[ -f "\$_MF_HB_SCRIPT" ] || _MF_HB_SCRIPT="/root/instalador_single_oficial/tools/mf_npm_build_heartbeat.sh"
+[ -f "\$_MF_HB_SCRIPT" ] && . "\$_MF_HB_SCRIPT"
+
 printf "${WHITE} >> Build do backend...\n"
-npm run build
+if type mf_npm_build_com_heartbeat >/dev/null 2>&1; then
+  mf_npm_build_com_heartbeat "backend" npm run build || exit 1
+else
+  npm run build
+fi
 sleep 2
 
 printf "${WHITE} >> Migrations do banco (sequelize db:migrate)...\n"
@@ -1147,12 +1155,17 @@ npm install --force
 rm -rf .build_nova
 build_ok=0
 for mem in 4096 3072 2048; do
-  printf "${WHITE} >> Build do frontend com --max-old-space-size=${mem}...\n"
-  if BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=${mem} --openssl-legacy-provider" npm run build; then
+  printf "${WHITE} >> Build do frontend com --max-old-space-size=\${mem}...\n"
+  if type mf_npm_build_com_heartbeat >/dev/null 2>&1; then
+    if mf_npm_build_com_heartbeat "frontend \${mem}MB" env BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=\${mem} --openssl-legacy-provider" npm run build; then
+      build_ok=1
+      break
+    fi
+  elif BUILD_PATH=.build_nova NODE_OPTIONS="--max-old-space-size=\${mem} --openssl-legacy-provider" npm run build; then
     build_ok=1
     break
   fi
-  printf "${YELLOW} >> Tentativa com ${mem} MB falhou. Tentando próximo limite...${WHITE}\n"
+  printf "${YELLOW} >> Tentativa com \${mem} MB falhou. Tentando próximo limite...${WHITE}\n"
   sleep 2
 done
 if [ "\$build_ok" -ne 1 ]; then

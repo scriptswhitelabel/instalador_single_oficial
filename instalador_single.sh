@@ -7652,5 +7652,31 @@ if [ "${1:-}" = "--coletar-variaveis-alta-performance" ]; then
   exit 0
 fi
 
+# Modo: executar ferramenta do menu sem abrir o menu principal (painel Multiflow Control)
+exec_ferramenta_direta() {
+  carregar_variaveis
+  case "${1:-}" in
+    8) backup_redis_ferramentas ;;
+    9) restaurar_redis_ferramentas ;;
+    10) importar_backup_banco_ferramentas ;;
+    11) backup_banco_ferramentas ;;
+    12) importar_backup_banco_api_oficial_ferramentas ;;
+    13) listar_bancos_ferramentas ;;
+    14) restaurar_backup_banco_alta_performance_ferramentas ;;
+    17) atualizar_whatsmeow ;;
+    22) backup_whatsmeow_ferramentas ;;
+    23) restaurar_whatsmeow_ferramentas ;;
+    *)
+      printf "${RED} >> Ferramenta inválida ou não suportada: ${1}${WHITE}\n"
+      return 1
+      ;;
+  esac
+}
+
+if [ "${1:-}" = "--exec-ferramenta" ] && [ -n "${2:-}" ]; then
+  exec_ferramenta_direta "$2"
+  exit $?
+fi
+
 carregar_variaveis
 menu
