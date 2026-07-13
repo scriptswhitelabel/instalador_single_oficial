@@ -372,15 +372,18 @@ atualizar_git_config() {
     
     # git remote set-url cobre URL HTTPS sem credenciais (https://github.com/... sem token),
     # com token na URL ou com/sem .git — a substituição por sed falhava nesses casos.
+    # Root em /home/deploy/* dispara "dubious ownership" no Git 2.35+; -c safe.directory evita isso
+    # sem alterar o gitconfig global (o instalador roda como root; o repo é do usuário deploy).
     if [ ! -d "${APP_ROOT}/.git" ]; then
       printf "${RED}❌ ERRO: Repositório git não encontrado em ${APP_ROOT}.${WHITE}\n"
       exit 1
     fi
-    if ! git -C "${APP_ROOT}" remote get-url origin >/dev/null 2>&1; then
-      printf "${RED}❌ ERRO: Remote 'origin' não encontrado em ${APP_ROOT}.${WHITE}\n"
+    if ! git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote get-url origin >/dev/null 2>&1; then
+      printf "${RED}❌ ERRO: Não foi possível ler o remote 'origin' em ${APP_ROOT}.${WHITE}\n"
+      printf "${YELLOW}   Detalhe: $(git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote get-url origin 2>&1)${WHITE}\n"
       exit 1
     fi
-    if git -C "${APP_ROOT}" remote set-url origin "${NEW_REMOTE_URL}"; then
+    if git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote set-url origin "${NEW_REMOTE_URL}"; then
       printf "${GREEN}✅ Remote origin definido para multiflow-pro.${WHITE}\n"
     else
       printf "${RED}❌ ERRO: git remote set-url falhou.${WHITE}\n"
