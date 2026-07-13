@@ -1262,6 +1262,24 @@ ${MF_GIT_SYNC_BODY}
     echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
     exit 1
   fi
+
+  # Multiflow-pro: git reset restaura TOKEN_GITHUB no package.json (Baileys/Hineken).
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    if [ -z "${github_token}" ]; then
+      echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+      exit 1
+    fi
+    sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
+    echo " >> Token GitHub aplicado no package.json (Baileys)."
+  fi
+  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
+    echo " >> Baileys/Hineken fixado na branch main no package.json."
+  fi
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
+    exit 1
+  fi
   
   npm prune --force > /dev/null 2>&1
   export PUPPETEER_SKIP_DOWNLOAD=true

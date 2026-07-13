@@ -205,8 +205,17 @@ selecionar_instancia_atualizar() {
 
 # Carregar variáveis
 dummy_carregar_variaveis() {
-  if [ -f $ARQUIVO_VARIAVEIS ]; then
-    source $ARQUIVO_VARIAVEIS
+  local arq="${ARQUIVO_VARIAVEIS_USADO:-}"
+  if [ -z "$arq" ] || [ ! -f "$arq" ]; then
+    if [ -f "/root/instalador_single_oficial/VARIAVEIS_INSTALACAO" ]; then
+      arq="/root/instalador_single_oficial/VARIAVEIS_INSTALACAO"
+    elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
+      arq="$ARQUIVO_VARIAVEIS"
+    fi
+  fi
+  if [ -n "$arq" ] && [ -f "$arq" ]; then
+    # shellcheck source=/dev/null
+    source "$arq"
   else
     empresa="multiflow"
     nome_titulo="MultiFlow"
@@ -892,6 +901,24 @@ ${MF_GIT_SYNC_BODY}
   
   if [ ! -f "package.json" ]; then
     echo "ERRO: package.json não encontrado em \$BACKEND_DIR"
+    exit 1
+  fi
+
+  # Multiflow-pro: git reset restaura TOKEN_GITHUB no package.json (Baileys/Hineken).
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    if [ -z "${github_token}" ]; then
+      echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+      exit 1
+    fi
+    sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
+    echo " >> Token GitHub aplicado no package.json (Baileys)."
+  fi
+  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
+    echo " >> Baileys/Hineken fixado na branch main no package.json."
+  fi
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+    echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
     exit 1
   fi
   
