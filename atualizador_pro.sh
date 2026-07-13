@@ -31,6 +31,28 @@ trata_erro() {
   exit 1
 }
 
+# Carrega KEY=VALUE sem quebrar em espaços (ex.: nome_titulo=Drocha Sellers).
+mf_carregar_arquivo_variaveis() {
+  local arquivo="$1"
+  local linha chave valor
+  [ -f "$arquivo" ] || return 1
+  while IFS= read -r linha || [ -n "$linha" ]; do
+    linha="${linha%$'\r'}"
+    [[ "$linha" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${linha//[[:space:]]/}" ]] && continue
+    [[ "$linha" == *=* ]] || continue
+    chave="${linha%%=*}"
+    valor="${linha#*=}"
+    [[ "$chave" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "$valor" =~ ^\".*\"$ ]]; then
+      valor="${valor:1:${#valor}-2}"
+    elif [[ "$valor" =~ ^\'.*\'$ ]]; then
+      valor="${valor:1:${#valor}-2}"
+    fi
+    printf -v "$chave" '%s' "$valor"
+  done < "$arquivo"
+}
+
 # Função banner
 banner() {
   printf " ${BLUE}"
@@ -62,7 +84,7 @@ detectar_instancias_instaladas() {
     local subdominio_frontend_original="${subdominio_frontend:-}"
     
     # Carregar variáveis do arquivo
-    source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+    mf_carregar_arquivo_variaveis "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null || true
     temp_empresa="${empresa:-}"
     
     if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
@@ -86,7 +108,7 @@ detectar_instancias_instaladas() {
         local subdominio_frontend_original="${subdominio_frontend:-}"
         
         # Carregar variáveis do arquivo
-        source "$arquivo_instancia" 2>/dev/null
+        mf_carregar_arquivo_variaveis "$arquivo_instancia" 2>/dev/null || true
         temp_empresa="${empresa:-}"
         
         if [ -n "${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}" ] && [ -d "/home/deploy/${temp_empresa}/backend" ]; then
@@ -210,10 +232,10 @@ dummy_carregar_variaveis() {
   
   # Primeiro tenta carregar do diretório do instalador
   if [ -f "$ARQUIVO_VARIAVEIS_INSTALADOR" ]; then
-    source "$ARQUIVO_VARIAVEIS_INSTALADOR"
+    mf_carregar_arquivo_variaveis "$ARQUIVO_VARIAVEIS_INSTALADOR"
   # Depois tenta do diretório atual
-  elif [ -f $ARQUIVO_VARIAVEIS ]; then
-    source $ARQUIVO_VARIAVEIS
+  elif [ -f "$ARQUIVO_VARIAVEIS" ]; then
+    mf_carregar_arquivo_variaveis "$ARQUIVO_VARIAVEIS"
   else
     empresa="multiflow"
     nome_titulo="MultiFlow"
@@ -637,7 +659,7 @@ otimiza_banco_atualizar() {
     return 0
   fi
   
-  [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ] && source "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
+  [ -f "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" ] && mf_carregar_arquivo_variaveis "${INSTALADOR_DIR}/${ARQUIVO_VARIAVEIS}" 2>/dev/null
   if [ "${ALTA_PERFORMANCE}" = "1" ]; then
     db_host_opt="127.0.0.1"
     db_port_opt="7532"
@@ -1099,34 +1121,84 @@ baixa_codigo_atualizar() {
   frontend_port=${SERVER_PORT:-3000}
   ativar_tela_atualizacao_frontend
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # /root é 700: o usuário deploy não consegue sourcer tools/path_node_deploy.sh.
+  # Injeta as funções de sync no heredoc (mesmo padrão do atualizador_remoto_FAST.sh).
+  if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+    MF_GIT_SYNC_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh")
+  else
+    MF_GIT_SYNC_BODY=$(cat <<'MF_GIT_SYNC_INLINE'
+
+mf_git_clean_preservando_locais() {
+  git clean -fd -e api_transcricao/run_transcricao.sh 2>/dev/null || true
+}
+mf_git_detectar_deploy_branch() {
+  if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+    printf '%s\n' MULTI100-OFICIAL-u21
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    printf '%s\n' main
+  elif git show-ref --verify --quiet refs/remotes/origin/master; then
+    printf '%s\n' master
+  fi
+}
+mf_git_sincronizar_repositorio() {
+  local commit_alvo="\${1:-}"
+  local branch_prefix="\${2:-atualizacao}"
+  chmod -R u+w .git 2>/dev/null || true
+  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
+  mf_git_clean_preservando_locais
+  if [ -n "\$commit_alvo" ]; then
+    if ! git cat-file -e "\${commit_alvo}^{commit}" 2>/dev/null; then
+      echo "ERRO: Commit \${commit_alvo} não encontrado após fetch."
+      return 1
+    fi
+    git checkout -f "\${commit_alvo}" || return 1
+    git reset --hard "\${commit_alvo}" || return 1
+    local _br_atu="\${branch_prefix}-\$(date +%Y%m%d-%H%M%S)"
+    git checkout -b "\$_br_atu" 2>/dev/null || git checkout "\$_br_atu" 2>/dev/null || true
+    local _head_atu
+    _head_atu=\$(git rev-parse HEAD 2>/dev/null)
+    if [ "\$_head_atu" != "\$commit_alvo" ]; then
+      echo "ERRO: Checkout falhou. Esperado \${commit_alvo}, atual \${_head_atu}"
+      return 1
+    fi
+    return 0
+  fi
+  MF_GIT_DEPLOY_BRANCH=\$(mf_git_detectar_deploy_branch)
+  if [ -z "\$MF_GIT_DEPLOY_BRANCH" ]; then
+    echo "ERRO: Nenhuma branch remota conhecida em origin."
+    return 1
+  fi
+  git reset --hard "origin/\${MF_GIT_DEPLOY_BRANCH}" || return 1
+  git checkout -B "\${MF_GIT_DEPLOY_BRANCH}" "origin/\${MF_GIT_DEPLOY_BRANCH}" 2>/dev/null || true
+  mf_git_clean_preservando_locais
+  git reset --hard "origin/\${MF_GIT_DEPLOY_BRANCH}" || return 1
+  return 0
+}
+MF_GIT_SYNC_INLINE
+)
+  fi
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
   if ! sudo su - deploy <<UPDATEAPP
   set -e
-  _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
-  if [ -f "\$_MF_PATH_NODE" ]; then
-    . "\$_MF_PATH_NODE"
-  elif [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
-    . /root/instalador_single_oficial/tools/path_node_deploy.sh
-  else
-    export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
-    if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
-      export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
-    elif [ -d /usr/local/n/versions/node ]; then
-      _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
-      if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
-        export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
-      fi
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "ERRO: npm não encontrado no PATH do usuário deploy."
-      exit 1
+  export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
+  if [ -d /usr/local/n/versions/node/20.19.4/bin ]; then
+    export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
+  elif [ -d /usr/local/n/versions/node ]; then
+    _mf_nv=\$(ls -1 /usr/local/n/versions/node 2>/dev/null | sort -V | tail -1)
+    if [ -n "\$_mf_nv" ] && [ -d "/usr/local/n/versions/node/\$_mf_nv/bin" ]; then
+      export PATH="/usr/local/n/versions/node/\$_mf_nv/bin:\$PATH"
     fi
   fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "ERRO: npm não encontrado no PATH do usuário deploy."
+    exit 1
+  fi
+${MF_GIT_SYNC_BODY}
   if ! command -v mf_git_sincronizar_repositorio >/dev/null 2>&1; then
-    echo "ERRO: mf_git_sincronizar_repositorio não disponível. Atualize tools/path_node_deploy.sh no instalador."
+    echo "ERRO: mf_git_sincronizar_repositorio não disponível após injeção das funções Git."
     exit 1
   fi
   

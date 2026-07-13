@@ -771,7 +771,7 @@ salvar_variaveis_instancia() {
     echo "empresa=${nova_empresa}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "senha_deploy=${senha_deploy}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "senha_master=${senha_master}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
-    echo "nome_titulo=${nome_titulo}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
+    echo "nome_titulo=\"${nome_titulo}\"" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "numero_suporte=${numero_suporte}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "facebook_app_id=${facebook_app_id}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"
     echo "facebook_app_secret=${facebook_app_secret}" >> "$ARQUIVO_VARIAVEIS_INSTANCIA"

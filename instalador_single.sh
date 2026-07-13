@@ -155,7 +155,7 @@ salvar_variaveis() {
   echo "senha_deploy=${senha_deploy}" >>$ARQUIVO_VARIAVEIS
   # echo "subdominio_perfex=${subdominio_perfex}" >>$ARQUIVO_VARIAVEIS
   echo "senha_master=${senha_master}" >>$ARQUIVO_VARIAVEIS
-  echo "nome_titulo=${nome_titulo}" >>$ARQUIVO_VARIAVEIS
+  echo "nome_titulo=\"${nome_titulo}\"" >>$ARQUIVO_VARIAVEIS
   echo "numero_suporte=${numero_suporte}" >>$ARQUIVO_VARIAVEIS
   echo "facebook_app_id=${facebook_app_id}" >>$ARQUIVO_VARIAVEIS
   echo "facebook_app_secret=${facebook_app_secret}" >>$ARQUIVO_VARIAVEIS
