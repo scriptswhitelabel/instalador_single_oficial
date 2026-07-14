@@ -1488,8 +1488,12 @@ DB_NAME=${nova_empresa}
 
 # DADOS REDIS (Docker)
 REDIS_URI=redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}
-REDIS_OPT_LIMITER_MAX=1
-REDIS_OPT_LIMITER_DURATION=3000
+REDIS_OPT_LIMITER_MAX=10
+REDIS_OPT_LIMITER_DURATION=1000
+# Throughput filas de mensagem Baileys (-handleMessage) e WhatsMeow (-handleWuzapiMessage)
+HANDLE_MESSAGE_QUEUE_CONCURRENCY=4
+HANDLE_MESSAGE_LIMITER_MAX=15
+HANDLE_MESSAGE_LIMITER_DURATION=1000
 # REDIS_URI_ACK=redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}
 # BULL_BOARD=true
 # BULL_USER=${email_deploy}

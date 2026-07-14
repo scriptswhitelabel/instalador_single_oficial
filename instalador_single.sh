@@ -4638,8 +4638,12 @@ DB_NAME=${empresa}
 
 # DADOS REDIS
 REDIS_URI=${redis_uri_instalador}
-REDIS_OPT_LIMITER_MAX=1
-REDIS_OPT_LIMITER_DURATION=3000
+REDIS_OPT_LIMITER_MAX=10
+REDIS_OPT_LIMITER_DURATION=1000
+# Throughput filas de mensagem Baileys (-handleMessage) e WhatsMeow (-handleWuzapiMessage)
+HANDLE_MESSAGE_QUEUE_CONCURRENCY=4
+HANDLE_MESSAGE_LIMITER_MAX=15
+HANDLE_MESSAGE_LIMITER_DURATION=1000
 ${redis_uri_ack_comentado}
 # BULL_BOARD=true
 # BULL_USER=${email_deploy}
@@ -5647,6 +5651,7 @@ STOPPM2
   # otimiza_banco_atualizar  # desativado: VACUUM FULL bloqueia o banco e prolonga a atualização
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_whatsapp_web_version
 
@@ -6129,6 +6134,17 @@ verificar_e_adicionar_max_buffer() {
   fi
   garantir_permissoes_env_backend "$ENV_FILE"
 }
+
+# Throughput Bull: Baileys + WhatsMeow (opção 2 / instalação)
+_mf_tools_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools"
+if [ -f "${_mf_tools_dir}/mf_env_handle_message_queue.sh" ]; then
+  # shellcheck source=tools/mf_env_handle_message_queue.sh
+  source "${_mf_tools_dir}/mf_env_handle_message_queue.sh"
+else
+  verificar_e_adicionar_handle_message_queue_env() {
+    printf "${YELLOW} >> tools/mf_env_handle_message_queue.sh não encontrado — pulando filas de mensagem.\n${WHITE}"
+  }
+fi
 
 # Verificar e documentar DISABLE_DISK_USAGE_CRON no .env do backend (cron ativo por padrão)
 verificar_e_adicionar_disable_disk_usage_cron() {

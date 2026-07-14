@@ -675,6 +675,17 @@ verificar_e_adicionar_disable_disk_usage_cron() {
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 
+# Throughput Bull: Baileys + WhatsMeow (atualizador_remoto)
+_mf_tools_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools"
+if [ -f "${_mf_tools_dir}/mf_env_handle_message_queue.sh" ]; then
+  # shellcheck source=tools/mf_env_handle_message_queue.sh
+  source "${_mf_tools_dir}/mf_env_handle_message_queue.sh"
+else
+  verificar_e_adicionar_handle_message_queue_env() {
+    printf "${YELLOW} >> tools/mf_env_handle_message_queue.sh não encontrado — pulando filas de mensagem.\n${WHITE}"
+  }
+fi
+
 # Verificar e adicionar WHATSAPP_WEB_VERSION e variáveis LID/Baileys no .env do backend
 verificar_e_adicionar_whatsapp_web_version() {
   if [ -z "${empresa}" ]; then
@@ -794,6 +805,7 @@ baixa_codigo_atualizar() {
   otimiza_banco_atualizar
 
   verificar_e_adicionar_disable_disk_usage_cron
+  verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_whatsapp_web_version
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"

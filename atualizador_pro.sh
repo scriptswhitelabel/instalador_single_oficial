@@ -946,6 +946,17 @@ verificar_e_adicionar_max_buffer() {
   garantir_permissoes_env_backend "$ENV_FILE"
 }
 
+# Throughput Bull: Baileys + WhatsMeow (atualização completa / opção 2 via pro)
+_mf_tools_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools"
+if [ -f "${_mf_tools_dir}/mf_env_handle_message_queue.sh" ]; then
+  # shellcheck source=tools/mf_env_handle_message_queue.sh
+  source "${_mf_tools_dir}/mf_env_handle_message_queue.sh"
+else
+  verificar_e_adicionar_handle_message_queue_env() {
+    printf "${YELLOW} >> tools/mf_env_handle_message_queue.sh não encontrado — pulando filas de mensagem.\n${WHITE}"
+  }
+fi
+
 # Verificar e documentar DISABLE_DISK_USAGE_CRON no .env do backend (cron ativo por padrão)
 verificar_e_adicionar_disable_disk_usage_cron() {
   dummy_carregar_variaveis
@@ -1095,6 +1106,7 @@ baixa_codigo_atualizar() {
   otimiza_banco_atualizar
 
   verificar_e_adicionar_max_buffer
+  verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_whatsapp_web_version
 
