@@ -993,6 +993,15 @@ baixa_codigo_atualizar() {
 
   # otimiza_banco_atualizar
 
+  carregar_credenciais_instancia
+
+  if [ ! -f "/home/deploy/${empresa}/backend/.env" ]; then
+    printf "${RED} >> ERRO: backend/.env não encontrado em /home/deploy/${empresa}/backend/.env${WHITE}\n"
+    printf "${YELLOW} >> Sem o .env a atualização quebra (DB, Redis, JWT). Restaure o arquivo e rode de novo.${WHITE}\n"
+    printf "${YELLOW} >> Dica: ls -la /home/deploy/${empresa}/backend/.env ; copie de backup se necessário.${WHITE}\n"
+    trata_erro "backend_env_ausente"
+  fi
+
   verificar_e_adicionar_max_buffer
   verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_disable_disk_usage_cron
@@ -1017,12 +1026,13 @@ baixa_codigo_atualizar() {
   ativar_tela_atualizacao_frontend
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
     MF_GIT_SYNC_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh")
   else
     MF_GIT_SYNC_BODY=$(cat <<'MF_GIT_SYNC_INLINE'
-
 mf_git_clean_preservando_locais() {
-  git clean -fd -e api_transcricao/run_transcricao.sh 2>/dev/null || true
+  git clean -fd -e api_transcricao/run_transcricao.sh -e backend/.env -e frontend/.env -e api_oficial/.env 2>/dev/null || true
 }
 mf_git_detectar_deploy_branch() {
   if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
@@ -1036,14 +1046,25 @@ mf_git_detectar_deploy_branch() {
 mf_git_sincronizar_repositorio() {
   local commit_alvo="\${1:-}"
   local branch_prefix="\${2:-atualizacao}"
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
+  echo " >> Git: liberando escrita em .git..."
   chmod -R u+w .git 2>/dev/null || true
-  git fetch --all --tags --prune 2>/dev/null || git fetch origin 2>/dev/null || true
+  echo " >> Git: fetch do origin..."
+  if ! git fetch --all --tags --prune; then
+    git fetch origin || { echo "ERRO: git fetch falhou (token/rede)."; return 1; }
+  fi
   mf_git_clean_preservando_locais
   if [ -n "\$commit_alvo" ]; then
+    if ! git cat-file -e "\${commit_alvo}^{commit}" 2>/dev/null; then
+      git fetch origin "\${commit_alvo}" 2>/dev/null || true
+      git fetch --unshallow 2>/dev/null || true
+    fi
     if ! git cat-file -e "\${commit_alvo}^{commit}" 2>/dev/null; then
       echo "ERRO: Commit \${commit_alvo} não encontrado após fetch."
       return 1
     fi
+    echo " >> Git: checkout \${commit_alvo}..."
     git checkout -f "\${commit_alvo}" || return 1
     git reset --hard "\${commit_alvo}" || return 1
     local _br_atu="\${branch_prefix}-\$(date +%Y%m%d-%H%M%S)"
@@ -1070,12 +1091,29 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
+
+  # Token no remote evita hang do git pedindo senha dentro do heredoc (sem TTY).
+  if [ -n "${github_token:-}" ]; then
+    printf "${WHITE} >> Aplicando github_token no remote origin (git fetch sem prompt)...${WHITE}\n"
+    if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
+      mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
+        && printf "${GREEN} >> Token aplicado no remote origin.${WHITE}\n" \
+        || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote; o fetch pode falhar.${WHITE}\n"
+    fi
+  elif echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+    printf "${RED} >> ERRO: github_token não definido — o git fetch do multiflow-pro costuma travar ou falhar.${WHITE}\n"
+    printf "${YELLOW} >> Inclua github_token=... no arquivo da instância e tente novamente.${WHITE}\n"
+    trata_erro "github_token_ausente_git"
+  fi
+
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
   if ! sudo su - deploy <<EOF
 set -e
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
 _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
 if [ -f "\$_MF_PATH_NODE" ]; then
   . "\$_MF_PATH_NODE"
@@ -1095,9 +1133,11 @@ cd /home/deploy/${empresa}
 
 if [ -n "${commit_atualizacao}" ]; then
   printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
+  printf "${WHITE} >> (fetch + checkout — aguarde; não use Ctrl+Z)${WHITE}\n"
   mf_git_sincronizar_repositorio "${commit_atualizacao}" "atualizacao-fast-${versao_atualizacao}" || exit 1
 else
   printf "${WHITE} >> Sincronizando com origin (Mais Recente: fetch + reset)...${WHITE}\n"
+  printf "${WHITE} >> (aguarde; não use Ctrl+Z)${WHITE}\n"
   mf_git_sincronizar_repositorio "" || exit 1
   printf "${WHITE} >> Branch sincronizada: \${MF_GIT_DEPLOY_BRANCH}${WHITE}\n"
 fi
