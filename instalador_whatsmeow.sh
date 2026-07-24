@@ -958,11 +958,14 @@ DB_PORT=5432
 DB_SSLMODE=false
 TZ=America/Sao_Paulo
 
-# RabbitMQ (host publicado; URL interna usa hostname rabbitmq:5672 no compose)
+# RabbitMQ opcional (Multiflow usa webhook HTTP).
+# Deixe RABBITMQ_URL vazio para nao publicar eventos no AMQP.
+# Para habilitar: preencha RABBITMQ_URL e suba com: docker compose --profile rabbitmq up -d
 RABBITMQ_AMQP_PORT=${wuzapi_rabbit_amqp_port}
 RABBITMQ_MGMT_PORT=${wuzapi_rabbit_mgmt_port}
-RABBITMQ_URL=amqp://${db_user}:${senha_deploy}@rabbitmq:5672/%2F
+RABBITMQ_URL=
 RABBITMQ_QUEUE=whatsapp_events_${empresa}
+# Exemplo: RABBITMQ_URL=amqp://${db_user}:${senha_deploy}@rabbitmq:5672/%2F
 EOF
 
     printf "${GREEN} >> Arquivo .env do wuzapi configurado com sucesso!${WHITE}\n"
@@ -1198,13 +1201,11 @@ ${cn_server}
       - WEBHOOK_FORMAT=\${WEBHOOK_FORMAT:-json}
       - SESSION_DEVICE_NAME=\${SESSION_DEVICE_NAME:-Windows - Wuz}
       - SESSION_PLATFORM_TYPE=\${SESSION_PLATFORM_TYPE:-CHROME}
-      # RabbitMQ configuration Optional
-      - RABBITMQ_URL=amqp://${db_user}:\${DB_PASSWORD}@rabbitmq:5672/
-      - RABBITMQ_QUEUE=whatsapp_events_${empresa}
+      # RabbitMQ opcional (vazio = publicacao AMQP desligada; Multiflow usa webhook)
+      - RABBITMQ_URL=\${RABBITMQ_URL:-}
+      - RABBITMQ_QUEUE=\${RABBITMQ_QUEUE:-whatsapp_events_${empresa}}
     depends_on:
       db:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     networks:
       - wuzapi-network
@@ -1236,10 +1237,14 @@ ${cn_db}
       retries: 5
     restart: always
 
+  # Opcional: docker compose --profile rabbitmq up -d
+  # So necessario se RABBITMQ_URL estiver preenchido no .env
   rabbitmq:
 ${cn_rmq}
     image: rabbitmq:3-management
     hostname: rabbitmq-${empresa}
+    profiles:
+      - rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: \${DB_USER:-${db_user}}
       RABBITMQ_DEFAULT_PASS: \${DB_PASSWORD:-wuzapi}
@@ -1778,7 +1783,7 @@ main() {
   printf "${WHITE}   📚 Para consultar os endpoints da API, acesse:${WHITE}\n"
   printf "${YELLOW}   https://${subdominio_limpo}/api${WHITE}\n"
   echo
-  printf "${WHITE}   🐰 RabbitMQ (host): AMQP ${YELLOW}${wuzapi_rabbit_amqp_port}${WHITE} | Management ${YELLOW}${wuzapi_rabbit_mgmt_port}${WHITE}\n"
+  printf "${WHITE}   🐰 RabbitMQ: ${YELLOW}opcional (desligado)${WHITE} — webhook por padrao; AMQP: preencha RABBITMQ_URL e use --profile rabbitmq\n"
   echo
   printf "${GREEN}══════════════════════════════════════════════════════════════════${WHITE}\n"
   echo
@@ -1923,7 +1928,7 @@ main_atualizar_whatsmeow() {
   banner
   printf "${WHITE} >> Atualizar WhatsMeow (WuzAPI)${WHITE}\n"
   printf "${WHITE} >> Fluxo: git pull → ajuste Dockerfile (se preciso) → rebuild do container da API.${WHITE}\n"
-  printf "${YELLOW} >> Postgres e RabbitMQ permanecem (sem apagar volumes).${WHITE}\n"
+  printf "${YELLOW} >> Postgres permanece. RabbitMQ so sobe com profile rabbitmq.${WHITE}\n"
   echo
   printf "${WHITE} >> Continuar? (S/N):${WHITE}\n"
   read -r conf
