@@ -8,6 +8,7 @@ mf_baileys_fixar_branch_main_package_json() {
   [ -z "$pkg" ] && return 0
   [ ! -f "$pkg" ] && return 0
   grep -q 'scriptswhitelabel/Hineken' "$pkg" 2>/dev/null || return 0
-  sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' "$pkg"
+  sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#104a2099368420067d556d1386f1075e39b4962d|g' "$pkg"
+  # sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' "$pkg"
   return 0
 }
