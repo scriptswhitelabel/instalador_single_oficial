@@ -490,10 +490,71 @@ EOF
   fi
 }
 
+
+preparar_rollup_frontend() {
+  local frontend="${VOZ_ROOT}/frontend"
+  local arch glibc_ver usar_wasm="false"
+
+  arch="$(uname -m)"
+  glibc_ver="$(ldd --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+' | tail -n1 || true)"
+
+  printf "${WHITE} >> Arquitetura detectada: %s | GLIBC: %s${WHITE}\n" \
+    "$arch" "${glibc_ver:-desconhecida}"
+
+  # Em ARM64 com GLIBC antiga, o binário nativo do Rollup não carrega.
+  # Substituímos o pacote "rollup" pelo build oficial WebAssembly.
+  if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+    if [ -z "$glibc_ver" ]; then
+      usar_wasm="true"
+    elif ! printf '%s\n%s\n' "2.34" "$glibc_ver" | sort -V -C; then
+      usar_wasm="true"
+    fi
+  fi
+
+  if [ "$usar_wasm" = "true" ]; then
+    printf "${YELLOW} >> ARM64/GLIBC incompatível com Rollup nativo.${WHITE}\n"
+    printf "${WHITE} >> Configurando @rollup/wasm-node para o build do frontend...${WHITE}\n"
+
+    FRONTEND_DIR="$frontend" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const frontend = process.env.FRONTEND_DIR;
+const packagePath = path.join(frontend, "package.json");
+const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+const wasmAlias = "npm:@rollup/wasm-node@^4.0.0";
+
+pkg.dependencies = pkg.dependencies || {};
+pkg.devDependencies = pkg.devDependencies || {};
+pkg.overrides = pkg.overrides || {};
+
+// Se Rollup estiver declarado diretamente, troca pela implementação WASM.
+if (Object.prototype.hasOwnProperty.call(pkg.dependencies, "rollup")) {
+  pkg.dependencies.rollup = wasmAlias;
+}
+if (Object.prototype.hasOwnProperty.call(pkg.devDependencies, "rollup")) {
+  pkg.devDependencies.rollup = wasmAlias;
+}
+
+// Se for dependência transitiva do Vite, força o alias pelo override.
+pkg.overrides.rollup = wasmAlias;
+
+fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + "\n");
+NODE
+
+    rm -rf "${frontend}/node_modules" "${frontend}/package-lock.json"
+  else
+    printf "${GREEN} >> Rollup nativo compatível; mantendo instalação padrão.${WHITE}\n"
+  fi
+}
+
 build_e_seed() {
   banner
   printf "${WHITE} >> Build do Engine (Go), Backend e Frontend...${WHITE}\n"
   export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:$PATH"
+
+  preparar_rollup_frontend
+  chown -R deploy:deploy "${VOZ_ROOT}/frontend"
 
   sudo -u deploy bash -lc "
     set -e
@@ -509,7 +570,7 @@ build_e_seed() {
     npm run build
     npm run seed || true
     cd '${VOZ_ROOT}/frontend'
-    npm install
+    npm install --include=optional
     npm run build
   " || trata_erro "build multiflow-voz"
 
