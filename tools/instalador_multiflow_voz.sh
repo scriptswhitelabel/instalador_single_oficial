@@ -715,8 +715,131 @@ resumo_final() {
   echo
 }
 
+# Preserva porta do engine no ecosystem após git reset (arquivo versionado)
+reaplicar_porta_engine_ecosystem() {
+  local env_file="${VOZ_ROOT}/backend/.env"
+  local port="${DEFAULT_ENGINE_PORT}"
+  if [ -f "$ARQUIVO_VARIAVEIS_VOZ" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS_VOZ" 2>/dev/null || true
+    port="${voz_engine_port:-$port}"
+  fi
+  if [ -f "$env_file" ]; then
+    local from_env
+    from_env=$(grep -m1 '^ENGINE_URL=' "$env_file" 2>/dev/null | sed -E 's|.*=http://[^:]+:([0-9]+).*|\1|' || true)
+    if [[ "$from_env" =~ ^[0-9]+$ ]]; then
+      port="$from_env"
+    fi
+  fi
+  voz_engine_port="$port"
+  if [ -f "${VOZ_ROOT}/ecosystem.config.js" ]; then
+    sed -i "s|-addr 127.0.0.1:[0-9]*|-addr 127.0.0.1:${voz_engine_port}|g" \
+      "${VOZ_ROOT}/ecosystem.config.js"
+  fi
+}
+
+atualizar_instalacao_voz() {
+  banner
+  printf "${WHITE} >> Atualizando MultiFlow VOZ (git + rebuild)...${WHITE}\n"
+  echo
+
+  if [ ! -d "${VOZ_ROOT}/.git" ]; then
+    printf "${RED} >> MultiFlow VOZ não encontrado em %s${WHITE}\n" "$VOZ_ROOT"
+    printf "${YELLOW} >> Use a opção Instalar MultiFlow-VOZ primeiro.${WHITE}\n"
+    exit 1
+  fi
+  if [ ! -f "${VOZ_ROOT}/backend/.env" ]; then
+    printf "${RED} >> Arquivo backend/.env não encontrado — instalação incompleta.${WHITE}\n"
+    exit 1
+  fi
+  if [ -z "${TOKEN_AUTH:-}" ]; then
+    printf "${YELLOW} >> Token GitHub:${WHITE}\n"
+    read -r TOKEN_AUTH
+    echo
+  fi
+  [ -n "${TOKEN_AUTH:-}" ] || trata_erro "token GitHub obrigatório"
+
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:$PATH"
+  if ! command -v go >/dev/null 2>&1; then
+    instalar_golang
+  fi
+  if ! command -v node >/dev/null 2>&1 || ! command -v pm2 >/dev/null 2>&1; then
+    instalar_node_pm2
+  fi
+
+  # Backup do .env (segurança — não versionado, mas por garantia)
+  cp -a "${VOZ_ROOT}/backend/.env" "/tmp/multiflow-voz.env.bak.$(date +%s)" 2>/dev/null || true
+
+  printf "${WHITE} >> Baixando atualizações do GitHub...${WHITE}\n"
+  local repo_url="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/${REPO_NAME}.git"
+  cd "$VOZ_ROOT"
+  git remote set-url origin "$repo_url" 2>/dev/null || true
+  git fetch origin || trata_erro "git fetch"
+  git checkout main 2>/dev/null || git checkout master 2>/dev/null || true
+  git reset --hard origin/main 2>/dev/null || git reset --hard origin/master || trata_erro "git reset"
+  git remote set-url origin "https://github.com/scriptswhitelabel/${REPO_NAME}.git" 2>/dev/null || true
+
+  # Restaura .env se o reset o removeu (não deveria, está no .gitignore)
+  if [ ! -f "${VOZ_ROOT}/backend/.env" ]; then
+    local bak
+    bak=$(ls -1t /tmp/multiflow-voz.env.bak.* 2>/dev/null | head -1 || true)
+    if [ -n "$bak" ]; then
+      cp -a "$bak" "${VOZ_ROOT}/backend/.env"
+      printf "${YELLOW} >> .env restaurado do backup temporário.${WHITE}\n"
+    else
+      trata_erro "backend/.env sumiu após o git pull"
+    fi
+  fi
+
+  mkdir -p "$VOZ_ROOT/logs" "$VOZ_ROOT/storage/recordings" \
+    "$VOZ_ROOT/backend/data" "$VOZ_ROOT/engine/data"
+  reaplicar_porta_engine_ecosystem
+  chown -R deploy:deploy "$VOZ_ROOT"
+
+  # Rebuild sem reescrever .env / nginx / SSL
+  build_e_seed
+
+  printf "${WHITE} >> Reiniciando PM2...${WHITE}\n"
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/bin:/usr/bin:$PATH"
+  sudo -u deploy bash -lc "
+    set -e
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/bin:\$PATH
+    if [ -f '${PATH_NODE_DEPLOY}' ]; then . '${PATH_NODE_DEPLOY}'; fi
+    cd '${VOZ_ROOT}'
+    pm2 delete multiflow-voz-engine 2>/dev/null || true
+    pm2 delete multiflow-voz-api 2>/dev/null || true
+    pm2 start ecosystem.config.js
+    pm2 save
+  " || trata_erro "pm2 restart"
+
+  chmod 755 /home/deploy 2>/dev/null || true
+  chmod -R o+rX "${VOZ_ROOT}/frontend/dist" 2>/dev/null || true
+
+  banner
+  printf "${GREEN}══════════════════════════════════════════════════════════${WHITE}\n"
+  printf "${GREEN}  MultiFlow VOZ atualizado com sucesso!${WHITE}\n"
+  printf "${GREEN}══════════════════════════════════════════════════════════${WHITE}\n"
+  echo
+  printf "  Pasta:  ${BLUE}%s${WHITE}\n" "$VOZ_ROOT"
+  printf "  PM2:    ${BLUE}multiflow-voz-api / multiflow-voz-engine${WHITE}\n"
+  if [ -f "$ARQUIVO_VARIAVEIS_VOZ" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS_VOZ" 2>/dev/null || true
+    [ -n "${voz_front_host:-}" ] && printf "  Front:  ${BLUE}https://%s${WHITE}\n" "$voz_front_host"
+    [ -n "${voz_api_host:-}" ] && printf "  API:    ${BLUE}https://%s${WHITE}\n" "$voz_api_host"
+  fi
+  echo
+  printf "${WHITE} >> .env, banco SQLite e gravações foram preservados.${WHITE}\n"
+  echo
+}
+
 # ─── Main ───
 main() {
+  if [ "${1:-}" = "--atualizar" ] || [ "${1:-}" = "atualizar" ]; then
+    atualizar_instalacao_voz
+    return 0
+  fi
+
   perguntar_modo_vps
 
   if [ "$MODO_VPS" = "multiflow" ]; then

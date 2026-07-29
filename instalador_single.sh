@@ -256,6 +256,77 @@ verificar_arquivos_existentes() {
   fi
 }
 
+# Função para atualizar MultiFlow VOZ já instalado (git pull + rebuild)
+atualizar_multiflow_voz() {
+  banner
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  printf "${YELLOW}⚠️  ATUALIZAR MULTIFLOW VOZ${WHITE}\n"
+  echo
+  printf "${WHITE}   Atualiza o código do repositório (git) e recompila API + Frontend + Engine.${WHITE}\n"
+  printf "${WHITE}   Mantém .env, SQLite, gravações e configurações já salvas.${WHITE}\n"
+  echo
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  echo
+  printf "${WHITE}   Deseja continuar? (S/N):${WHITE}\n"
+  echo
+  read -p "> " confirmacao_voz_upd
+  confirmacao_voz_upd=$(echo "${confirmacao_voz_upd}" | tr '[:lower:]' '[:upper:]')
+  echo
+
+  if [ "${confirmacao_voz_upd}" != "S" ]; then
+    printf "${GREEN} >> Operação cancelada. Voltando ao menu de ferramentas...${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  banner
+  printf "${WHITE} >> Digite o TOKEN de autorização do GitHub (acesso ao repositório multiflow-voz):${WHITE}\n"
+  echo
+  read -p "> " TOKEN_AUTH
+
+  if [ -z "$TOKEN_AUTH" ]; then
+    printf "${RED}❌ ERRO: Token de autorização não pode estar vazio.${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  printf "${BLUE} >> Token recebido. Validando acesso ao repositório...${WHITE}\n"
+  echo
+
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TEST_DIR="${INSTALADOR_DIR}/test_clone_voz_upd_$(date +%s)"
+  REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-voz.git"
+
+  if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${GREEN}✅ Token validado com sucesso!${WHITE}\n"
+    echo
+    sleep 1
+
+    VOZ_SCRIPT="${INSTALADOR_DIR}/tools/instalador_multiflow_voz.sh"
+    if [ -f "$VOZ_SCRIPT" ]; then
+      chmod 775 "$VOZ_SCRIPT"
+      printf "${GREEN} >> Executando atualização MultiFlow-VOZ...${WHITE}\n"
+      echo
+      TOKEN_AUTH="${TOKEN_AUTH}" bash "$VOZ_SCRIPT" --atualizar
+      echo
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+    else
+      printf "${RED} >> Erro: Arquivo ${VOZ_SCRIPT} não encontrado!${WHITE}\n"
+      sleep 3
+    fi
+  else
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED}❌ ERRO: Token inválido ou sem acesso ao repositório multiflow-voz.${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+    read -r
+  fi
+}
+
 # Função para instalar MultiFlow VOZ (softphone / ligações)
 instalar_multiflow_voz() {
   banner
@@ -2358,6 +2429,7 @@ menu_ferramentas() {
     printf "   [${BLUE}3${WHITE}] Instalar API WhatsMeow\n"
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     printf "   [${BLUE}24${WHITE}] Instalar MultiFlow-VOZ\n"
+    printf "   [${BLUE}25${WHITE}] Atualizar MultiFlow-VOZ\n"
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
@@ -2447,6 +2519,9 @@ menu_ferramentas() {
       ;;
     24)
       instalar_multiflow_voz
+      ;;
+    25)
+      atualizar_multiflow_voz
       ;;
     6)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
