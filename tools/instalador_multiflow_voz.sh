@@ -327,6 +327,8 @@ instalar_base_vps_limpo() {
     useradd -m -p "$(openssl passwd -1 "${senha_deploy}")" -s /bin/bash -G sudo deploy
     usermod -aG sudo deploy
   fi
+  # Nginx (www-data) precisa atravessar /home/deploy para servir o frontend estático
+  chmod 755 /home/deploy
 
   # Nginx default off
   rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
@@ -604,6 +606,10 @@ iniciar_pm2() {
 configurar_nginx_ssl() {
   banner
   printf "${WHITE} >> Configurando Nginx + SSL...${WHITE}\n"
+
+  # Garante que www-data consiga ler o dist (comum em VPS limpo: /home/deploy = 750)
+  chmod 755 /home/deploy 2>/dev/null || true
+  chmod -R o+rX "${VOZ_ROOT}/frontend/dist" 2>/dev/null || true
 
   local front_conf="multiflow-voz-front"
   local api_conf="multiflow-voz-api"
