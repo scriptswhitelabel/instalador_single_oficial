@@ -571,6 +571,7 @@ NODE
 }
 
 build_e_seed() {
+  local skip_seed="${1:-}"
   banner
   printf "${WHITE} >> Build do Engine (Go), Backend e Frontend...${WHITE}\n"
   export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:$PATH"
@@ -590,7 +591,11 @@ build_e_seed() {
     cd '${VOZ_ROOT}/backend'
     npm install
     npm run build
-    npm run seed || true
+    if [ '${skip_seed}' != 'skip-seed' ]; then
+      npm run seed || true
+    else
+      echo '>> Atualização: seed pulado (preserva dados / evita falha de schema).'
+    fi
     cd '${VOZ_ROOT}/frontend'
     npm install --include=optional
     npm run build
@@ -816,8 +821,8 @@ atualizar_instalacao_voz() {
   reaplicar_porta_engine_ecosystem
   chown -R deploy:deploy "$VOZ_ROOT"
 
-  # Rebuild sem reescrever .env / nginx / SSL
-  build_e_seed
+  # Rebuild sem reescrever .env / nginx / SSL (sem seed — não mexe no banco de produção)
+  build_e_seed skip-seed
 
   printf "${WHITE} >> Reiniciando PM2...${WHITE}\n"
   export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/bin:/usr/bin:$PATH"
