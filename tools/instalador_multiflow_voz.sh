@@ -66,6 +66,15 @@ gerar_segredo() {
   openssl rand -hex 24 2>/dev/null || head -c 48 /dev/urandom | xxd -p | tr -d '\n' | head -c 48
 }
 
+# Root em /home/deploy/* dispara "dubious ownership" no Git 2.35+
+garantir_git_safe_voz() {
+  git config --global --add safe.directory "${VOZ_ROOT}" 2>/dev/null || true
+}
+
+git_voz() {
+  git -c "safe.directory=${VOZ_ROOT}" -C "${VOZ_ROOT}" "$@"
+}
+
 # ─── Detecção de instâncias Multiflow (mesmo padrão do instalador) ───
 detectar_instancias_instaladas() {
   local instancias=()
@@ -239,14 +248,20 @@ solicitar_dados_voz() {
   else
     multiflow_api_sugerido=""
   fi
-  printf "${YELLOW} >> URL da API Multiflow para bridge Oficial (opcional"
+  printf "${YELLOW} >> URL da API Multiflow para bridge Oficial (opcional — HUB"
   if [ -n "$multiflow_api_sugerido" ]; then
     printf ", Enter = %s" "$multiflow_api_sugerido"
   fi
   printf "):${WHITE}\n"
+  printf "${WHITE}    Em modo HUB, cada Multiflow registra a própria URL ao colar o mfv_.${WHITE}\n"
+  printf "${WHITE}    Deixe vazio se for VOZ compartilhado por várias instalações.${WHITE}\n"
   read -r multiflow_api_url
   multiflow_api_url="${multiflow_api_url:-$multiflow_api_sugerido}"
   multiflow_api_url="${multiflow_api_url%/}"
+  # Aceita host sem scheme
+  if [ -n "$multiflow_api_url" ] && ! echo "$multiflow_api_url" | grep -qiE '^https?://'; then
+    multiflow_api_url="https://${multiflow_api_url}"
+  fi
   echo
 
   printf "${WHITE}── Confirmação ──${WHITE}\n"
@@ -305,6 +320,9 @@ instalar_base_vps_limpo() {
   ufw allow 22/tcp >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
+  # WebRTC (DataChannel PCM browser ↔ engine): precisa de UDP de entrada
+  ufw allow 10000:60000/udp >/dev/null 2>&1 || true
+  ufw --force enable >/dev/null 2>&1 || true
 
   # Redis com senha
   if [ -f /etc/redis/redis.conf ]; then
@@ -425,6 +443,8 @@ garantir_deps_vps_multiflow() {
   if ! command -v go >/dev/null 2>&1; then
     instalar_golang
   fi
+  # Softphone remoto precisa de UDP inbound (ICE host candidates do engine)
+  ufw allow 10000:60000/udp >/dev/null 2>&1 || true
   printf "${GREEN} >> Dependências OK (reaproveitando Postgres/Redis/Nginx do Multiflow).${WHITE}\n"
   printf "${WHITE} >> Obs: o MultiFlow VOZ usa SQLite próprio; Postgres/Redis do Multiflow ficam intactos.${WHITE}\n"
   sleep 2
@@ -434,22 +454,22 @@ clonar_repositorio() {
   banner
   printf "${WHITE} >> Clonando repositório multiflow-voz...${WHITE}\n"
   local repo_url="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/${REPO_NAME}.git"
+  garantir_git_safe_voz
 
   if [ -d "${VOZ_ROOT}/.git" ]; then
     printf "${YELLOW} >> Pasta já existe — atualizando (git fetch/reset)...${WHITE}\n"
-    cd "$VOZ_ROOT"
-    git remote set-url origin "$repo_url" 2>/dev/null || true
-    git fetch origin
-    git checkout main 2>/dev/null || git checkout master 2>/dev/null || true
-    git reset --hard origin/main 2>/dev/null || git reset --hard origin/master || true
+    git_voz remote set-url origin "$repo_url" 2>/dev/null || true
+    git_voz fetch origin || trata_erro "git fetch"
+    git_voz checkout main 2>/dev/null || git_voz checkout master 2>/dev/null || true
+    git_voz reset --hard origin/main 2>/dev/null || git_voz reset --hard origin/master || true
   else
     rm -rf "$VOZ_ROOT"
-    git clone "$repo_url" "$VOZ_ROOT" || trata_erro "git clone multiflow-voz"
+    git -c "safe.directory=*" clone "$repo_url" "$VOZ_ROOT" || trata_erro "git clone multiflow-voz"
+    garantir_git_safe_voz
   fi
 
   # Remove token da URL remota
-  cd "$VOZ_ROOT"
-  git remote set-url origin "https://github.com/scriptswhitelabel/${REPO_NAME}.git" 2>/dev/null || true
+  git_voz remote set-url origin "https://github.com/scriptswhitelabel/${REPO_NAME}.git" 2>/dev/null || true
   chown -R deploy:deploy "$VOZ_ROOT"
   mkdir -p "$VOZ_ROOT/logs" "$VOZ_ROOT/storage/recordings" \
     "$VOZ_ROOT/backend/data" "$VOZ_ROOT/engine/data"
@@ -772,12 +792,12 @@ atualizar_instalacao_voz() {
 
   printf "${WHITE} >> Baixando atualizações do GitHub...${WHITE}\n"
   local repo_url="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/${REPO_NAME}.git"
-  cd "$VOZ_ROOT"
-  git remote set-url origin "$repo_url" 2>/dev/null || true
-  git fetch origin || trata_erro "git fetch"
-  git checkout main 2>/dev/null || git checkout master 2>/dev/null || true
-  git reset --hard origin/main 2>/dev/null || git reset --hard origin/master || trata_erro "git reset"
-  git remote set-url origin "https://github.com/scriptswhitelabel/${REPO_NAME}.git" 2>/dev/null || true
+  garantir_git_safe_voz
+  git_voz remote set-url origin "$repo_url" 2>/dev/null || true
+  git_voz fetch origin || trata_erro "git fetch"
+  git_voz checkout main 2>/dev/null || git_voz checkout master 2>/dev/null || true
+  git_voz reset --hard origin/main 2>/dev/null || git_voz reset --hard origin/master || trata_erro "git reset"
+  git_voz remote set-url origin "https://github.com/scriptswhitelabel/${REPO_NAME}.git" 2>/dev/null || true
 
   # Restaura .env se o reset o removeu (não deveria, está no .gitignore)
   if [ ! -f "${VOZ_ROOT}/backend/.env" ]; then
@@ -814,6 +834,7 @@ atualizar_instalacao_voz() {
 
   chmod 755 /home/deploy 2>/dev/null || true
   chmod -R o+rX "${VOZ_ROOT}/frontend/dist" 2>/dev/null || true
+  ufw allow 10000:60000/udp >/dev/null 2>&1 || true
 
   banner
   printf "${GREEN}══════════════════════════════════════════════════════════${WHITE}\n"
