@@ -628,6 +628,145 @@ iniciar_pm2() {
   fi
 }
 
+otimizar_sqlite_voz() {
+  local db="${VOZ_ROOT}/backend/data/multiflow-voz.sqlite"
+  local pm2_bin="/usr/local/n/versions/node/20.19.4/bin/pm2"
+  local mode=""
+
+  [ -f "$db" ] || {
+    printf "${YELLOW} >> Banco VOZ ainda não existe; WAL será ativado no primeiro boot.${WHITE}\n"
+    return 0
+  }
+
+  printf "${WHITE} >> Otimizando SQLite do VOZ (WAL + synchronous=NORMAL)...${WHITE}\n"
+  command -v sqlite3 >/dev/null 2>&1 || apt-get install -y sqlite3 >/dev/null 2>&1 || true
+  command -v sqlite3 >/dev/null 2>&1 || trata_erro "sqlite3 não encontrado para ativar WAL"
+
+  # journal_mode só pode mudar sem outra conexão aberta.
+  sudo -u deploy env HOME=/home/deploy PM2_HOME=/home/deploy/.pm2 \
+    "$pm2_bin" stop multiflow-voz-api >/dev/null 2>&1 || true
+
+  sqlite3 "$db" "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=1000; PRAGMA busy_timeout=10000;" \
+    || trata_erro "ativar WAL no SQLite do VOZ"
+  mode=$(sqlite3 "$db" "PRAGMA journal_mode;" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+  [ "$mode" = "wal" ] || trata_erro "journal_mode permaneceu ${mode:-desconhecido}"
+  printf "${GREEN} >> SQLite VOZ em WAL (${mode}).${WHITE}\n"
+  chown deploy:deploy "$db" "${db}-wal" "${db}-shm" 2>/dev/null || true
+}
+
+carregar_hosts_voz() {
+  if [ -f "$ARQUIVO_VARIAVEIS_VOZ" ]; then
+    # shellcheck source=/dev/null
+    source "$ARQUIVO_VARIAVEIS_VOZ" 2>/dev/null || true
+  fi
+  local env_file="${VOZ_ROOT}/backend/.env"
+  if [ -f "$env_file" ]; then
+    local from_port from_front from_api
+    from_port=$(grep -m1 '^PORT=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)
+    from_front=$(grep -m1 '^PUBLIC_APP_URL=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    from_api=$(grep -m1 '^PUBLIC_API_URL=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    [ -z "${voz_api_port:-}" ] && [[ "$from_port" =~ ^[0-9]+$ ]] && voz_api_port="$from_port"
+    [ -z "${voz_front_host:-}" ] && [ -n "$from_front" ] && voz_front_host=$(normalizar_host "$from_front")
+    [ -z "${voz_api_host:-}" ] && [ -n "$from_api" ] && voz_api_host=$(normalizar_host "$from_api")
+  fi
+  voz_api_port="${voz_api_port:-$DEFAULT_API_PORT}"
+}
+
+escrever_zone_poll_nginx_voz() {
+  rm -f /etc/nginx/conf.d/voz-softphone-poll-limit.conf
+  cat >/etc/nginx/conf.d/multiflow-voz-poll-limit.conf <<'EOF'
+# Evita que Softphones desatualizados saturem a API com polls.
+limit_req_zone $binary_remote_addr zone=voz_softphone_poll:10m rate=40r/s;
+EOF
+}
+
+garantir_rate_limit_nginx_voz() {
+  carregar_hosts_voz
+  local api_port="${voz_api_port:-$DEFAULT_API_PORT}"
+  local front_host="${voz_front_host:-}"
+  local api_host="${voz_api_host:-}"
+
+  [ -n "$front_host" ] && [ -n "$api_host" ] || {
+    printf "${YELLOW} >> Hosts do VOZ não encontrados; rate-limit do Nginx não foi alterado.${WHITE}\n"
+    return 0
+  }
+
+  printf "${WHITE} >> Aplicando proteção de poll do Softphone no Nginx...${WHITE}\n"
+  command -v python3 >/dev/null 2>&1 || apt-get install -y python3 >/dev/null 2>&1 || true
+  command -v python3 >/dev/null 2>&1 || trata_erro "python3 não encontrado para ajustar o Nginx"
+  escrever_zone_poll_nginx_voz
+
+  FRONT_HOST="$front_host" API_HOST="$api_host" API_PORT="$api_port" python3 <<'PY'
+import glob
+import os
+import re
+from pathlib import Path
+
+front_host = os.environ["FRONT_HOST"]
+api_host = os.environ["API_HOST"]
+api_port = os.environ["API_PORT"]
+
+def server_blocks(text):
+    for match in re.finditer(r"(?m)^[ \t]*server[ \t]*\{", text):
+        depth = 0
+        for pos in range(match.start(), len(text)):
+            if text[pos] == "{":
+                depth += 1
+            elif text[pos] == "}":
+                depth -= 1
+                if depth == 0:
+                    yield match.start(), pos + 1
+                    break
+
+def poll_locations():
+    locations = []
+    for endpoint in ("incoming", "pending-transfer"):
+        locations.append(f"""
+  location = /api/v1/calls/{endpoint} {{
+    limit_req zone=voz_softphone_poll burst=80 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:{api_port};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }}
+""")
+    return "".join(locations) + "\n"
+
+seen = set()
+for raw_path in glob.glob("/etc/nginx/sites-available/*"):
+    path = Path(raw_path).resolve()
+    if path in seen or not path.is_file():
+        continue
+    seen.add(path)
+    text = path.read_text()
+    replacements = []
+    for start, end in server_blocks(text):
+        block = text[start:end]
+        server_names = re.findall(r"(?m)^[ \t]*server_name[ \t]+([^;]+);", block)
+        names = set(" ".join(server_names).split())
+        if not ({front_host, api_host} & names):
+            continue
+        if "location = /api/v1/calls/incoming" in block:
+            continue
+        location = re.search(r"(?m)^[ \t]*location[ \t]+/(?:api/)?[ \t]*\{", block)
+        if not location:
+            raise RuntimeError(f"location genérica não encontrada em {path}")
+        insert_at = start + location.start()
+        replacements.append((insert_at, poll_locations()))
+    for insert_at, value in reversed(replacements):
+        text = text[:insert_at] + value + text[insert_at:]
+    if replacements:
+        path.write_text(text)
+        print(f"Rate-limit VOZ aplicado em {path}")
+PY
+
+  nginx -t || trata_erro "nginx -t após rate-limit do VOZ"
+  systemctl reload nginx || service nginx reload || trata_erro "reload nginx"
+}
+
 configurar_nginx_ssl() {
   banner
   printf "${WHITE} >> Configurando Nginx + SSL...${WHITE}\n"
@@ -654,6 +793,28 @@ server {
   index index.html;
 
   client_max_body_size 100M;
+
+  location = /api/v1/calls/incoming {
+    limit_req zone=voz_softphone_poll burst=80 nodelay;
+    limit_req_status 429;
+    proxy_pass http://${up_api}_via_front;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
+
+  location = /api/v1/calls/pending-transfer {
+    limit_req zone=voz_softphone_poll burst=80 nodelay;
+    limit_req_status 429;
+    proxy_pass http://${up_api}_via_front;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
 
   location /api/ {
     proxy_pass http://${up_api}_via_front;
@@ -689,6 +850,28 @@ server {
 
   client_max_body_size 100M;
 
+  location = /api/v1/calls/incoming {
+    limit_req zone=voz_softphone_poll burst=80 nodelay;
+    limit_req_status 429;
+    proxy_pass http://${up_api};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
+
+  location = /api/v1/calls/pending-transfer {
+    limit_req zone=voz_softphone_poll burst=80 nodelay;
+    limit_req_status 429;
+    proxy_pass http://${up_api};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
+
   location / {
     proxy_pass http://${up_api};
     proxy_http_version 1.1;
@@ -702,6 +885,8 @@ server {
   }
 }
 EOF
+
+  escrever_zone_poll_nginx_voz
 
   ln -sfn "/etc/nginx/sites-available/${front_conf}" "/etc/nginx/sites-enabled/${front_conf}"
   ln -sfn "/etc/nginx/sites-available/${api_conf}" "/etc/nginx/sites-enabled/${api_conf}"
@@ -824,6 +1009,9 @@ atualizar_instalacao_voz() {
   # Rebuild sem reescrever .env / nginx / SSL (sem seed — não mexe no banco de produção)
   build_e_seed skip-seed
 
+  # Para a API brevemente: WAL só pode ser ativado sem conexão SQLite aberta.
+  otimizar_sqlite_voz
+
   printf "${WHITE} >> Reiniciando PM2...${WHITE}\n"
   export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/bin:/usr/bin:$PATH"
   sudo -u deploy bash -lc "
@@ -840,6 +1028,7 @@ atualizar_instalacao_voz() {
   chmod 755 /home/deploy 2>/dev/null || true
   chmod -R o+rX "${VOZ_ROOT}/frontend/dist" 2>/dev/null || true
   ufw allow 10000:60000/udp >/dev/null 2>&1 || true
+  garantir_rate_limit_nginx_voz
 
   banner
   printf "${GREEN}══════════════════════════════════════════════════════════${WHITE}\n"
@@ -886,6 +1075,7 @@ main() {
   clonar_repositorio
   escrever_env_backend
   build_e_seed
+  otimizar_sqlite_voz
   iniciar_pm2
   configurar_nginx_ssl
   resumo_final
