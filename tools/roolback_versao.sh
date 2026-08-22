@@ -487,6 +487,11 @@ aplicar_token_baileys_package_json() {
   sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
   chown deploy:deploy "$pkg" 2>/dev/null || true
   printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  _mf_baileys_tools="${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh"
+  # shellcheck source=tools/baileys_hineken_package_json.sh
+  [ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
+  mf_baileys_fixar_branch_main_package_json "$pkg"
+  printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
 }
 
