@@ -723,14 +723,25 @@ verificar_e_adicionar_whatsapp_web_version() {
     return 0
   fi
 
-  if ! grep -q '^WHATSAPP_WEB_VERSION=' "$ENV_FILE"; then
+  # Versão padrão do instalador (atualize aqui quando a Meta invalidar a anterior).
+  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1042896555"
+  local _mf_wa_ver_atual=""
+  if grep -q '^WHATSAPP_WEB_VERSION=' "$ENV_FILE"; then
+    _mf_wa_ver_atual=$(grep '^WHATSAPP_WEB_VERSION=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  if [ -z "$_mf_wa_ver_atual" ]; then
     printf "${WHITE} >> Adicionando WHATSAPP_WEB_VERSION ao .env do backend...\n"
     echo "" >> "$ENV_FILE"
     echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$ENV_FILE"
-    echo "WHATSAPP_WEB_VERSION=2.3000.1038235667" >> "$ENV_FILE"
-    printf "${GREEN} >> WHATSAPP_WEB_VERSION adicionada ao .env do backend.${WHITE}\n"
+    echo "WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO}" >> "$ENV_FILE"
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO} adicionada ao .env do backend.${WHITE}\n"
+  elif [ "$_mf_wa_ver_atual" != "$MF_WHATSAPP_WEB_VERSION_PADRAO" ]; then
+    printf "${WHITE} >> Atualizando WHATSAPP_WEB_VERSION no .env: ${_mf_wa_ver_atual} → ${MF_WHATSAPP_WEB_VERSION_PADRAO}\n"
+    sed -i "s|^WHATSAPP_WEB_VERSION=.*|WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO}|" "$ENV_FILE"
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION atualizada para ${MF_WHATSAPP_WEB_VERSION_PADRAO}.${WHITE}\n"
   else
-    printf "${GREEN} >> WHATSAPP_WEB_VERSION já definida no .env do backend (não alterado).${WHITE}\n"
+    printf "${GREEN} >> WHATSAPP_WEB_VERSION já está em ${MF_WHATSAPP_WEB_VERSION_PADRAO}.${WHITE}\n"
   fi
 
   local _mf_lid_baileys_header=0

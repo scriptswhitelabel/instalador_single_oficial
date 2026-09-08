@@ -264,17 +264,27 @@ pm2 save
 RESTARTPM2
 }
 
-# Garante WHATSAPP_WEB_VERSION no .env do backend se a linha ainda não existir (não sobrescreve valor manual).
+# Garante WHATSAPP_WEB_VERSION no .env do backend no padrão do instalador (cria ou atualiza se diferente).
 garantir_whatsapp_web_version_env_backend() {
   local env_file="$1"
+  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1042896555"
+  local _mf_wa_ver_atual=""
   [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
+
   if grep -q '^WHATSAPP_WEB_VERSION=' "$env_file" 2>/dev/null; then
-    return 0
+    _mf_wa_ver_atual=$(grep '^WHATSAPP_WEB_VERSION=' "$env_file" | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
-  printf "${WHITE} >> Incluindo WHATSAPP_WEB_VERSION no .env do backend (padrão do instalador)...\n${WHITE}"
-  echo "" >> "$env_file"
-  echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$env_file"
-  echo "WHATSAPP_WEB_VERSION=2.3000.1038235667" >> "$env_file"
+
+  if [ -z "$_mf_wa_ver_atual" ]; then
+    printf "${WHITE} >> Incluindo WHATSAPP_WEB_VERSION no .env do backend (padrão do instalador)...\n${WHITE}"
+    echo "" >> "$env_file"
+    echo "# Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente." >> "$env_file"
+    echo "WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO}" >> "$env_file"
+  elif [ "$_mf_wa_ver_atual" != "$MF_WHATSAPP_WEB_VERSION_PADRAO" ]; then
+    printf "${WHITE} >> Atualizando WHATSAPP_WEB_VERSION no .env: ${_mf_wa_ver_atual} → ${MF_WHATSAPP_WEB_VERSION_PADRAO}\n${WHITE}"
+    sed -i "s|^WHATSAPP_WEB_VERSION=.*|WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO}|" "$env_file"
+  fi
+
   chown deploy:deploy "$env_file" 2>/dev/null || true
   chmod 600 "$env_file" 2>/dev/null || true
 }

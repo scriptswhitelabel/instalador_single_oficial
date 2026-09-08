@@ -1572,7 +1572,7 @@ TRANSCRIBE_URL=http://localhost:4002
 MAX_BUFFER_SIZE_MB=200
 
 # Opcional: fixa a versão do WhatsApp Web usada pelo Baileys. Se vazio, busca automaticamente.
-WHATSAPP_WEB_VERSION=2.3000.1038235667
+WHATSAPP_WEB_VERSION=2.3000.1042896555
 
 # DISABLE_PUSH_NOTIFICATIONS=0
 
