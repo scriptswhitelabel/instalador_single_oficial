@@ -302,6 +302,12 @@ garantir_clone_hub() {
 
   [ -f "${HUB_ROOT}/install.sh" ] || trata_erro "install.sh não encontrado no clone"
   chmod 775 "${HUB_ROOT}/install.sh"
+
+  # Clone feito como root: pasta precisa ser do deploy (mesmo padrao Multiflow/VOZ).
+  if id deploy >/dev/null 2>&1; then
+    chown -R deploy:deploy "$HUB_ROOT" || trata_erro "chown deploy em $HUB_ROOT"
+    printf "${GREEN} >> Dono de %s: deploy:deploy${WHITE}\n" "$HUB_ROOT"
+  fi
 }
 
 limpar_token_do_remote() {
