@@ -398,6 +398,149 @@ instalar_multiflow_voz() {
   fi
 }
 
+# Função para atualizar HUB MultiFlow já instalado
+atualizar_multiflow_hub() {
+  banner
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  printf "${YELLOW}⚠️  ATUALIZAR HUB MULTIFLOW${WHITE}\n"
+  echo
+  printf "${WHITE}   Atualiza o código do repositório (git) e recompila backend + painel.${WHITE}\n"
+  printf "${WHITE}   Mantém .env, banco, Nginx e configurações já salvas (com rollback automático).${WHITE}\n"
+  echo
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  echo
+  printf "${WHITE}   Deseja continuar? (S/N):${WHITE}\n"
+  echo
+  read -p "> " confirmacao_hub_upd
+  confirmacao_hub_upd=$(echo "${confirmacao_hub_upd}" | tr '[:lower:]' '[:upper:]')
+  echo
+
+  if [ "${confirmacao_hub_upd}" != "S" ]; then
+    printf "${GREEN} >> Operação cancelada. Voltando ao menu de ferramentas...${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  banner
+  printf "${WHITE} >> Digite o TOKEN de autorização do GitHub (acesso ao repositório multiflow-hub):${WHITE}\n"
+  echo
+  read -p "> " TOKEN_AUTH
+
+  if [ -z "$TOKEN_AUTH" ]; then
+    printf "${RED}❌ ERRO: Token de autorização não pode estar vazio.${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  printf "${BLUE} >> Token recebido. Validando acesso ao repositório...${WHITE}\n"
+  echo
+
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TEST_DIR="${INSTALADOR_DIR}/test_clone_hub_upd_$(date +%s)"
+  REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-hub.git"
+
+  if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${GREEN}✅ Token validado com sucesso!${WHITE}\n"
+    echo
+    sleep 1
+
+    HUB_SCRIPT="${INSTALADOR_DIR}/tools/instalador_multiflow_hub.sh"
+    if [ -f "$HUB_SCRIPT" ]; then
+      chmod 775 "$HUB_SCRIPT"
+      printf "${GREEN} >> Executando atualização HUB MultiFlow...${WHITE}\n"
+      echo
+      TOKEN_AUTH="${TOKEN_AUTH}" bash "$HUB_SCRIPT" --atualizar
+      echo
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+    else
+      printf "${RED} >> Erro: Arquivo ${HUB_SCRIPT} não encontrado!${WHITE}\n"
+      sleep 3
+    fi
+  else
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED}❌ ERRO: Token inválido ou sem acesso ao repositório multiflow-hub.${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+    read -r
+  fi
+}
+
+# Função para instalar HUB MultiFlow (Central ou Local)
+instalar_multiflow_hub() {
+  banner
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  printf "${YELLOW}⚠️  HUB MULTIFLOW${WHITE}\n"
+  echo
+  printf "${WHITE}   Instala o HUB Meta Connect / WhatsApp Oficial (Central ou Local).${WHITE}\n"
+  printf "${WHITE}   Pode ser no mesmo VPS do Multiflow (reaproveita Nginx/Postgres/Redis)${WHITE}\n"
+  printf "${WHITE}   ou em VPS limpo (o instalador do HUB sobe a base completa).${WHITE}\n"
+  echo
+  printf "${YELLOW}══════════════════════════════════════════════════════════════════${WHITE}\n"
+  echo
+  printf "${WHITE}   Deseja continuar? (S/N):${WHITE}\n"
+  echo
+  read -p "> " confirmacao_hub
+  confirmacao_hub=$(echo "${confirmacao_hub}" | tr '[:lower:]' '[:upper:]')
+  echo
+
+  if [ "${confirmacao_hub}" != "S" ]; then
+    printf "${GREEN} >> Operação cancelada. Voltando ao menu de ferramentas...${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  banner
+  printf "${WHITE} >> Digite o TOKEN de autorização do GitHub (acesso ao repositório multiflow-hub):${WHITE}\n"
+  echo
+  read -p "> " TOKEN_AUTH
+
+  if [ -z "$TOKEN_AUTH" ]; then
+    printf "${RED}❌ ERRO: Token de autorização não pode estar vazio.${WHITE}\n"
+    sleep 2
+    return
+  fi
+
+  printf "${BLUE} >> Token recebido. Validando acesso ao repositório...${WHITE}\n"
+  echo
+
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TEST_DIR="${INSTALADOR_DIR}/test_clone_hub_$(date +%s)"
+  REPO_URL="https://${TOKEN_AUTH}@github.com/scriptswhitelabel/multiflow-hub.git"
+
+  if git clone --depth 1 "${REPO_URL}" "${TEST_DIR}" >/dev/null 2>&1; then
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${GREEN}✅ Token validado com sucesso!${WHITE}\n"
+    echo
+    sleep 1
+
+    HUB_SCRIPT="${INSTALADOR_DIR}/tools/instalador_multiflow_hub.sh"
+    if [ -f "$HUB_SCRIPT" ]; then
+      chmod 775 "$HUB_SCRIPT"
+      printf "${GREEN} >> Executando Instalador HUB MultiFlow...${WHITE}\n"
+      echo
+      TOKEN_AUTH="${TOKEN_AUTH}" bash "$HUB_SCRIPT"
+      echo
+      printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+      read -r
+    else
+      printf "${RED} >> Erro: Arquivo ${HUB_SCRIPT} não encontrado!${WHITE}\n"
+      sleep 3
+    fi
+  else
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    printf "${RED}❌ ERRO: Token inválido ou sem acesso ao repositório multiflow-hub.${WHITE}\n"
+    printf "${RED}══════════════════════════════════════════════════════════════════${WHITE}\n"
+    echo
+    printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+    read -r
+  fi
+}
+
 # Função para instalar API WhatsMeow
 instalar_whatsmeow() {
   banner
@@ -2430,6 +2573,8 @@ menu_ferramentas() {
     printf "   [${BLUE}5${WHITE}] Instalar Nova Instância\n"
     printf "   [${BLUE}24${WHITE}] Instalar MultiFlow-VOZ\n"
     printf "   [${BLUE}25${WHITE}] Atualizar MultiFlow-VOZ\n"
+    printf "   [${BLUE}26${WHITE}] Instalar HUB MultiFlow\n"
+    printf "   [${BLUE}27${WHITE}] Atualizar HUB MultiFlow\n"
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
@@ -2522,6 +2667,12 @@ menu_ferramentas() {
       ;;
     25)
       atualizar_multiflow_voz
+      ;;
+    26)
+      instalar_multiflow_hub
+      ;;
+    27)
+      atualizar_multiflow_hub
       ;;
     6)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
