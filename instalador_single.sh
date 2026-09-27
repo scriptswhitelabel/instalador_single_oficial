@@ -7931,6 +7931,59 @@ migrar_multiflow_pro() {
 }
 
 # Opção 30: aponta a instância para o repositório ultraWhats (token + remote git + repo_url/github_token)
+# Após set-url: fetch --prune e remove trackings [branch "..."] cujo upstream não existe mais no origin.
+mf_git_limpar_trackings_orfaos() {
+  local app_root="${1:-}"
+  local removidos=0
+  local cur="" br merge_ref short_ref linha
+  [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && return 1
+
+  export GIT_TERMINAL_PROMPT=0
+  printf "${WHITE} >> Limpando trackings de branches órfãs (fetch --prune)...${WHITE}\n"
+  if ! git -c "safe.directory=${app_root}" -C "${app_root}" fetch origin --prune; then
+    printf "${YELLOW} >> Aviso: git fetch --prune falhou; trackings órfãos podem permanecer.${WHITE}\n"
+    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
+    return 1
+  fi
+
+  while IFS= read -r linha; do
+    [ -z "$linha" ] && continue
+    # Ex.: branch.MULTI100-OFICIAL-u21.merge refs/heads/MULTI100-OFICIAL-u21
+    br="${linha%%.merge *}"
+    br="${br#branch.}"
+    merge_ref="${linha#* }"
+    short_ref="${merge_ref#refs/heads/}"
+    [ -z "$br" ] || [ -z "$short_ref" ] && continue
+    if ! git -c "safe.directory=${app_root}" -C "${app_root}" show-ref --verify --quiet "refs/remotes/origin/${short_ref}" 2>/dev/null; then
+      if git -c "safe.directory=${app_root}" -C "${app_root}" config --remove-section "branch.${br}" 2>/dev/null; then
+        printf "${GREEN} >> Tracking removido: branch.${br} (sem origin/${short_ref})${WHITE}\n"
+        removidos=$((removidos + 1))
+      fi
+    fi
+  done < <(git -c "safe.directory=${app_root}" -C "${app_root}" config --get-regexp '^branch\..*\.merge$' 2>/dev/null || true)
+
+  cur=$(git -c "safe.directory=${app_root}" -C "${app_root}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -n "$cur" ] && [ "$cur" != "HEAD" ] && [ "$cur" != "main" ] && [ "$cur" != "master" ]; then
+    if ! git -c "safe.directory=${app_root}" -C "${app_root}" show-ref --verify --quiet "refs/remotes/origin/${cur}" 2>/dev/null; then
+      if git -c "safe.directory=${app_root}" -C "${app_root}" show-ref --verify --quiet refs/remotes/origin/main 2>/dev/null; then
+        printf "${YELLOW} >> Branch atual (${cur}) não existe no novo origin; indo para main...${WHITE}\n"
+        git -c "safe.directory=${app_root}" -C "${app_root}" checkout -B main origin/main >/dev/null 2>&1 || true
+      elif git -c "safe.directory=${app_root}" -C "${app_root}" show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
+        printf "${YELLOW} >> Branch atual (${cur}) não existe no novo origin; indo para master...${WHITE}\n"
+        git -c "safe.directory=${app_root}" -C "${app_root}" checkout -B master origin/master >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
+  unset GIT_TERMINAL_PROMPT 2>/dev/null || true
+  if [ "$removidos" -eq 0 ]; then
+    printf "${GREEN} >> Nenhum tracking órfão encontrado.${WHITE}\n"
+  else
+    printf "${GREEN} >> ${removidos} tracking(s) órfão(s) removido(s).${WHITE}\n"
+  fi
+  return 0
+}
+
 atualizar_ultrawhats() {
   local REPO_ULTRA_CANONICO="https://github.com/scriptswhitelabel/ultrawhats.git"
   local REPO_ULTRA_HOST="github.com/scriptswhitelabel/ultrawhats.git"
@@ -8026,6 +8079,8 @@ atualizar_ultrawhats() {
     sleep 2
     return 1
   fi
+
+  mf_git_limpar_trackings_orfaos "${APP_ROOT}" || true
 
   ARQUIVO_VARIAVEIS_ALVO="${ARQUIVO_VARIAVEIS_USADO:-}"
   if [ -z "$ARQUIVO_VARIAVEIS_ALVO" ] || [ ! -f "$ARQUIVO_VARIAVEIS_ALVO" ]; then
