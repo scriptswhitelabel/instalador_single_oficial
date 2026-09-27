@@ -2578,7 +2578,7 @@ menu_ferramentas() {
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
-    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats\n"
+    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats (token GitHub)\n"
     echo
     printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
@@ -7984,25 +7984,146 @@ mf_git_limpar_trackings_orfaos() {
   return 0
 }
 
+# Aplica token no remote origin da instância (e subpastas com .git próprio, se existirem).
+# Na raiz: força URL canônica ultraWhats + token. Nas subpastas: só reaplica o token no HTTPS atual.
+# Reusa mf_git_aplicar_token_remote quando disponível (mesma lógica do update FAST).
+mf_opcao30_aplicar_token_nos_gits() {
+  local app_root="${1:-}"
+  local token="${2:-}"
+  local repo_canonico="${3:-}"
+  local token_encoded new_url git_dir remotes_ok=0 remotes_fail=0
+
+  if [ -z "$app_root" ] || [ -z "$token" ] || [ -z "$repo_canonico" ]; then
+    return 1
+  fi
+
+  # shellcheck source=/dev/null
+  if [ -f "${INSTALADOR_DIR:-}/tools/git_sincronizar_repositorio.sh" ]; then
+    . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+  elif [ -f "/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh" ]; then
+    . "/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh"
+  fi
+
+  token_encoded=$(codifica_clone_base "$token")
+  new_url="https://${token_encoded}@${repo_canonico#https://}"
+  [[ "$new_url" != *.git ]] && new_url="${new_url}.git"
+
+  for git_dir in \
+    "${app_root}" \
+    "${app_root}/frontend" \
+    "${app_root}/backend" \
+    "${app_root}/api_oficial" \
+    "${app_root}/api_transcricao"; do
+    [ -d "${git_dir}/.git" ] || continue
+
+    if [ -f "${git_dir}/.git/config" ]; then
+      cp "${git_dir}/.git/config" "${git_dir}/.git/config.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+    fi
+
+    if ! git -c "safe.directory=${git_dir}" -C "${git_dir}" remote get-url origin >/dev/null 2>&1; then
+      printf "${YELLOW} >> Aviso: sem remote origin em ${git_dir}${WHITE}\n"
+      continue
+    fi
+
+    if [ "$git_dir" = "$app_root" ]; then
+      # Raiz da instância: troca para ultraWhats + token
+      if git -c "safe.directory=${git_dir}" -C "${git_dir}" remote set-url origin "${new_url}"; then
+        printf "${GREEN} >> Remote origin atualizado para ultraWhats: ${BLUE}${git_dir}${WHITE}\n"
+        remotes_ok=$((remotes_ok + 1))
+      else
+        printf "${RED} >> ERRO: git remote set-url falhou em ${git_dir}${WHITE}\n"
+        remotes_fail=$((remotes_fail + 1))
+        continue
+      fi
+    fi
+
+    # Mesma função do update FAST (encoding idêntico ao fetch)
+    if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
+      if mf_git_aplicar_token_remote "${git_dir}" "${token}"; then
+        printf "${GREEN} >> Token aplicado no remote origin: ${BLUE}${git_dir}${WHITE}\n"
+        [ "$git_dir" != "$app_root" ] && remotes_ok=$((remotes_ok + 1))
+      else
+        printf "${YELLOW} >> Aviso: não foi possível aplicar token em ${git_dir}${WHITE}\n"
+        [ "$git_dir" = "$app_root" ] && remotes_fail=$((remotes_fail + 1))
+      fi
+    elif [ "$git_dir" != "$app_root" ]; then
+      printf "${YELLOW} >> Aviso: mf_git_aplicar_token_remote indisponível; subpasta ${git_dir} não atualizada.${WHITE}\n"
+    fi
+  done
+
+  [ "$remotes_ok" -gt 0 ] && [ "$remotes_fail" -eq 0 ]
+}
+
+# Valida token contra o repositório ultraWhats (ls-remote; fallback clone raso).
+mf_opcao30_validar_token() {
+  local token="${1:-}"
+  local repo_host="${2:-github.com/scriptswhitelabel/ultrawhats.git}"
+  local token_encoded url err_file test_dir
+
+  [ -z "$token" ] && return 1
+  token_encoded=$(codifica_clone_base "$token")
+  url="https://${token_encoded}@${repo_host}"
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
+
+  err_file=$(mktemp)
+  if git ls-remote --exit-code "${url}" HEAD >/dev/null 2>"$err_file"; then
+    rm -f "$err_file"
+    unset GIT_TERMINAL_PROMPT GIT_ASKPASS 2>/dev/null || true
+    return 0
+  fi
+
+  test_dir="${INSTALADOR_DIR:-/tmp}/test_clone_ultrawhats_$(date +%s)"
+  if git clone --depth 1 "${url}" "${test_dir}" >/dev/null 2>>"$err_file"; then
+    rm -rf "${test_dir}" >/dev/null 2>&1
+    rm -f "$err_file"
+    unset GIT_TERMINAL_PROMPT GIT_ASKPASS 2>/dev/null || true
+    return 0
+  fi
+  rm -rf "${test_dir}" >/dev/null 2>&1
+  ERRO_GIT_VALIDACAO=$(head -3 "$err_file" 2>/dev/null | tr '\n' ' ')
+  rm -f "$err_file"
+  unset GIT_TERMINAL_PROMPT GIT_ASKPASS 2>/dev/null || true
+  return 1
+}
+
+# Confirma que o remote local da pasta aceita o token (mesmo caminho do update).
+mf_opcao30_validar_remote_local() {
+  local app_root="${1:-}"
+  [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && return 1
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
+  if git -c "safe.directory=${app_root}" -C "${app_root}" ls-remote --exit-code origin HEAD >/dev/null 2>&1; then
+    unset GIT_TERMINAL_PROMPT GIT_ASKPASS 2>/dev/null || true
+    return 0
+  fi
+  unset GIT_TERMINAL_PROMPT GIT_ASKPASS 2>/dev/null || true
+  return 1
+}
+
 atualizar_ultrawhats() {
   local REPO_ULTRA_CANONICO="https://github.com/scriptswhitelabel/ultrawhats.git"
   local REPO_ULTRA_HOST="github.com/scriptswhitelabel/ultrawhats.git"
   local TOKEN_AUTH=""
   local APP_ROOT=""
-  local NEW_REMOTE_URL=""
   local ARQUIVO_VARIAVEIS_ALVO=""
-  local TEST_DIR=""
-  local token_encoded=""
+  local token_sed=""
+
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
   banner
-  printf "${WHITE} >> Atualizar ultraWhats${WHITE}\n"
-  printf "${WHITE} >> Troca o remote Git e a variável de instalação para:${WHITE}\n"
+  printf "${WHITE} >> Atualizar ultraWhats (token GitHub)${WHITE}\n"
+  printf "${WHITE} >> Esta opção pede o PAT e já atualiza:${WHITE}\n"
+  printf "${BLUE}   1)${WHITE} github_token / repo_url no arquivo de variáveis da instância${WHITE}\n"
+  printf "${BLUE}   2)${WHITE} remote origin na pasta git (token embutido no HTTPS, como no update FAST)${WHITE}\n"
+  echo
+  printf "${WHITE} >> Repositório alvo:${WHITE}\n"
   printf "${BLUE}   ${REPO_ULTRA_CANONICO}${WHITE}\n"
   echo
-  printf "${YELLOW} >> Isso NÃO faz pull/build. Depois use a opção 2 (Atualizar) ou 8 (FAST) para baixar o código.${WHITE}\n"
+  printf "${YELLOW} >> Isso NÃO faz pull/build. Depois use a opção 2 (Atualizar) ou 8 (FAST).${WHITE}\n"
   echo
 
-  if ! selecionar_instancia_atualizar "apontar para ultraWhats"; then
+  if ! selecionar_instancia_atualizar "apontar para ultraWhats / renovar token"; then
     printf "${RED} >> Operação cancelada.${WHITE}\n"
     sleep 2
     return 1
@@ -8028,10 +8149,12 @@ atualizar_ultrawhats() {
 
   banner
   printf "${WHITE} >> Instância: ${BLUE}${empresa}${WHITE}\n"
+  printf "${WHITE} >> Arquivo de variáveis: ${YELLOW}${ARQUIVO_VARIAVEIS_USADO:- (não definido)}${WHITE}\n"
   printf "${WHITE} >> Repositório atual: ${YELLOW}${repo_url:- (não definido)}${WHITE}\n"
   printf "${WHITE} >> Novo repositório: ${GREEN}${REPO_ULTRA_CANONICO}${WHITE}\n"
   echo
-  printf "${WHITE} >> Digite o TOKEN de autorização do GitHub (acesso ao repositório ultrawhats):${WHITE}\n"
+  printf "${WHITE} >> Digite o NOVO TOKEN (PAT) do GitHub com acesso ao repositório ultrawhats:${WHITE}\n"
+  printf "${YELLOW} >> (o valor não é gravado no código do instalador — só no arquivo da instância e no remote)${WHITE}\n"
   echo
   read -r -p "> " TOKEN_AUTH
   TOKEN_AUTH=$(printf '%s' "$TOKEN_AUTH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
@@ -8042,45 +8165,21 @@ atualizar_ultrawhats() {
     return 1
   fi
 
-  printf "${WHITE} >> Validando token com git clone de teste...${WHITE}\n"
+  printf "${WHITE} >> Validando token (git ls-remote)...${WHITE}\n"
   echo
-  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  TEST_DIR="${INSTALADOR_DIR}/test_clone_ultrawhats_$(date +%s)"
-  token_encoded=$(codifica_clone_base "$TOKEN_AUTH")
-  export GIT_TERMINAL_PROMPT=0
-  if git clone --depth 1 "https://${token_encoded}@${REPO_ULTRA_HOST}" "${TEST_DIR}" >/dev/null 2>&1; then
-    rm -rf "${TEST_DIR}" >/dev/null 2>&1
-    printf "${GREEN} >> Token validado com sucesso.${WHITE}\n"
+  ERRO_GIT_VALIDACAO=""
+  if mf_opcao30_validar_token "$TOKEN_AUTH" "$REPO_ULTRA_HOST"; then
+    printf "${GREEN} >> Token validado com sucesso (acesso ao ultrawhats OK).${WHITE}\n"
     echo
   else
-    rm -rf "${TEST_DIR}" >/dev/null 2>&1
-    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
     printf "${RED} >> Token inválido ou sem acesso ao repositório ultrawhats.${WHITE}\n"
+    if [ -n "${ERRO_GIT_VALIDACAO:-}" ]; then
+      printf "${YELLOW} >> Detalhe do Git: ${ERRO_GIT_VALIDACAO}${WHITE}\n"
+    fi
+    printf "${YELLOW} >> Confira o PAT (scopes/repo) e tente novamente na opção 30.${WHITE}\n"
     sleep 2
     return 1
   fi
-  unset GIT_TERMINAL_PROMPT 2>/dev/null || true
-
-  NEW_REMOTE_URL="https://${token_encoded}@${REPO_ULTRA_HOST}"
-  if [ -f "${APP_ROOT}/.git/config" ]; then
-    cp "${APP_ROOT}/.git/config" "${APP_ROOT}/.git/config.backup.$(date +%Y%m%d_%H%M%S)"
-  fi
-
-  if ! git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote get-url origin >/dev/null 2>&1; then
-    printf "${RED} >> ERRO: não foi possível ler o remote origin em ${APP_ROOT}${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-
-  if git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote set-url origin "${NEW_REMOTE_URL}"; then
-    printf "${GREEN} >> Remote origin atualizado para ultraWhats.${WHITE}\n"
-  else
-    printf "${RED} >> ERRO: git remote set-url falhou.${WHITE}\n"
-    sleep 2
-    return 1
-  fi
-
-  mf_git_limpar_trackings_orfaos "${APP_ROOT}" || true
 
   ARQUIVO_VARIAVEIS_ALVO="${ARQUIVO_VARIAVEIS_USADO:-}"
   if [ -z "$ARQUIVO_VARIAVEIS_ALVO" ] || [ ! -f "$ARQUIVO_VARIAVEIS_ALVO" ]; then
@@ -8091,12 +8190,13 @@ atualizar_ultrawhats() {
 
   cp "$ARQUIVO_VARIAVEIS_ALVO" "${ARQUIVO_VARIAVEIS_ALVO}.backup.$(date +%Y%m%d_%H%M%S)"
 
+  token_sed="${TOKEN_AUTH//&/\\&}"
   if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_ALVO"; then
-    sed -i "s|^github_token=.*|github_token=${TOKEN_AUTH//&/\\&}|" "$ARQUIVO_VARIAVEIS_ALVO"
+    sed -i "s|^github_token=.*|github_token=${token_sed}|" "$ARQUIVO_VARIAVEIS_ALVO"
   else
     echo "github_token=${TOKEN_AUTH}" >> "$ARQUIVO_VARIAVEIS_ALVO"
   fi
-  printf "${GREEN} >> github_token salvo na variável de instalação.${WHITE}\n"
+  printf "${GREEN} >> github_token salvo em: ${BLUE}${ARQUIVO_VARIAVEIS_ALVO}${WHITE}\n"
 
   if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_ALVO"; then
     sed -i "s|^repo_url=.*|repo_url=${REPO_ULTRA_CANONICO}|" "$ARQUIVO_VARIAVEIS_ALVO"
@@ -8108,8 +8208,34 @@ atualizar_ultrawhats() {
   repo_url="${REPO_ULTRA_CANONICO}"
   github_token="${TOKEN_AUTH}"
 
+  printf "${WHITE} >> Aplicando token no remote origin (pasta git)...${WHITE}\n"
+  if ! mf_opcao30_aplicar_token_nos_gits "${APP_ROOT}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}"; then
+    printf "${RED} >> ERRO: não foi possível atualizar o remote origin com o novo token.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  printf "${WHITE} >> Validando remote local (git ls-remote origin HEAD)...${WHITE}\n"
+  if mf_opcao30_validar_remote_local "${APP_ROOT}"; then
+    printf "${GREEN} >> Remote origin autenticado com sucesso — o próximo update/fetch deve funcionar.${WHITE}\n"
+  else
+    printf "${RED} >> ERRO: o remote foi gravado, mas git ls-remote origin ainda falhou.${WHITE}\n"
+    printf "${YELLOW} >> Verifique: git -C ${APP_ROOT} remote -v${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  mf_git_limpar_trackings_orfaos "${APP_ROOT}" || true
+
+  if type aplicar_token_baileys_package_json >/dev/null 2>&1; then
+    aplicar_token_baileys_package_json "${empresa}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}" || true
+  fi
+
   echo
-  printf "${GREEN} >> Instância ${BLUE}${empresa}${GREEN} apontada para ultraWhats.${WHITE}\n"
+  printf "${GREEN} >> Instância ${BLUE}${empresa}${GREEN} pronta para ultraWhats com o novo token.${WHITE}\n"
+  printf "${GREEN} >> Atualizado:${WHITE}\n"
+  printf "   - variáveis: github_token + repo_url (${ARQUIVO_VARIAVEIS_ALVO})${WHITE}\n"
+  printf "   - git remote origin em ${APP_ROOT} (e subpastas com .git, se existirem)${WHITE}\n"
   printf "${YELLOW} >> Próximo passo: menu principal → opção 2 (Atualizar) ou 8 (Atualização FAST).${WHITE}\n"
   echo
   printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
