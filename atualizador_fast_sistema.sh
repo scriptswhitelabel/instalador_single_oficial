@@ -452,7 +452,7 @@ aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
   [ -z "$tok" ] && return 1
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 1
@@ -1223,7 +1223,7 @@ MF_GIT_SYNC_INLINE
     printf "${WHITE} >> Aplicando github_token no remote origin...${WHITE}\n"
     mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
       || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote.${WHITE}\n"
-  elif echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -z "${github_token:-}" ]; then
+  elif echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
     printf "${RED} >> ERRO: github_token não definido — o git fetch pode travar/falhar.${WHITE}\n"
     trata_erro "github_token_ausente_git"
   fi
@@ -1423,7 +1423,7 @@ declare -g versao_atualizacao="Mais_Recente"
 declare -g commit_atualizacao=""
 printf "${GREEN} >> Versão: última do Git (branch remota)${WHITE}\n"
 
-if echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -z "${github_token:-}" ]; then
+if echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
   printf "${YELLOW} >> Aviso: github_token não definido — Baileys pode falhar no npm install.${WHITE}\n"
 fi
 

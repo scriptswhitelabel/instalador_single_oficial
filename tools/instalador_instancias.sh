@@ -215,7 +215,7 @@ aplicar_token_baileys_package_json() {
   local emp="${1:-$nova_empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
   grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0

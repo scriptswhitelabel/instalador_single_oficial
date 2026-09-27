@@ -328,7 +328,7 @@ aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
   [ -z "$tok" ] && return 1
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 1
@@ -1111,7 +1111,7 @@ MF_GIT_SYNC_INLINE
         && printf "${GREEN} >> Token aplicado no remote origin.${WHITE}\n" \
         || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote; o fetch pode falhar.${WHITE}\n"
     fi
-  elif echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+  elif echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
     printf "${RED} >> ERRO: github_token não definido — o git fetch do multiflow-pro costuma travar ou falhar.${WHITE}\n"
     printf "${YELLOW} >> Inclua github_token=... no arquivo da instância e tente novamente.${WHITE}\n"
     trata_erro "github_token_ausente_git"
@@ -1166,7 +1166,7 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
   if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     if [ -z "${github_token}" ]; then
       echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
@@ -1341,7 +1341,7 @@ if ! selecionar_versao_atualizacao; then
 fi
 
 carregar_credenciais_instancia
-if echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -z "${github_token:-}" ]; then
+if echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
   printf "${YELLOW} >> Aviso: github_token não definido — o Baileys no package.json pode falhar no npm install.${WHITE}\n"
   sleep 2
 fi

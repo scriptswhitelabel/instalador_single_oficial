@@ -2429,8 +2429,8 @@ atualizar_baileys_pro_heineken_ferramentas() {
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
   fi
 
-  if ! echo "${repo_url:-}" | grep -q "scriptswhitelabel/multiflow-pro"; then
-    printf "${YELLOW} >> Aviso: o repositório configurado não parece ser MultiFlow-PRO (Baileys/Heineken).${WHITE}\n"
+  if ! echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
+    printf "${YELLOW} >> Aviso: o repositório configurado não parece ser MultiFlow-PRO / ultraWhats (Baileys/Heineken).${WHITE}\n"
     printf "${YELLOW} >> Continuar mesmo assim? (s/N):${WHITE}\n"
     read -r continuar_nf
     continuar_nf=$(printf '%s' "${continuar_nf:-}" | tr '[:upper:]' '[:lower:]')
@@ -2480,11 +2480,11 @@ atualizar_baileys_pro_heineken_ferramentas() {
     fi
   fi
   cd "${backend_dir}" || exit 1
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro" && grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
     sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
     printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   fi
@@ -2578,6 +2578,7 @@ menu_ferramentas() {
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
+    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats\n"
     echo
     printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
@@ -2673,6 +2674,9 @@ menu_ferramentas() {
       ;;
     27)
       atualizar_multiflow_hub
+      ;;
+    30)
+      atualizar_ultrawhats
       ;;
     6)
       SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -4429,12 +4433,17 @@ EOF
   } || trata_erro "instala_git_base"
 }
 
-# Multiflow-pro: substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação
+# Repos que usam Baileys/Hineken com TOKEN_GITHUB no package.json
+mf_repo_usa_token_baileys() {
+  echo "${1:-${repo_url:-}}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"
+}
+
+# Multiflow-pro / ultraWhats: substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação
 aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -q "scriptswhitelabel/multiflow-pro" || return 0
+  mf_repo_usa_token_baileys "$repo" || return 0
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
   grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
@@ -6135,8 +6144,8 @@ ${MF_GIT_SYNC_BODY}
     exit 1
   fi
 
-  # Multiflow-pro: substituir TOKEN_GITHUB no package.json (baileys/Hineken) antes do npm install
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+  # Multiflow-pro / ultraWhats: substituir TOKEN_GITHUB no package.json (baileys/Hineken) antes do npm install
+  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
     if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
       sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
       echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
@@ -7921,6 +7930,138 @@ migrar_multiflow_pro() {
   sleep 2
 }
 
+# Opção 30: aponta a instância para o repositório ultraWhats (token + remote git + repo_url/github_token)
+atualizar_ultrawhats() {
+  local REPO_ULTRA_CANONICO="https://github.com/scriptswhitelabel/ultrawhats.git"
+  local REPO_ULTRA_HOST="github.com/scriptswhitelabel/ultrawhats.git"
+  local TOKEN_AUTH=""
+  local APP_ROOT=""
+  local NEW_REMOTE_URL=""
+  local ARQUIVO_VARIAVEIS_ALVO=""
+  local TEST_DIR=""
+  local token_encoded=""
+
+  banner
+  printf "${WHITE} >> Atualizar ultraWhats${WHITE}\n"
+  printf "${WHITE} >> Troca o remote Git e a variável de instalação para:${WHITE}\n"
+  printf "${BLUE}   ${REPO_ULTRA_CANONICO}${WHITE}\n"
+  echo
+  printf "${YELLOW} >> Isso NÃO faz pull/build. Depois use a opção 2 (Atualizar) ou 8 (FAST) para baixar o código.${WHITE}\n"
+  echo
+
+  if ! selecionar_instancia_atualizar "apontar para ultraWhats"; then
+    printf "${RED} >> Operação cancelada.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
+  fi
+
+  if [ -z "${empresa:-}" ]; then
+    printf "${RED} >> ERRO: variável 'empresa' não encontrada na instância.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  APP_ROOT="/home/deploy/${empresa}"
+  if [ ! -d "${APP_ROOT}/.git" ]; then
+    printf "${RED} >> ERRO: repositório git não encontrado em ${APP_ROOT}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  banner
+  printf "${WHITE} >> Instância: ${BLUE}${empresa}${WHITE}\n"
+  printf "${WHITE} >> Repositório atual: ${YELLOW}${repo_url:- (não definido)}${WHITE}\n"
+  printf "${WHITE} >> Novo repositório: ${GREEN}${REPO_ULTRA_CANONICO}${WHITE}\n"
+  echo
+  printf "${WHITE} >> Digite o TOKEN de autorização do GitHub (acesso ao repositório ultrawhats):${WHITE}\n"
+  echo
+  read -r -p "> " TOKEN_AUTH
+  TOKEN_AUTH=$(printf '%s' "$TOKEN_AUTH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
+
+  if [ -z "$TOKEN_AUTH" ]; then
+    printf "${RED} >> Token não informado. Operação cancelada.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  printf "${WHITE} >> Validando token com git clone de teste...${WHITE}\n"
+  echo
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TEST_DIR="${INSTALADOR_DIR}/test_clone_ultrawhats_$(date +%s)"
+  token_encoded=$(codifica_clone_base "$TOKEN_AUTH")
+  export GIT_TERMINAL_PROMPT=0
+  if git clone --depth 1 "https://${token_encoded}@${REPO_ULTRA_HOST}" "${TEST_DIR}" >/dev/null 2>&1; then
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    printf "${GREEN} >> Token validado com sucesso.${WHITE}\n"
+    echo
+  else
+    rm -rf "${TEST_DIR}" >/dev/null 2>&1
+    unset GIT_TERMINAL_PROMPT 2>/dev/null || true
+    printf "${RED} >> Token inválido ou sem acesso ao repositório ultrawhats.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  unset GIT_TERMINAL_PROMPT 2>/dev/null || true
+
+  NEW_REMOTE_URL="https://${token_encoded}@${REPO_ULTRA_HOST}"
+  if [ -f "${APP_ROOT}/.git/config" ]; then
+    cp "${APP_ROOT}/.git/config" "${APP_ROOT}/.git/config.backup.$(date +%Y%m%d_%H%M%S)"
+  fi
+
+  if ! git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote get-url origin >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: não foi possível ler o remote origin em ${APP_ROOT}${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  if git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote set-url origin "${NEW_REMOTE_URL}"; then
+    printf "${GREEN} >> Remote origin atualizado para ultraWhats.${WHITE}\n"
+  else
+    printf "${RED} >> ERRO: git remote set-url falhou.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  ARQUIVO_VARIAVEIS_ALVO="${ARQUIVO_VARIAVEIS_USADO:-}"
+  if [ -z "$ARQUIVO_VARIAVEIS_ALVO" ] || [ ! -f "$ARQUIVO_VARIAVEIS_ALVO" ]; then
+    printf "${RED} >> ERRO: arquivo de variáveis da instância não encontrado.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+
+  cp "$ARQUIVO_VARIAVEIS_ALVO" "${ARQUIVO_VARIAVEIS_ALVO}.backup.$(date +%Y%m%d_%H%M%S)"
+
+  if grep -q "^github_token=" "$ARQUIVO_VARIAVEIS_ALVO"; then
+    sed -i "s|^github_token=.*|github_token=${TOKEN_AUTH//&/\\&}|" "$ARQUIVO_VARIAVEIS_ALVO"
+  else
+    echo "github_token=${TOKEN_AUTH}" >> "$ARQUIVO_VARIAVEIS_ALVO"
+  fi
+  printf "${GREEN} >> github_token salvo na variável de instalação.${WHITE}\n"
+
+  if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_ALVO"; then
+    sed -i "s|^repo_url=.*|repo_url=${REPO_ULTRA_CANONICO}|" "$ARQUIVO_VARIAVEIS_ALVO"
+  else
+    echo "repo_url=${REPO_ULTRA_CANONICO}" >> "$ARQUIVO_VARIAVEIS_ALVO"
+  fi
+  printf "${GREEN} >> repo_url atualizado para ${REPO_ULTRA_CANONICO}${WHITE}\n"
+
+  repo_url="${REPO_ULTRA_CANONICO}"
+  github_token="${TOKEN_AUTH}"
+
+  echo
+  printf "${GREEN} >> Instância ${BLUE}${empresa}${GREEN} apontada para ultraWhats.${WHITE}\n"
+  printf "${YELLOW} >> Próximo passo: menu principal → opção 2 (Atualizar) ou 8 (Atualização FAST).${WHITE}\n"
+  echo
+  printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
+  read -r
+  return 0
+}
+
 # Atualização FAST (sem reinstalar node_modules/Baileys)
 atualizar_base_fast() {
   banner
@@ -7994,6 +8135,7 @@ exec_ferramenta_direta() {
     17) atualizar_whatsmeow ;;
     22) backup_whatsmeow_ferramentas ;;
     23) restaurar_whatsmeow_ferramentas ;;
+    30) atualizar_ultrawhats ;;
     *)
       printf "${RED} >> Ferramenta inválida ou não suportada: ${1}${WHITE}\n"
       return 1
