@@ -2578,7 +2578,7 @@ menu_ferramentas() {
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
-    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats (token GitHub)\n"
+    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats (token GitHub + FAST)\n"
     echo
     printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
@@ -8102,25 +8102,27 @@ mf_opcao30_validar_remote_local() {
 }
 
 atualizar_ultrawhats() {
+  # Repo canônico = mesmo origin do projeto local ultrawhats (scriptswhitelabel/ultrawhats).
   local REPO_ULTRA_CANONICO="https://github.com/scriptswhitelabel/ultrawhats.git"
   local REPO_ULTRA_HOST="github.com/scriptswhitelabel/ultrawhats.git"
   local TOKEN_AUTH=""
   local APP_ROOT=""
   local ARQUIVO_VARIAVEIS_ALVO=""
   local token_sed=""
+  local empresa_alvo=""
+  local arquivo_vars_preservado=""
 
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
   banner
-  printf "${WHITE} >> Atualizar ultraWhats (token GitHub)${WHITE}\n"
+  printf "${WHITE} >> Atualizar ultraWhats (token GitHub + Atualização FAST)${WHITE}\n"
   printf "${WHITE} >> Esta opção pede o PAT e já atualiza:${WHITE}\n"
   printf "${BLUE}   1)${WHITE} github_token / repo_url no arquivo de variáveis da instância${WHITE}\n"
   printf "${BLUE}   2)${WHITE} remote origin na pasta git (token embutido no HTTPS, como no update FAST)${WHITE}\n"
+  printf "${BLUE}   3)${WHITE} em seguida inicia automaticamente a Atualização FAST (mesma da opção 8)${WHITE}\n"
   echo
   printf "${WHITE} >> Repositório alvo:${WHITE}\n"
   printf "${BLUE}   ${REPO_ULTRA_CANONICO}${WHITE}\n"
-  echo
-  printf "${YELLOW} >> Isso NÃO faz pull/build. Depois use a opção 2 (Atualizar) ou 8 (FAST).${WHITE}\n"
   echo
 
   if ! selecionar_instancia_atualizar "apontar para ultraWhats / renovar token"; then
@@ -8140,7 +8142,9 @@ atualizar_ultrawhats() {
     return 1
   fi
 
-  APP_ROOT="/home/deploy/${empresa}"
+  empresa_alvo="${empresa}"
+  arquivo_vars_preservado="${ARQUIVO_VARIAVEIS_USADO:-}"
+  APP_ROOT="/home/deploy/${empresa_alvo}"
   if [ ! -d "${APP_ROOT}/.git" ]; then
     printf "${RED} >> ERRO: repositório git não encontrado em ${APP_ROOT}${WHITE}\n"
     sleep 2
@@ -8148,8 +8152,8 @@ atualizar_ultrawhats() {
   fi
 
   banner
-  printf "${WHITE} >> Instância: ${BLUE}${empresa}${WHITE}\n"
-  printf "${WHITE} >> Arquivo de variáveis: ${YELLOW}${ARQUIVO_VARIAVEIS_USADO:- (não definido)}${WHITE}\n"
+  printf "${WHITE} >> Instância: ${BLUE}${empresa_alvo}${WHITE}\n"
+  printf "${WHITE} >> Arquivo de variáveis: ${YELLOW}${arquivo_vars_preservado:- (não definido)}${WHITE}\n"
   printf "${WHITE} >> Repositório atual: ${YELLOW}${repo_url:- (não definido)}${WHITE}\n"
   printf "${WHITE} >> Novo repositório: ${GREEN}${REPO_ULTRA_CANONICO}${WHITE}\n"
   echo
@@ -8181,7 +8185,7 @@ atualizar_ultrawhats() {
     return 1
   fi
 
-  ARQUIVO_VARIAVEIS_ALVO="${ARQUIVO_VARIAVEIS_USADO:-}"
+  ARQUIVO_VARIAVEIS_ALVO="${arquivo_vars_preservado}"
   if [ -z "$ARQUIVO_VARIAVEIS_ALVO" ] || [ ! -f "$ARQUIVO_VARIAVEIS_ALVO" ]; then
     printf "${RED} >> ERRO: arquivo de variáveis da instância não encontrado.${WHITE}\n"
     sleep 2
@@ -8207,6 +8211,8 @@ atualizar_ultrawhats() {
 
   repo_url="${REPO_ULTRA_CANONICO}"
   github_token="${TOKEN_AUTH}"
+  empresa="${empresa_alvo}"
+  ARQUIVO_VARIAVEIS_USADO="${ARQUIVO_VARIAVEIS_ALVO}"
 
   printf "${WHITE} >> Aplicando token no remote origin (pasta git)...${WHITE}\n"
   if ! mf_opcao30_aplicar_token_nos_gits "${APP_ROOT}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}"; then
@@ -8217,7 +8223,7 @@ atualizar_ultrawhats() {
 
   printf "${WHITE} >> Validando remote local (git ls-remote origin HEAD)...${WHITE}\n"
   if mf_opcao30_validar_remote_local "${APP_ROOT}"; then
-    printf "${GREEN} >> Remote origin autenticado com sucesso — o próximo update/fetch deve funcionar.${WHITE}\n"
+    printf "${GREEN} >> Remote origin autenticado com sucesso — iniciando Atualização FAST.${WHITE}\n"
   else
     printf "${RED} >> ERRO: o remote foi gravado, mas git ls-remote origin ainda falhou.${WHITE}\n"
     printf "${YELLOW} >> Verifique: git -C ${APP_ROOT} remote -v${WHITE}\n"
@@ -8228,18 +8234,25 @@ atualizar_ultrawhats() {
   mf_git_limpar_trackings_orfaos "${APP_ROOT}" || true
 
   if type aplicar_token_baileys_package_json >/dev/null 2>&1; then
-    aplicar_token_baileys_package_json "${empresa}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}" || true
+    aplicar_token_baileys_package_json "${empresa_alvo}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}" || true
   fi
 
   echo
-  printf "${GREEN} >> Instância ${BLUE}${empresa}${GREEN} pronta para ultraWhats com o novo token.${WHITE}\n"
+  printf "${GREEN} >> Instância ${BLUE}${empresa_alvo}${GREEN} pronta para ultraWhats com o novo token.${WHITE}\n"
   printf "${GREEN} >> Atualizado:${WHITE}\n"
   printf "   - variáveis: github_token + repo_url (${ARQUIVO_VARIAVEIS_ALVO})${WHITE}\n"
   printf "   - git remote origin em ${APP_ROOT} (e subpastas com .git, se existirem)${WHITE}\n"
-  printf "${YELLOW} >> Próximo passo: menu principal → opção 2 (Atualizar) ou 8 (Atualização FAST).${WHITE}\n"
   echo
-  printf "${GREEN} >> Pressione Enter para voltar ao menu de ferramentas...${WHITE}\n"
-  read -r
+  printf "${WHITE} >> Iniciando Atualização FAST automaticamente (mesma função da opção 8)...${WHITE}\n"
+  sleep 2
+
+  # Preserva seleção da instância para o FAST (evita escolher de novo se só houver 1;
+  # se houver várias, o FAST ainda lista — mas ARQUIVO_VARIAVEIS_USADO já aponta a correta).
+  export ARQUIVO_VARIAVEIS_USADO="${ARQUIVO_VARIAVEIS_ALVO}"
+  export MF_OPCAO30_INSTANCIA_PRESET="${ARQUIVO_VARIAVEIS_ALVO}"
+  atualizar_base_fast
+  unset MF_OPCAO30_INSTANCIA_PRESET 2>/dev/null || true
+
   return 0
 }
 

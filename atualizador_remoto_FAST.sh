@@ -118,6 +118,26 @@ selecionar_instancia_atualizar() {
   detectar_instancias_instaladas
   
   local total_instancias=${#INSTANCIAS_DETECTADAS[@]}
+
+  # Preset da opção 30 (token + FAST): usa a mesma instância já validada, sem perguntar de novo.
+  if [ -n "${MF_OPCAO30_INSTANCIA_PRESET:-}" ] && [ -f "${MF_OPCAO30_INSTANCIA_PRESET}" ]; then
+    local preset_ok=0
+    local _i
+    for _i in "${INSTANCIAS_DETECTADAS[@]}"; do
+      if [ "$_i" = "${MF_OPCAO30_INSTANCIA_PRESET}" ]; then
+        preset_ok=1
+        break
+      fi
+    done
+    if [ "$preset_ok" -eq 1 ]; then
+      source "${MF_OPCAO30_INSTANCIA_PRESET}"
+      declare -g ARQUIVO_VARIAVEIS_USADO="${MF_OPCAO30_INSTANCIA_PRESET}"
+      printf "${GREEN} >> Instância (opção 30): ${BLUE}${empresa}${WHITE}\n"
+      echo
+      sleep 1
+      return 0
+    fi
+  fi
   
   if [ $total_instancias -eq 0 ]; then
     printf "${RED} >> ERRO: Nenhuma instância instalada detectada!${WHITE}\n"
