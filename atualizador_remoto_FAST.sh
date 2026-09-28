@@ -343,20 +343,24 @@ carregar_credenciais_instancia() {
   fi
 }
 
-# Multiflow-pro: TOKEN_GITHUB no package.json (baileys) — o git checkout restaura o placeholder
+# Aplica TOKEN_GITHUB no package.json se necessário (qualquer repo com Baileys privado).
 aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
-  [ -z "$tok" ] && return 1
   local pkg="/home/deploy/${emp}/backend/package.json"
-  [ ! -f "$pkg" ] && return 1
-  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
-  local tok_sed="${tok//&/\\&}"
-  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-  chown deploy:deploy "$pkg" 2>/dev/null || true
-  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  [ ! -f "$pkg" ] && return 0
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+    echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
+    return 0
+  fi
+  [ -z "$tok" ] && return 1
+  if grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null; then
+    local tok_sed="${tok//&/\\&}"
+    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+    chown deploy:deploy "$pkg" 2>/dev/null || true
+    printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  fi
   mf_baileys_fixar_branch_main_package_json "$pkg"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
@@ -1124,6 +1128,7 @@ MF_GIT_SYNC_INLINE
   fi
 
   # Token no remote evita hang do git pedindo senha dentro do heredoc (sem TTY).
+  # Usa o origin já configurado (qualquer repo HTTPS); não hardcoda ultrawhats.
   if [ -n "${github_token:-}" ]; then
     printf "${WHITE} >> Aplicando github_token no remote origin (git fetch sem prompt)...${WHITE}\n"
     if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
@@ -1131,10 +1136,13 @@ MF_GIT_SYNC_INLINE
         && printf "${GREEN} >> Token aplicado no remote origin.${WHITE}\n" \
         || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote; o fetch pode falhar.${WHITE}\n"
     fi
-  elif echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
-    printf "${RED} >> ERRO: github_token não definido — o git fetch do multiflow-pro costuma travar ou falhar.${WHITE}\n"
-    printf "${YELLOW} >> Inclua github_token=... no arquivo da instância e tente novamente.${WHITE}\n"
-    trata_erro "github_token_ausente_git"
+  else
+    _origin_chk=$(git -c "safe.directory=/home/deploy/${empresa}" -C "/home/deploy/${empresa}" remote get-url origin 2>/dev/null || true)
+    if echo "${repo_url:-}${_origin_chk}" | grep -Eqi 'github\.com'; then
+      printf "${RED} >> ERRO: github_token não definido — o git fetch HTTPS do GitHub costuma falhar em repos privados.${WHITE}\n"
+      printf "${YELLOW} >> Inclua github_token=... no arquivo da instância (ou use a opção 30) e tente novamente.${WHITE}\n"
+      trata_erro "github_token_ausente_git"
+    fi
   fi
 
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
@@ -1186,7 +1194,7 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
+if echo "${repo_url}" | grep -Eqi 'github\.com' || grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' package.json 2>/dev/null; then
   if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     if [ -z "${github_token}" ]; then
       echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
@@ -1361,8 +1369,8 @@ if ! selecionar_versao_atualizacao; then
 fi
 
 carregar_credenciais_instancia
-if echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
-  printf "${YELLOW} >> Aviso: github_token não definido — o Baileys no package.json pode falhar no npm install.${WHITE}\n"
+if echo "${repo_url:-}" | grep -Eqi 'github\.com' && [ -z "${github_token:-}" ]; then
+  printf "${YELLOW} >> Aviso: github_token não definido — repos privados GitHub / Baileys podem falhar no fetch ou npm install.${WHITE}\n"
   sleep 2
 fi
 

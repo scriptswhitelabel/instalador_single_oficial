@@ -447,20 +447,24 @@ carregar_credenciais_instancia() {
   fi
 }
 
-# Multiflow-pro: TOKEN_GITHUB no package.json (baileys) — o git checkout restaura o placeholder
+# Aplica TOKEN_GITHUB no package.json se necessário (qualquer repo com Baileys privado).
 aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
-  [ -z "$tok" ] && return 1
   local pkg="/home/deploy/${emp}/backend/package.json"
-  [ ! -f "$pkg" ] && return 1
-  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
-  local tok_sed="${tok//&/\\&}"
-  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-  chown deploy:deploy "$pkg" 2>/dev/null || true
-  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  [ ! -f "$pkg" ] && return 0
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+    echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
+    return 0
+  fi
+  [ -z "$tok" ] && return 1
+  if grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null; then
+    local tok_sed="${tok//&/\\&}"
+    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+    chown deploy:deploy "$pkg" 2>/dev/null || true
+    printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  fi
   mf_baileys_fixar_branch_main_package_json "$pkg"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
@@ -1223,9 +1227,12 @@ MF_GIT_SYNC_INLINE
     printf "${WHITE} >> Aplicando github_token no remote origin...${WHITE}\n"
     mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
       || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote.${WHITE}\n"
-  elif echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
-    printf "${RED} >> ERRO: github_token não definido — o git fetch pode travar/falhar.${WHITE}\n"
-    trata_erro "github_token_ausente_git"
+  elif [ -z "${github_token:-}" ]; then
+    _origin_chk=$(git -c "safe.directory=/home/deploy/${empresa}" -C "/home/deploy/${empresa}" remote get-url origin 2>/dev/null || true)
+    if echo "${repo_url:-}${_origin_chk}" | grep -Eqi 'github\.com'; then
+      printf "${RED} >> ERRO: github_token não definido — o git fetch HTTPS do GitHub costuma falhar em repos privados.${WHITE}\n"
+      trata_erro "github_token_ausente_git"
+    fi
   fi
 
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
@@ -1423,8 +1430,8 @@ declare -g versao_atualizacao="Mais_Recente"
 declare -g commit_atualizacao=""
 printf "${GREEN} >> Versão: última do Git (branch remota)${WHITE}\n"
 
-if echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -z "${github_token:-}" ]; then
-  printf "${YELLOW} >> Aviso: github_token não definido — Baileys pode falhar no npm install.${WHITE}\n"
+if echo "${repo_url:-}" | grep -Eqi 'github\.com' && [ -z "${github_token:-}" ]; then
+  printf "${YELLOW} >> Aviso: github_token não definido — Baileys / fetch podem falhar.${WHITE}\n"
 fi
 
 baixa_codigo_atualizar || exit 1

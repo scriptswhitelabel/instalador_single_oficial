@@ -2429,8 +2429,8 @@ atualizar_baileys_pro_heineken_ferramentas() {
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
   fi
 
-  if ! echo "${repo_url:-}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
-    printf "${YELLOW} >> Aviso: o repositório configurado não parece ser MultiFlow-PRO / ultraWhats (Baileys/Heineken).${WHITE}\n"
+  if ! echo "${repo_url:-}" | grep -Eqi 'github\.com'; then
+    printf "${YELLOW} >> Aviso: o repositório configurado não parece ser HTTPS GitHub (Baileys/Heineken costuma exigir token).${WHITE}\n"
     printf "${YELLOW} >> Continuar mesmo assim? (s/N):${WHITE}\n"
     read -r continuar_nf
     continuar_nf=$(printf '%s' "${continuar_nf:-}" | tr '[:upper:]' '[:lower:]')
@@ -2480,11 +2480,11 @@ atualizar_baileys_pro_heineken_ferramentas() {
     fi
   fi
   cd "${backend_dir}" || exit 1
-  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+  if [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
-  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
     sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
     printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   fi
@@ -2578,7 +2578,7 @@ menu_ferramentas() {
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
     printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
-    printf "   [${BLUE}30${WHITE}] Atualizar ultraWhats (token GitHub + FAST)\n"
+    printf "   [${BLUE}30${WHITE}] Atualizar token GitHub + FAST (qualquer repo)\n"
     echo
     printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
     printf "   [${BLUE}6${WHITE}] Agendar Backup Diário do Banco Alta Performance\n"
@@ -4433,23 +4433,39 @@ EOF
   } || trata_erro "instala_git_base"
 }
 
-# Repos que usam Baileys/Hineken com TOKEN_GITHUB no package.json
-mf_repo_usa_token_baileys() {
-  echo "${1:-${repo_url:-}}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"
+# True se a URL for HTTPS github.com (qualquer owner/repo — ultrawhats, multiflow-pro, etc.).
+mf_repo_https_github() {
+  echo "${1:-${repo_url:-}}" | grep -Eqi '^https://([^/@]+@)?github\.com/'
 }
 
-# Multiflow-pro / ultraWhats: substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação
+# Repos conhecidos OU package.json com TOKEN_GITHUB / Hineken (Baileys privado).
+mf_repo_usa_token_baileys() {
+  local repo="${1:-${repo_url:-}}"
+  local emp="${2:-${empresa:-}}"
+  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" && return 0
+  local pkg="/home/deploy/${emp}/backend/package.json"
+  [ -f "$pkg" ] || return 1
+  grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null
+}
+
+# Substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação.
+# Não depende de um único repo: aplica se o package.json pedir o placeholder.
 aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  mf_repo_usa_token_baileys "$repo" || return 0
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
-  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
-  local tok_sed="${tok//&/\\&}"
-  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+    mf_repo_usa_token_baileys "$repo" "$emp" || return 0
+    return 0
+  fi
+  [ -z "$tok" ] && return 1
+  if grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null; then
+    local tok_sed="${tok//&/\\&}"
+    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+    printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+  fi
   mf_baileys_fixar_branch_main_package_json "$pkg"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
@@ -4469,14 +4485,14 @@ codifica_clone_base() {
 
 # Testa se o token tem acesso ao repositório (git ls-remote ou git clone).
 # Usa só o token na URL; não pede senha (GIT_TERMINAL_PROMPT=0).
-# Retorna 0 se válido, 1 se inválido. Opcional: passar segundo arg "1" para guardar stderr em ERRO_GIT_VALIDACAO.
+# $1 = token; $2 = "1" para guardar stderr em ERRO_GIT_VALIDACAO; $3 = URL do repo (opcional; default repo_url).
 validar_token_git_clone() {
   local token="${1:-$github_token}"
   local mostrar_erro="${2:-0}"
+  local repo_alvo="${3:-${repo_url:-}}"
   [ -z "$token" ] && return 1
   local url_base
-  url_base=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^[^@]*@||')
-  [ -z "$url_base" ] && url_base=$(echo "${repo_url}" | sed 's|^https://||')
+  url_base=$(echo "${repo_alvo}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
   [ -z "$url_base" ] && return 1
   [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
   local token_encoded
@@ -4510,28 +4526,49 @@ validar_token_git_clone() {
   return 1
 }
 
-# Valida token antes da atualização; se expirado, pede novo, valida e atualiza .git/config + arquivo de variáveis
+# Valida token antes da atualização; se expirado, pede novo, valida e atualiza .git/config + arquivo de variáveis.
+# Usa o remote origin da pasta da instância (preferencial) ou repo_url — funciona com qualquer repo HTTPS GitHub.
 validar_e_atualizar_token_antes_atualizar() {
   # Garantir que temos repo_url e github_token da instância selecionada
   if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null
   fi
-  if [ -z "${repo_url}" ] || [ -z "${github_token}" ]; then
-    printf "${RED} >> ERRO: repo_url ou github_token não encontrados no arquivo da instância.${WHITE}\n"
+
+  local app_root="/home/deploy/${empresa:-}"
+  local origin_publico=""
+  if [ -n "${empresa:-}" ] && [ -d "${app_root}/.git" ]; then
+    origin_publico=$(git -c "safe.directory=${app_root}" -C "${app_root}" remote get-url origin 2>/dev/null \
+      | sed -E 's#^(https?://)[^/@]+@#\1#' || true)
+    if [ -n "$origin_publico" ] && [ -z "${repo_url:-}" ]; then
+      repo_url="$origin_publico"
+    fi
+  fi
+
+  local repo_validacao="${origin_publico:-${repo_url:-}}"
+  if [ -z "${repo_validacao}" ] || [ -z "${github_token}" ]; then
+    printf "${RED} >> ERRO: repo_url/origin ou github_token não encontrados no arquivo da instância.${WHITE}\n"
     return 1
   fi
 
-  # Validação silenciosa com o token já gravado (.git/config e variáveis); só pede token se falhar
-  if validar_token_git_clone; then
+  # Validação silenciosa com o token já gravado; só pede token se falhar
+  if validar_token_git_clone "${github_token}" 0 "${repo_validacao}"; then
+    # Reaplica token no origin atual (preserva o path do remote)
+    if [ -n "${github_token:-}" ] && [ -d "${app_root}/.git" ]; then
+      INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      # shellcheck source=/dev/null
+      [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ] && . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+      if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
+        mf_git_aplicar_token_remote "${app_root}" "${github_token}" >/dev/null 2>&1 || true
+      fi
+    fi
     return 0
   fi
 
   banner
   printf "${RED} >> O Token não está válido (expirado ou sem acesso).${WHITE}\n"
   echo
-  # Mostrar repositório atual e permitir confirmar ou trocar o link
-  printf "${WHITE} >> Repositório atual (variável de instalação):${WHITE}\n"
-  printf "${BLUE}   %s${WHITE}\n" "${repo_url:- (não definido) }"
+  printf "${WHITE} >> Repositório alvo (origin / variável de instalação):${WHITE}\n"
+  printf "${BLUE}   %s${WHITE}\n" "${repo_validacao}"
   echo
   printf "${YELLOW} >> Deseja manter este repositório (s) ou digitar um novo link?${WHITE}\n"
   printf "${YELLOW}   Digite ${GREEN}s${YELLOW} para manter, ou cole o novo link do Git:${WHITE}\n"
@@ -4539,10 +4576,10 @@ validar_e_atualizar_token_antes_atualizar() {
   read -r -p "> " resposta_repo
   resposta_repo=$(printf '%s' "$resposta_repo" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r')
   if [ -n "$resposta_repo" ] && [ "$resposta_repo" != "s" ] && [ "$resposta_repo" != "S" ]; then
-    # Usuário digitou um novo link
     novo_repo="$resposta_repo"
     [[ "$novo_repo" != *.git ]] && [[ "$novo_repo" =~ github\.com ]] && novo_repo="${novo_repo}.git"
     repo_url="$novo_repo"
+    repo_validacao="$novo_repo"
     printf "${GREEN} >> Repositório atualizado para: ${repo_url}${WHITE}\n"
     if [ -n "${ARQUIVO_VARIAVEIS_USADO:-}" ] && [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
       if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_USADO"; then
@@ -4554,6 +4591,8 @@ validar_e_atualizar_token_antes_atualizar() {
       printf "${GREEN} >> Link do repositório salvo na variável de instalação.${WHITE}\n"
     fi
     echo
+  else
+    repo_url="${repo_validacao}"
   fi
   echo
   printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
@@ -4569,12 +4608,12 @@ validar_e_atualizar_token_antes_atualizar() {
   printf "${WHITE} >> Validando token e repositório...\n"
   echo
   ERRO_GIT_VALIDACAO=""
-  if ! validar_token_git_clone "$novo_token" 1; then
+  if ! validar_token_git_clone "$novo_token" 1 "${repo_validacao}"; then
     printf "${RED} >> O novo token não foi aceito. Atualização cancelada.${WHITE}\n"
     if [ -n "${ERRO_GIT_VALIDACAO:-}" ]; then
       printf "${YELLOW} >> Detalhe do Git: ${ERRO_GIT_VALIDACAO}${WHITE}\n"
     fi
-    printf "${YELLOW} >> Confira: token correto, repositório ${repo_url:-?} e permissão 'repo'.${WHITE}\n"
+    printf "${YELLOW} >> Confira: token correto, repositório ${repo_validacao:-?} e permissão 'repo'.${WHITE}\n"
     sleep 2
     return 1
   fi
@@ -4590,7 +4629,7 @@ validar_e_atualizar_token_antes_atualizar() {
 
   cp "$git_config" "${git_config}.backup.$(date +%Y%m%d_%H%M%S)"
   local path_repo
-  path_repo=$(echo "$repo_url" | sed 's|^https://||' | sed 's|^[^@]*@||')
+  path_repo=$(echo "$repo_validacao" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
   [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
   local novo_token_encoded
   novo_token_encoded=$(codifica_clone_base "$novo_token")
@@ -4606,10 +4645,17 @@ validar_e_atualizar_token_antes_atualizar() {
     else
       echo "github_token=${novo_token}" >> "$ARQUIVO_VARIAVEIS_USADO"
     fi
+    if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_USADO"; then
+      repo_sed="${repo_validacao//&/\\&}"
+      sed -i "s|^repo_url=.*|repo_url=${repo_sed}|" "$ARQUIVO_VARIAVEIS_USADO"
+    else
+      echo "repo_url=${repo_validacao}" >> "$ARQUIVO_VARIAVEIS_USADO"
+    fi
     printf "${GREEN} >> Token atualizado no arquivo de variáveis da instância.${WHITE}\n"
   fi
 
   github_token="$novo_token"
+  repo_url="${repo_validacao}"
   echo
   sleep 2
   return 0
@@ -6043,6 +6089,19 @@ MF_GIT_SYNC_INLINE
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "$frontend_port" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
+
+  # Token no origin (fetch sem prompt) — preserva o remote já configurado (qualquer repo).
+  if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+  fi
+  if [ -n "${github_token:-}" ] && type mf_git_aplicar_token_remote >/dev/null 2>&1; then
+    printf "${WHITE} >> Aplicando github_token no remote origin (git fetch sem prompt)...${WHITE}\n"
+    mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
+      && printf "${GREEN} >> Token aplicado no remote origin.${WHITE}\n" \
+      || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote; o fetch pode falhar.${WHITE}\n"
+  fi
+
   if ! sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
   _MF_PATH_NODE="${INSTALADOR_DIR}/tools/path_node_deploy.sh"
@@ -6144,8 +6203,8 @@ ${MF_GIT_SYNC_BODY}
     exit 1
   fi
 
-  # Multiflow-pro / ultraWhats: substituir TOKEN_GITHUB no package.json (baileys/Hineken) antes do npm install
-  if echo "${repo_url}" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)"; then
+  # TOKEN_GITHUB / Baileys: aplica se o package.json pedir (qualquer repo)
+  if grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' package.json 2>/dev/null || echo "${repo_url}" | grep -Eqi 'github\.com'; then
     if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
       sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
       echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
@@ -7930,7 +7989,8 @@ migrar_multiflow_pro() {
   sleep 2
 }
 
-# Opção 30: aponta a instância para o repositório ultraWhats (token + remote git + repo_url/github_token)
+# Opção 30: renovar github_token da instância (qualquer repo HTTPS GitHub) + aplicar no origin + FAST.
+# Não força ultrawhats: usa remote origin já configurado ou repo_url da instância.
 # Após set-url: fetch --prune e remove trackings [branch "..."] cujo upstream não existe mais no origin.
 mf_git_limpar_trackings_orfaos() {
   local app_root="${1:-}"
@@ -7985,15 +8045,15 @@ mf_git_limpar_trackings_orfaos() {
 }
 
 # Aplica token no remote origin da instância (e subpastas com .git próprio, se existirem).
-# Na raiz: força URL canônica ultraWhats + token. Nas subpastas: só reaplica o token no HTTPS atual.
-# Reusa mf_git_aplicar_token_remote quando disponível (mesma lógica do update FAST).
+# Se $3 (repo_canonico) estiver definido, set-url na raiz para esse repo + token.
+# Caso contrário, só reaplica o token preservando o origin atual (update genérico).
 mf_opcao30_aplicar_token_nos_gits() {
   local app_root="${1:-}"
   local token="${2:-}"
   local repo_canonico="${3:-}"
-  local token_encoded new_url git_dir remotes_ok=0 remotes_fail=0
+  local remotes_ok=0 remotes_fail=0 git_dir
 
-  if [ -z "$app_root" ] || [ -z "$token" ] || [ -z "$repo_canonico" ]; then
+  if [ -z "$app_root" ] || [ -z "$token" ]; then
     return 1
   fi
 
@@ -8003,10 +8063,6 @@ mf_opcao30_aplicar_token_nos_gits() {
   elif [ -f "/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh" ]; then
     . "/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh"
   fi
-
-  token_encoded=$(codifica_clone_base "$token")
-  new_url="https://${token_encoded}@${repo_canonico#https://}"
-  [[ "$new_url" != *.git ]] && new_url="${new_url}.git"
 
   for git_dir in \
     "${app_root}" \
@@ -8025,11 +8081,11 @@ mf_opcao30_aplicar_token_nos_gits() {
       continue
     fi
 
-    if [ "$git_dir" = "$app_root" ]; then
-      # Raiz da instância: troca para ultraWhats + token
-      if git -c "safe.directory=${git_dir}" -C "${git_dir}" remote set-url origin "${new_url}"; then
-        printf "${GREEN} >> Remote origin atualizado para ultraWhats: ${BLUE}${git_dir}${WHITE}\n"
+    if [ "$git_dir" = "$app_root" ] && [ -n "$repo_canonico" ]; then
+      if type mf_git_aplicar_token_remote >/dev/null 2>&1 && mf_git_aplicar_token_remote "${git_dir}" "${token}" "${repo_canonico}"; then
+        printf "${GREEN} >> Remote origin atualizado: ${BLUE}${repo_canonico}${WHITE} em ${BLUE}${git_dir}${WHITE}\n"
         remotes_ok=$((remotes_ok + 1))
+        continue
       else
         printf "${RED} >> ERRO: git remote set-url falhou em ${git_dir}${WHITE}\n"
         remotes_fail=$((remotes_fail + 1))
@@ -8037,30 +8093,33 @@ mf_opcao30_aplicar_token_nos_gits() {
       fi
     fi
 
-    # Mesma função do update FAST (encoding idêntico ao fetch)
     if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
       if mf_git_aplicar_token_remote "${git_dir}" "${token}"; then
         printf "${GREEN} >> Token aplicado no remote origin: ${BLUE}${git_dir}${WHITE}\n"
-        [ "$git_dir" != "$app_root" ] && remotes_ok=$((remotes_ok + 1))
+        remotes_ok=$((remotes_ok + 1))
       else
         printf "${YELLOW} >> Aviso: não foi possível aplicar token em ${git_dir}${WHITE}\n"
         [ "$git_dir" = "$app_root" ] && remotes_fail=$((remotes_fail + 1))
       fi
-    elif [ "$git_dir" != "$app_root" ]; then
-      printf "${YELLOW} >> Aviso: mf_git_aplicar_token_remote indisponível; subpasta ${git_dir} não atualizada.${WHITE}\n"
+    else
+      printf "${YELLOW} >> Aviso: mf_git_aplicar_token_remote indisponível; ${git_dir} não atualizado.${WHITE}\n"
+      [ "$git_dir" = "$app_root" ] && remotes_fail=$((remotes_fail + 1))
     fi
   done
 
   [ "$remotes_ok" -gt 0 ] && [ "$remotes_fail" -eq 0 ]
 }
 
-# Valida token contra o repositório ultraWhats (ls-remote; fallback clone raso).
+# Valida token contra um repositório HTTPS GitHub qualquer (ls-remote; fallback clone raso).
+# $1 = token; $2 = host/path ou URL (ex.: github.com/org/repo.git ou https://github.com/org/repo.git)
 mf_opcao30_validar_token() {
   local token="${1:-}"
-  local repo_host="${2:-github.com/scriptswhitelabel/ultrawhats.git}"
-  local token_encoded url err_file test_dir
+  local repo_ref="${2:-}"
+  local token_encoded url err_file test_dir repo_host
 
-  [ -z "$token" ] && return 1
+  [ -z "$token" ] || [ -z "$repo_ref" ] && return 1
+  repo_host=$(echo "$repo_ref" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+  [[ "$repo_host" != *.git ]] && repo_host="${repo_host}.git"
   token_encoded=$(codifica_clone_base "$token")
   url="https://${token_encoded}@${repo_host}"
   export GIT_TERMINAL_PROMPT=0
@@ -8073,7 +8132,7 @@ mf_opcao30_validar_token() {
     return 0
   fi
 
-  test_dir="${INSTALADOR_DIR:-/tmp}/test_clone_ultrawhats_$(date +%s)"
+  test_dir="${INSTALADOR_DIR:-/tmp}/test_clone_token_$(date +%s)"
   if git clone --depth 1 "${url}" "${test_dir}" >/dev/null 2>>"$err_file"; then
     rm -rf "${test_dir}" >/dev/null 2>&1
     rm -f "$err_file"
@@ -8101,31 +8160,35 @@ mf_opcao30_validar_remote_local() {
   return 1
 }
 
+# Renova token GitHub da instância (genérico) e dispara Atualização FAST.
+# Mantém o nome atualizar_ultrawhats por compatibilidade com menu / --exec-ferramenta 30.
 atualizar_ultrawhats() {
-  # Repo canônico = mesmo origin do projeto local ultrawhats (scriptswhitelabel/ultrawhats).
-  local REPO_ULTRA_CANONICO="https://github.com/scriptswhitelabel/ultrawhats.git"
-  local REPO_ULTRA_HOST="github.com/scriptswhitelabel/ultrawhats.git"
+  local repo_sed=""
   local TOKEN_AUTH=""
   local APP_ROOT=""
   local ARQUIVO_VARIAVEIS_ALVO=""
   local token_sed=""
   local empresa_alvo=""
   local arquivo_vars_preservado=""
+  local REPO_ALVO=""
+  local REPO_HOST=""
+  local origin_publico=""
+  local forcar_set_url=""
+  local resposta_repo=""
 
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
   banner
-  printf "${WHITE} >> Atualizar ultraWhats (token GitHub + Atualização FAST)${WHITE}\n"
+  printf "${WHITE} >> Atualizar token GitHub + Atualização FAST${WHITE}\n"
   printf "${WHITE} >> Esta opção pede o PAT e já atualiza:${WHITE}\n"
-  printf "${BLUE}   1)${WHITE} github_token / repo_url no arquivo de variáveis da instância${WHITE}\n"
-  printf "${BLUE}   2)${WHITE} remote origin na pasta git (token embutido no HTTPS, como no update FAST)${WHITE}\n"
+  printf "${BLUE}   1)${WHITE} github_token (e repo_url se você trocar o link) no arquivo da instância${WHITE}\n"
+  printf "${BLUE}   2)${WHITE} remote origin na pasta git (token no HTTPS — sem trocar de repo, salvo se você pedir)${WHITE}\n"
   printf "${BLUE}   3)${WHITE} em seguida inicia automaticamente a Atualização FAST (mesma da opção 8)${WHITE}\n"
   echo
-  printf "${WHITE} >> Repositório alvo:${WHITE}\n"
-  printf "${BLUE}   ${REPO_ULTRA_CANONICO}${WHITE}\n"
+  printf "${YELLOW} >> Funciona com qualquer repositório HTTPS GitHub (ultrawhats, multiflow-pro, etc.).${WHITE}\n"
   echo
 
-  if ! selecionar_instancia_atualizar "apontar para ultraWhats / renovar token"; then
+  if ! selecionar_instancia_atualizar "renovar token GitHub / Atualização FAST"; then
     printf "${RED} >> Operação cancelada.${WHITE}\n"
     sleep 2
     return 1
@@ -8151,13 +8214,35 @@ atualizar_ultrawhats() {
     return 1
   fi
 
+  origin_publico=$(git -c "safe.directory=${APP_ROOT}" -C "${APP_ROOT}" remote get-url origin 2>/dev/null \
+    | sed -E 's#^(https?://)[^/@]+@#\1#' || true)
+  REPO_ALVO="${origin_publico:-${repo_url:-}}"
+  if [ -z "$REPO_ALVO" ]; then
+    printf "${RED} >> ERRO: nem origin nem repo_url definidos. Informe o link do repositório.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  [[ "$REPO_ALVO" != *.git ]] && [[ "$REPO_ALVO" =~ github\.com ]] && REPO_ALVO="${REPO_ALVO}.git"
+
   banner
   printf "${WHITE} >> Instância: ${BLUE}${empresa_alvo}${WHITE}\n"
   printf "${WHITE} >> Arquivo de variáveis: ${YELLOW}${arquivo_vars_preservado:- (não definido)}${WHITE}\n"
-  printf "${WHITE} >> Repositório atual: ${YELLOW}${repo_url:- (não definido)}${WHITE}\n"
-  printf "${WHITE} >> Novo repositório: ${GREEN}${REPO_ULTRA_CANONICO}${WHITE}\n"
+  printf "${WHITE} >> Origin atual: ${YELLOW}${origin_publico:- (não definido)}${WHITE}\n"
+  printf "${WHITE} >> repo_url da instância: ${YELLOW}${repo_url:- (não definido)}${WHITE}\n"
+  printf "${WHITE} >> Repositório alvo (validação): ${GREEN}${REPO_ALVO}${WHITE}\n"
   echo
-  printf "${WHITE} >> Digite o NOVO TOKEN (PAT) do GitHub com acesso ao repositório ultrawhats:${WHITE}\n"
+  printf "${YELLOW} >> Manter este repositório (s) ou colar um novo link HTTPS?${WHITE}\n"
+  echo
+  read -r -p "> " resposta_repo
+  resposta_repo=$(printf '%s' "$resposta_repo" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r')
+  if [ -n "$resposta_repo" ] && [ "$resposta_repo" != "s" ] && [ "$resposta_repo" != "S" ]; then
+    REPO_ALVO="$resposta_repo"
+    [[ "$REPO_ALVO" != *.git ]] && [[ "$REPO_ALVO" =~ github\.com ]] && REPO_ALVO="${REPO_ALVO}.git"
+    forcar_set_url="1"
+    printf "${GREEN} >> Novo repositório: ${REPO_ALVO}${WHITE}\n"
+  fi
+  echo
+  printf "${WHITE} >> Digite o NOVO TOKEN (PAT) do GitHub com acesso a este repositório:${WHITE}\n"
   printf "${YELLOW} >> (o valor não é gravado no código do instalador — só no arquivo da instância e no remote)${WHITE}\n"
   echo
   read -r -p "> " TOKEN_AUTH
@@ -8169,18 +8254,21 @@ atualizar_ultrawhats() {
     return 1
   fi
 
-  printf "${WHITE} >> Validando token (git ls-remote)...${WHITE}\n"
+  REPO_HOST=$(echo "$REPO_ALVO" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+  [[ "$REPO_HOST" != *.git ]] && REPO_HOST="${REPO_HOST}.git"
+
+  printf "${WHITE} >> Validando token contra ${BLUE}${REPO_ALVO}${WHITE}...${WHITE}\n"
   echo
   ERRO_GIT_VALIDACAO=""
-  if mf_opcao30_validar_token "$TOKEN_AUTH" "$REPO_ULTRA_HOST"; then
-    printf "${GREEN} >> Token validado com sucesso (acesso ao ultrawhats OK).${WHITE}\n"
+  if mf_opcao30_validar_token "$TOKEN_AUTH" "$REPO_HOST"; then
+    printf "${GREEN} >> Token validado com sucesso (acesso ao repositório OK).${WHITE}\n"
     echo
   else
-    printf "${RED} >> Token inválido ou sem acesso ao repositório ultrawhats.${WHITE}\n"
+    printf "${RED} >> Token inválido ou sem acesso ao repositório informado.${WHITE}\n"
     if [ -n "${ERRO_GIT_VALIDACAO:-}" ]; then
       printf "${YELLOW} >> Detalhe do Git: ${ERRO_GIT_VALIDACAO}${WHITE}\n"
     fi
-    printf "${YELLOW} >> Confira o PAT (scopes/repo) e tente novamente na opção 30.${WHITE}\n"
+    printf "${YELLOW} >> Confira o PAT (scopes/repo) e o link do repositório; tente novamente na opção 30.${WHITE}\n"
     sleep 2
     return 1
   fi
@@ -8202,23 +8290,33 @@ atualizar_ultrawhats() {
   fi
   printf "${GREEN} >> github_token salvo em: ${BLUE}${ARQUIVO_VARIAVEIS_ALVO}${WHITE}\n"
 
+  # Sempre alinha repo_url ao alvo validado (origin atual ou link novo)
+  repo_sed="${REPO_ALVO//&/\\&}"
   if grep -q "^repo_url=" "$ARQUIVO_VARIAVEIS_ALVO"; then
-    sed -i "s|^repo_url=.*|repo_url=${REPO_ULTRA_CANONICO}|" "$ARQUIVO_VARIAVEIS_ALVO"
+    sed -i "s|^repo_url=.*|repo_url=${repo_sed}|" "$ARQUIVO_VARIAVEIS_ALVO"
   else
-    echo "repo_url=${REPO_ULTRA_CANONICO}" >> "$ARQUIVO_VARIAVEIS_ALVO"
+    echo "repo_url=${REPO_ALVO}" >> "$ARQUIVO_VARIAVEIS_ALVO"
   fi
-  printf "${GREEN} >> repo_url atualizado para ${REPO_ULTRA_CANONICO}${WHITE}\n"
+  printf "${GREEN} >> repo_url = ${REPO_ALVO}${WHITE}\n"
 
-  repo_url="${REPO_ULTRA_CANONICO}"
+  repo_url="${REPO_ALVO}"
   github_token="${TOKEN_AUTH}"
   empresa="${empresa_alvo}"
   ARQUIVO_VARIAVEIS_USADO="${ARQUIVO_VARIAVEIS_ALVO}"
 
   printf "${WHITE} >> Aplicando token no remote origin (pasta git)...${WHITE}\n"
-  if ! mf_opcao30_aplicar_token_nos_gits "${APP_ROOT}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}"; then
-    printf "${RED} >> ERRO: não foi possível atualizar o remote origin com o novo token.${WHITE}\n"
-    sleep 2
-    return 1
+  if [ "$forcar_set_url" = "1" ]; then
+    if ! mf_opcao30_aplicar_token_nos_gits "${APP_ROOT}" "${TOKEN_AUTH}" "${REPO_ALVO}"; then
+      printf "${RED} >> ERRO: não foi possível atualizar o remote origin com o novo token/repo.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
+  else
+    if ! mf_opcao30_aplicar_token_nos_gits "${APP_ROOT}" "${TOKEN_AUTH}"; then
+      printf "${RED} >> ERRO: não foi possível aplicar o token no remote origin atual.${WHITE}\n"
+      sleep 2
+      return 1
+    fi
   fi
 
   printf "${WHITE} >> Validando remote local (git ls-remote origin HEAD)...${WHITE}\n"
@@ -8227,6 +8325,7 @@ atualizar_ultrawhats() {
   else
     printf "${RED} >> ERRO: o remote foi gravado, mas git ls-remote origin ainda falhou.${WHITE}\n"
     printf "${YELLOW} >> Verifique: git -C ${APP_ROOT} remote -v${WHITE}\n"
+    printf "${YELLOW} >> Token inválido/expirado ou sem acesso a este repositório — o refactor genérico não corrige PAT expirado.${WHITE}\n"
     sleep 2
     return 1
   fi
@@ -8234,11 +8333,11 @@ atualizar_ultrawhats() {
   mf_git_limpar_trackings_orfaos "${APP_ROOT}" || true
 
   if type aplicar_token_baileys_package_json >/dev/null 2>&1; then
-    aplicar_token_baileys_package_json "${empresa_alvo}" "${TOKEN_AUTH}" "${REPO_ULTRA_CANONICO}" || true
+    aplicar_token_baileys_package_json "${empresa_alvo}" "${TOKEN_AUTH}" "${REPO_ALVO}" || true
   fi
 
   echo
-  printf "${GREEN} >> Instância ${BLUE}${empresa_alvo}${GREEN} pronta para ultraWhats com o novo token.${WHITE}\n"
+  printf "${GREEN} >> Instância ${BLUE}${empresa_alvo}${GREEN} pronta com o novo token (repo: ${REPO_ALVO}).${WHITE}\n"
   printf "${GREEN} >> Atualizado:${WHITE}\n"
   printf "   - variáveis: github_token + repo_url (${ARQUIVO_VARIAVEIS_ALVO})${WHITE}\n"
   printf "   - git remote origin em ${APP_ROOT} (e subpastas com .git, se existirem)${WHITE}\n"
@@ -8246,8 +8345,6 @@ atualizar_ultrawhats() {
   printf "${WHITE} >> Iniciando Atualização FAST automaticamente (mesma função da opção 8)...${WHITE}\n"
   sleep 2
 
-  # Preserva seleção da instância para o FAST (evita escolher de novo se só houver 1;
-  # se houver várias, o FAST ainda lista — mas ARQUIVO_VARIAVEIS_USADO já aponta a correta).
   export ARQUIVO_VARIAVEIS_USADO="${ARQUIVO_VARIAVEIS_ALVO}"
   export MF_OPCAO30_INSTANCIA_PRESET="${ARQUIVO_VARIAVEIS_ALVO}"
   atualizar_base_fast

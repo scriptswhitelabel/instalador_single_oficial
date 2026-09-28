@@ -1,6 +1,6 @@
 #!/bin/bash
-# Sincroniza o repositório da instância com origin (descarta alterações locais e
-# arquivos não rastreados que impediriam checkout/merge).
+# Sincroniza o repositório da instância com o remote origin já configurado
+# (fetch + reset --hard). Não hardcoda um único repo (ultrawhats, multiflow-pro, etc.).
 #
 # Uso (como usuário deploy, dentro do diretório do projeto):
 #   . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
@@ -9,6 +9,7 @@
 #
 # Opcional (como root, antes do sudo su - deploy):
 #   mf_git_aplicar_token_remote "/home/deploy/EMPRESA" "$github_token"
+#   mf_git_aplicar_token_remote "/home/deploy/EMPRESA" "$github_token" "https://github.com/org/repo.git"
 
 mf_git_urlencode() {
   local length="${#1}"
@@ -22,23 +23,53 @@ mf_git_urlencode() {
   done
 }
 
+# Remove credenciais embutidas de uma URL git (https://TOKEN@host/... → https://host/...).
+mf_git_url_publica() {
+  local url="${1:-}"
+  [ -z "$url" ] && return 1
+  printf '%s\n' "$url" | sed -E 's#^(https?://)[^/@]+@#\1#'
+}
+
+# Retorna a URL pública do remote origin da pasta ($1 = app_root).
+mf_git_origin_publico() {
+  local app_root="${1:-}"
+  local current
+  [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && return 1
+  current=$(git -c "safe.directory=${app_root}" -C "${app_root}" remote get-url origin 2>/dev/null) || return 1
+  mf_git_url_publica "$current"
+}
+
+# True se a URL for HTTPS github.com (qualquer owner/repo).
+mf_git_url_https_github() {
+  local url="${1:-}"
+  echo "$url" | grep -Eqi '^https://([^/@]+@)?github\.com/'
+}
+
 # Grava github_token no remote origin (HTTPS) para fetch sem prompt interativo.
+# Por padrão preserva o host/path já configurado no origin (não troca de repositório).
 # $1 = raiz do app (/home/deploy/empresa). $2 = token.
+# $3 opcional = URL canônica sem token (https://github.com/org/repo.git) para set-url antes do token.
 mf_git_aplicar_token_remote() {
   local app_root="${1:-}"
   local token="${2:-}"
+  local repo_canonico="${3:-}"
   [ -z "$app_root" ] || [ -z "$token" ] && return 1
   [ ! -d "${app_root}/.git" ] && return 1
 
   local current path_repo tok_enc new_url
-  current=$(git -c "safe.directory=${app_root}" -C "${app_root}" remote get-url origin 2>/dev/null) || return 1
-  case "$current" in
-    https://*) ;;
-    *) return 0 ;;
-  esac
+  if [ -n "$repo_canonico" ]; then
+    path_repo=$(mf_git_url_publica "$repo_canonico" | sed 's|^https://||' | sed 's|^http://||')
+    [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
+  else
+    current=$(git -c "safe.directory=${app_root}" -C "${app_root}" remote get-url origin 2>/dev/null) || return 1
+    case "$current" in
+      https://*) ;;
+      *) return 0 ;;
+    esac
+    path_repo=$(printf '%s' "$current" | sed 's|https://[^@]*@||' | sed 's|^https://||')
+    [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
+  fi
 
-  path_repo=$(printf '%s' "$current" | sed 's|https://[^@]*@||' | sed 's|^https://||')
-  [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
   tok_enc=$(mf_git_urlencode "$token")
   new_url="https://${tok_enc}@${path_repo}"
 
@@ -79,8 +110,17 @@ mf_git_desabilitar_prompt() {
 mf_git_sincronizar_repositorio() {
   local commit_alvo="${1:-}"
   local branch_prefix="${2:-atualizacao}"
+  local origin_publico=""
 
   mf_git_desabilitar_prompt
+
+  origin_publico=$(git remote get-url origin 2>/dev/null | sed -E 's#^(https?://)[^/@]+@#\1#' || true)
+  if [ -n "$origin_publico" ]; then
+    echo " >> Git: remote origin = ${origin_publico}"
+  else
+    echo "ERRO: remote origin não configurado nesta pasta. Configure com: git remote -v"
+    return 1
+  fi
 
   echo " >> Git: liberando escrita em .git (pode demorar em repos grandes)..."
   chmod -R u+w .git 2>/dev/null || true
@@ -125,11 +165,11 @@ mf_git_sincronizar_repositorio() {
 
   MF_GIT_DEPLOY_BRANCH=$(mf_git_detectar_deploy_branch)
   if [ -z "$MF_GIT_DEPLOY_BRANCH" ]; then
-    echo "ERRO: Nenhuma branch remota conhecida em origin."
+    echo "ERRO: Nenhuma branch remota conhecida em origin (esperado: MULTI100-OFICIAL-u21, main ou master)."
     return 1
   fi
 
-  echo " >> Git: sincronizando branch ${MF_GIT_DEPLOY_BRANCH}..."
+  echo " >> Git: sincronizando branch ${MF_GIT_DEPLOY_BRANCH} (reset --hard origin/${MF_GIT_DEPLOY_BRANCH})..."
   git reset --hard "origin/${MF_GIT_DEPLOY_BRANCH}" || return 1
   git checkout -B "${MF_GIT_DEPLOY_BRANCH}" "origin/${MF_GIT_DEPLOY_BRANCH}" 2>/dev/null || true
   mf_git_clean_preservando_locais
