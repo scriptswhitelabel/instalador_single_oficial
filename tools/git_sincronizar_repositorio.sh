@@ -10,6 +10,16 @@
 # Opcional (como root, antes do sudo su - deploy):
 #   mf_git_aplicar_token_remote "/home/deploy/EMPRESA" "$github_token"
 #   mf_git_aplicar_token_remote "/home/deploy/EMPRESA" "$github_token" "https://github.com/org/repo.git"
+#
+# Recuperação de token inválido (como root, com TTY):
+#   mf_git_sincronizar_com_recuperacao_token "" "atualizacao" "/home/deploy/EMPRESA" "$ARQUIVO_VARIAVEIS_USADO"
+#   → se o fetch falhar por auth, pede novo PAT, grava na instância, aplica no origin e retenta.
+
+# Código de saída dedicado: falha de autenticação Git (token inválido / sem acesso).
+MF_GIT_EXIT_AUTH="${MF_GIT_EXIT_AUTH:-42}"
+
+# Caminho deste arquivo (para re-source as deploy).
+_MF_GIT_SYNC_SH="${BASH_SOURCE[0]:-}"
 
 mf_git_urlencode() {
   local length="${#1}"
@@ -105,12 +115,242 @@ mf_git_desabilitar_prompt() {
   export SSH_ASKPASS=true
 }
 
+# True se a mensagem de erro do git indicar falha de autenticação/credencial.
+mf_git_eh_erro_auth() {
+  local msg="${1:-}"
+  [ -z "$msg" ] && return 1
+  echo "$msg" | grep -Eiq \
+    'Authentication failed|Invalid username or token|invalid[[:space:]]+(username|token)|could not read Username|Permission denied \(publickey\)|ERROR:.*(401|403)|fatal:.*(Authentication|credential)|remote:.*(Invalid|Unauthorized|Permission)|Repository not found'
+}
+
+# Marca falha de auth para o caller (root) detectar mesmo se o exit code for mascarado.
+mf_git_marcar_auth_falhou() {
+  if [ -n "${MF_GIT_AUTH_MARKER:-}" ]; then
+    printf 'auth\n' > "${MF_GIT_AUTH_MARKER}" 2>/dev/null || true
+  fi
+}
+
+# Fetch com captura de stderr. Retorna 0 ok, MF_GIT_EXIT_AUTH (42) auth, 1 outro erro.
+mf_git_fetch_detectando_auth() {
+  local err_file rc=0
+  err_file=$(mktemp 2>/dev/null || echo "/tmp/mf_git_fetch_err_$$")
+  mf_git_desabilitar_prompt
+
+  if git fetch --all --tags --prune 2>"$err_file"; then
+    rm -f "$err_file" 2>/dev/null || true
+    return 0
+  fi
+
+  echo " >> Aviso: fetch --all falhou; tentando git fetch origin..."
+  if git fetch origin 2>>"$err_file"; then
+    rm -f "$err_file" 2>/dev/null || true
+    return 0
+  fi
+
+  # Exibe o erro do git para o operador
+  if [ -s "$err_file" ]; then
+    cat "$err_file" >&2 || true
+  fi
+
+  if mf_git_eh_erro_auth "$(cat "$err_file" 2>/dev/null)"; then
+    echo "ERRO: autenticação Git falhou (token inválido ou sem acesso ao remote origin)."
+    echo "ERRO: Verifique github_token no arquivo da instância e o remote: git remote -v"
+    mf_git_marcar_auth_falhou
+    rm -f "$err_file" 2>/dev/null || true
+    return "${MF_GIT_EXIT_AUTH}"
+  fi
+
+  echo "ERRO: git fetch falhou (rede ou credencial/token inválido no remote origin)."
+  echo "ERRO: Verifique github_token no arquivo da instância e o remote: git remote -v"
+  # Heurística: stderr menciona token/auth/credential → trata como auth recuperável
+  if grep -Eiq 'token|auth|credential|password|username' "$err_file" 2>/dev/null; then
+    mf_git_marcar_auth_falhou
+    rm -f "$err_file" 2>/dev/null || true
+    return "${MF_GIT_EXIT_AUTH}"
+  fi
+
+  rm -f "$err_file" 2>/dev/null || true
+  return 1
+}
+
+# Valida PAT contra um repo HTTPS (ls-remote; fallback clone raso).
+# $1 = token; $2 = URL ou host/path (ex.: https://github.com/org/repo.git).
+mf_git_validar_token_ls_remote() {
+  local token="${1:-}"
+  local repo_ref="${2:-}"
+  local token_encoded url err_file test_dir repo_host
+
+  [ -z "$token" ] || [ -z "$repo_ref" ] && return 1
+  repo_host=$(echo "$repo_ref" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+  [[ "$repo_host" != *.git ]] && repo_host="${repo_host}.git"
+  token_encoded=$(mf_git_urlencode "$token")
+  url="https://${token_encoded}@${repo_host}"
+
+  mf_git_desabilitar_prompt
+  err_file=$(mktemp 2>/dev/null || echo "/tmp/mf_git_val_err_$$")
+
+  if git ls-remote --exit-code "${url}" HEAD >/dev/null 2>"$err_file"; then
+    rm -f "$err_file" 2>/dev/null || true
+    return 0
+  fi
+
+  test_dir="/tmp/mf_git_test_clone_$$"
+  if git clone --depth 1 "${url}" "${test_dir}" >/dev/null 2>>"$err_file"; then
+    rm -rf "${test_dir}" >/dev/null 2>&1
+    rm -f "$err_file" 2>/dev/null || true
+    return 0
+  fi
+  rm -rf "${test_dir}" >/dev/null 2>&1
+  MF_GIT_ERRO_VALIDACAO=$(head -3 "$err_file" 2>/dev/null | tr '\n' ' ')
+  rm -f "$err_file" 2>/dev/null || true
+  return 1
+}
+
+# Grava github_token (e opcionalmente repo_url) no arquivo de variáveis da instância.
+# $1 = arquivo; $2 = token; $3 = repo_url opcional.
+mf_git_gravar_token_instancia() {
+  local arquivo="${1:-}"
+  local token="${2:-}"
+  local repo="${3:-}"
+  local token_sed repo_sed
+
+  [ -z "$arquivo" ] || [ -z "$token" ] && return 1
+  [ ! -f "$arquivo" ] && return 1
+
+  cp "$arquivo" "${arquivo}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+  token_sed="${token//&/\\&}"
+  if grep -q "^github_token=" "$arquivo"; then
+    sed -i "s|^github_token=.*|github_token=${token_sed}|" "$arquivo"
+  else
+    echo "github_token=${token}" >> "$arquivo"
+  fi
+
+  if [ -n "$repo" ]; then
+    repo_sed="${repo//&/\\&}"
+    if grep -q "^repo_url=" "$arquivo"; then
+      sed -i "s|^repo_url=.*|repo_url=${repo_sed}|" "$arquivo"
+    else
+      echo "repo_url=${repo}" >> "$arquivo"
+    fi
+  fi
+  return 0
+}
+
+# Lê uma linha do terminal do operador (não do heredoc).
+mf_git_read_tty() {
+  local prompt="${1:-}"
+  local _line=""
+  if [ -r /dev/tty ]; then
+    printf '%s' "$prompt" > /dev/tty 2>/dev/null || printf '%s' "$prompt"
+    IFS= read -r _line < /dev/tty || return 1
+  else
+    printf '%s' "$prompt"
+    IFS= read -r _line || return 1
+  fi
+  printf '%s\n' "$_line"
+}
+
+# Prompt interativo: novo PAT → validar → gravar instância → aplicar no origin.
+# $1 = app_root; $2 = arquivo de variáveis da instância.
+# Retorna 0 se token ok e aplicado; 1 se usuário cancelar ou token continuar inválido.
+mf_git_recuperar_token_interativo() {
+  local app_root="${1:-}"
+  local arquivo_vars="${2:-}"
+  local origin_publico="" repo_alvo="" novo_token="" resposta=""
+
+  [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && {
+    echo "ERRO: app_root git inválido para recuperar token: ${app_root:-}"
+    return 1
+  }
+  [ -z "$arquivo_vars" ] || [ ! -f "$arquivo_vars" ] && {
+    echo "ERRO: arquivo de variáveis da instância não encontrado: ${arquivo_vars:-}"
+    return 1
+  }
+
+  # Recarrega vars atuais (repo_url etc.)
+  # shellcheck source=/dev/null
+  . "$arquivo_vars" 2>/dev/null || true
+
+  origin_publico=$(mf_git_origin_publico "$app_root" 2>/dev/null || true)
+  repo_alvo="${origin_publico:-${repo_url:-}}"
+  if [ -z "$repo_alvo" ]; then
+    echo "ERRO: nem origin nem repo_url definidos — não é possível validar o token."
+    return 1
+  fi
+  [[ "$repo_alvo" != *.git ]] && [[ "$repo_alvo" =~ github\.com ]] && repo_alvo="${repo_alvo}.git"
+
+  echo
+  echo "=============================================================="
+  echo " Token inválido / autenticação Git falhou."
+  echo " Repositório: ${repo_alvo}"
+  echo "=============================================================="
+  echo
+
+  while true; do
+    echo "Token inválido. Cole um novo GitHub PAT:"
+    echo "(Enter vazio ou 'c' cancela a atualização)"
+    novo_token=$(mf_git_read_tty "> " | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
+    if [ -z "$novo_token" ] || [ "$novo_token" = "c" ] || [ "$novo_token" = "C" ]; then
+      echo " >> Operação cancelada pelo usuário (token não informado)."
+      return 1
+    fi
+
+    echo " >> Validando token (git ls-remote)..."
+    MF_GIT_ERRO_VALIDACAO=""
+    if ! mf_git_validar_token_ls_remote "$novo_token" "$repo_alvo"; then
+      echo " >> Token ainda inválido ou sem acesso a ${repo_alvo}."
+      [ -n "${MF_GIT_ERRO_VALIDACAO:-}" ] && echo " >> Detalhe: ${MF_GIT_ERRO_VALIDACAO}"
+      resposta=$(mf_git_read_tty "Tentar outro token? (s/N): " | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | tr -d '\r')
+      if [ "$resposta" = "s" ] || [ "$resposta" = "sim" ]; then
+        continue
+      fi
+      echo " >> Operação cancelada (token continua inválido)."
+      return 1
+    fi
+
+    echo " >> Token validado. Gravando na instância e aplicando no remote origin..."
+    if ! mf_git_gravar_token_instancia "$arquivo_vars" "$novo_token" "$repo_alvo"; then
+      echo "ERRO: não foi possível gravar github_token em ${arquivo_vars}"
+      return 1
+    fi
+
+    if ! mf_git_aplicar_token_remote "$app_root" "$novo_token" "$repo_alvo"; then
+      # Fallback: só reaplica token preservando path do origin
+      if ! mf_git_aplicar_token_remote "$app_root" "$novo_token"; then
+        echo "ERRO: não foi possível aplicar o token no remote origin."
+        return 1
+      fi
+    fi
+
+    # Confirma ls-remote no origin local (mesmo caminho do update)
+    mf_git_desabilitar_prompt
+    if ! git -c "safe.directory=${app_root}" -C "${app_root}" ls-remote --exit-code origin HEAD >/dev/null 2>&1; then
+      echo " >> Aviso: ls-remote origin ainda falhou após aplicar o token."
+      resposta=$(mf_git_read_tty "Informar outro token? (s/N): " | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | tr -d '\r')
+      if [ "$resposta" = "s" ] || [ "$resposta" = "sim" ]; then
+        continue
+      fi
+      return 1
+    fi
+
+    github_token="$novo_token"
+    repo_url="$repo_alvo"
+    export github_token repo_url
+    echo " >> github_token salvo e remoto origin atualizado. Retentando sync..."
+    echo
+    return 0
+  done
+}
+
 # $1 = commit (vazio = Mais Recente). $2 = prefixo opcional da branch temporária (commit fixo).
 # Define MF_GIT_DEPLOY_BRANCH quando sincroniza com origin.
+# Retorna MF_GIT_EXIT_AUTH (42) se o fetch falhar por autenticação.
 mf_git_sincronizar_repositorio() {
   local commit_alvo="${1:-}"
   local branch_prefix="${2:-atualizacao}"
   local origin_publico=""
+  local fetch_rc=0
 
   mf_git_desabilitar_prompt
 
@@ -126,13 +366,10 @@ mf_git_sincronizar_repositorio() {
   chmod -R u+w .git 2>/dev/null || true
 
   echo " >> Git: fetch do origin (sem prompt interativo)..."
-  if ! git fetch --all --tags --prune; then
-    echo " >> Aviso: fetch --all falhou; tentando git fetch origin..."
-    if ! git fetch origin; then
-      echo "ERRO: git fetch falhou (rede ou credencial/token inválido no remote origin)."
-      echo "ERRO: Verifique github_token no arquivo da instância e o remote: git remote -v"
-      return 1
-    fi
+  mf_git_fetch_detectando_auth
+  fetch_rc=$?
+  if [ "$fetch_rc" -ne 0 ]; then
+    return "$fetch_rc"
   fi
   echo " >> Git: fetch concluído."
 
@@ -176,4 +413,94 @@ mf_git_sincronizar_repositorio() {
   git reset --hard "origin/${MF_GIT_DEPLOY_BRANCH}" || return 1
   echo " >> Git: branch ${MF_GIT_DEPLOY_BRANCH} sincronizada."
   return 0
+}
+
+# Como root: aplica token atual, sincroniza como deploy; se auth falhar, pede novo PAT e retenta.
+# $1 = commit (vazio = Mais Recente); $2 = prefixo branch; $3 = app_root; $4 = arquivo variáveis.
+# Até sucesso ou cancelamento do usuário.
+mf_git_sincronizar_com_recuperacao_token() {
+  local commit_alvo="${1:-}"
+  local branch_prefix="${2:-atualizacao}"
+  local app_root="${3:-}"
+  local arquivo_vars="${4:-}"
+  local marker="" sync_sh="" rc=0 repo_canonico=""
+
+  [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && {
+    echo "ERRO: app_root inválido: ${app_root:-}"
+    return 1
+  }
+  [ -z "$arquivo_vars" ] || [ ! -f "$arquivo_vars" ] && {
+    echo "ERRO: arquivo de variáveis não encontrado: ${arquivo_vars:-}"
+    return 1
+  }
+
+  sync_sh="${_MF_GIT_SYNC_SH}"
+  if [ -z "$sync_sh" ] || [ ! -f "$sync_sh" ]; then
+    if [ -f "${INSTALADOR_DIR:-}/tools/git_sincronizar_repositorio.sh" ]; then
+      sync_sh="${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+    elif [ -f "/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh" ]; then
+      sync_sh="/root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh"
+    else
+      echo "ERRO: git_sincronizar_repositorio.sh não encontrado para sincronizar como deploy."
+      return 1
+    fi
+  fi
+
+  marker="/tmp/mf_git_auth_failed_$$"
+  rm -f "$marker" 2>/dev/null || true
+
+  while true; do
+    rm -f "$marker" 2>/dev/null || true
+    # shellcheck source=/dev/null
+    . "$arquivo_vars" 2>/dev/null || true
+
+    repo_canonico="${repo_url:-}"
+    if [ -n "${github_token:-}" ]; then
+      echo " >> Aplicando github_token no remote origin (git fetch sem prompt)..."
+      if [ -n "$repo_canonico" ] && mf_git_url_https_github "$repo_canonico"; then
+        mf_git_aplicar_token_remote "$app_root" "$github_token" "$repo_canonico" \
+          || mf_git_aplicar_token_remote "$app_root" "$github_token" || true
+      else
+        mf_git_aplicar_token_remote "$app_root" "$github_token" || true
+      fi
+    fi
+
+    # Sync como deploy (ownership correto). Propaga exit code (incl. 42).
+    set +e
+    sudo -u deploy env \
+      MF_GIT_AUTH_MARKER="$marker" \
+      MF_GIT_EXIT_AUTH="${MF_GIT_EXIT_AUTH}" \
+      GIT_TERMINAL_PROMPT=0 \
+      GIT_ASKPASS=true \
+      bash -c "
+        set +e
+        cd $(printf '%q' "$app_root") || exit 1
+        # shellcheck source=/dev/null
+        . $(printf '%q' "$sync_sh")
+        mf_git_sincronizar_repositorio $(printf '%q' "$commit_alvo") $(printf '%q' "$branch_prefix")
+        exit \$?
+      "
+    rc=$?
+    set -e
+
+    if [ "$rc" -eq 0 ]; then
+      rm -f "$marker" 2>/dev/null || true
+      return 0
+    fi
+
+    if [ -f "$marker" ] || [ "$rc" -eq "${MF_GIT_EXIT_AUTH}" ]; then
+      echo " >> Falha de autenticação no git fetch — solicitando novo token..."
+      if ! mf_git_recuperar_token_interativo "$app_root" "$arquivo_vars"; then
+        rm -f "$marker" 2>/dev/null || true
+        return 1
+      fi
+      # shellcheck source=/dev/null
+      . "$arquivo_vars" 2>/dev/null || true
+      continue
+    fi
+
+    echo "ERRO: sincronização git falhou (código ${rc}) — não é falha de token recuperável."
+    rm -f "$marker" 2>/dev/null || true
+    return "$rc"
+  done
 }

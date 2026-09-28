@@ -1223,17 +1223,34 @@ MF_GIT_SYNC_INLINE
 )
   fi
 
-  if [ -n "${github_token:-}" ] && type mf_git_aplicar_token_remote >/dev/null 2>&1; then
-    printf "${WHITE} >> Aplicando github_token no remote origin...${WHITE}\n"
-    mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
-      || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote.${WHITE}\n"
-  elif [ -z "${github_token:-}" ]; then
+  # Sync ANTES do heredoc: recuperação de PAT no TTY do root se auth falhar.
+  if [ -z "${ARQUIVO_VARIAVEIS_USADO:-}" ] || [ ! -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    printf "${RED} >> ERRO: arquivo de variáveis da instância não definido (ARQUIVO_VARIAVEIS_USADO).${WHITE}\n"
+    trata_erro "arquivo_variaveis_ausente_git"
+  fi
+  if [ -z "${github_token:-}" ]; then
     _origin_chk=$(git -c "safe.directory=/home/deploy/${empresa}" -C "/home/deploy/${empresa}" remote get-url origin 2>/dev/null || true)
     if echo "${repo_url:-}${_origin_chk}" | grep -Eqi 'github\.com'; then
-      printf "${RED} >> ERRO: github_token não definido — o git fetch HTTPS do GitHub costuma falhar em repos privados.${WHITE}\n"
-      trata_erro "github_token_ausente_git"
+      printf "${YELLOW} >> Aviso: github_token não definido — se o fetch falhar por auth, será pedido um novo PAT.${WHITE}\n"
     fi
   fi
+  printf "${WHITE} >> Sincronizando código com origin (recuperação de token se auth falhar)...${WHITE}\n"
+  printf "${WHITE} >> (aguarde; não use Ctrl+Z)${WHITE}\n"
+  if ! type mf_git_sincronizar_com_recuperacao_token >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: mf_git_sincronizar_com_recuperacao_token indisponível (tools/git_sincronizar_repositorio.sh).${WHITE}\n"
+    trata_erro "git_sync_lib_ausente"
+  fi
+  if [ -n "${commit_atualizacao}" ]; then
+    mf_git_sincronizar_com_recuperacao_token "${commit_atualizacao}" "atualizacao-fast-${versao_atualizacao}" \
+      "/home/deploy/${empresa}" "${ARQUIVO_VARIAVEIS_USADO}" \
+      || trata_erro "git_sync_token"
+  else
+    mf_git_sincronizar_com_recuperacao_token "" "atualizacao-fast" \
+      "/home/deploy/${empresa}" "${ARQUIVO_VARIAVEIS_USADO}" \
+      || trata_erro "git_sync_token"
+  fi
+  carregar_credenciais_instancia
+  printf "${GREEN} >> Repositório sincronizado.${WHITE}\n"
 
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
@@ -1254,22 +1271,10 @@ else
     export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
   fi
 fi
-${MF_GIT_SYNC_BODY}
 
-printf "${WHITE} >> Atualizando código (git)...\n"
+printf "${WHITE} >> Código já sincronizado; seguindo com build (FAST)...\n"
 echo
 cd /home/deploy/${empresa}
-
-if [ -n "${commit_atualizacao}" ]; then
-  printf "${WHITE} >> Checkout versão ${versao_atualizacao} (commit ${commit_atualizacao})...${WHITE}\n"
-  printf "${WHITE} >> (fetch + checkout — aguarde; não use Ctrl+Z)${WHITE}\n"
-  mf_git_sincronizar_repositorio "${commit_atualizacao}" "atualizacao-fast-${versao_atualizacao}" || exit 1
-else
-  printf "${WHITE} >> Sincronizando com origin (Mais Recente: fetch + reset)...${WHITE}\n"
-  printf "${WHITE} >> (aguarde; não use Ctrl+Z)${WHITE}\n"
-  mf_git_sincronizar_repositorio "" || exit 1
-  printf "${WHITE} >> Branch sincronizada: \${MF_GIT_DEPLOY_BRANCH}${WHITE}\n"
-fi
 
 if [ -d "/home/deploy/${empresa}/api_transcricao" ] && [ -f "/home/deploy/${empresa}/api_transcricao/main.py" ]; then
   main_py_transc="/home/deploy/${empresa}/api_transcricao/main.py"

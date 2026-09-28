@@ -4595,7 +4595,7 @@ validar_e_atualizar_token_antes_atualizar() {
     repo_url="${repo_validacao}"
   fi
   echo
-  printf "${YELLOW} >> Digite o novo token de autorização do GitHub:${WHITE}\n"
+  printf "${RED} >> Token inválido. Cole um novo GitHub PAT:${WHITE}\n"
   echo
   read -r -p "> " novo_token
   novo_token=$(printf '%s' "$novo_token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r\n')
@@ -6090,17 +6090,35 @@ MF_GIT_SYNC_INLINE
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "$frontend_port" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
 
-  # Token no origin (fetch sem prompt) — preserva o remote já configurado (qualquer repo).
+  # Sync ANTES do heredoc: se auth falhar, pede novo PAT no TTY, grava na instância, aplica origin e retenta.
   if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
     # shellcheck source=/dev/null
     . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
   fi
-  if [ -n "${github_token:-}" ] && type mf_git_aplicar_token_remote >/dev/null 2>&1; then
-    printf "${WHITE} >> Aplicando github_token no remote origin (git fetch sem prompt)...${WHITE}\n"
-    mf_git_aplicar_token_remote "/home/deploy/${empresa}" "${github_token}" \
-      && printf "${GREEN} >> Token aplicado no remote origin.${WHITE}\n" \
-      || printf "${YELLOW} >> Aviso: não foi possível gravar o token no remote; o fetch pode falhar.${WHITE}\n"
+  if [ -z "${ARQUIVO_VARIAVEIS_USADO:-}" ] || [ ! -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    printf "${RED} >> ERRO: arquivo de variáveis da instância não definido (ARQUIVO_VARIAVEIS_USADO).${WHITE}\n"
+    trata_erro "arquivo_variaveis_ausente_git"
   fi
+  printf "${WHITE} >> Sincronizando código com origin (recuperação de token se auth falhar)...${WHITE}\n"
+  if ! type mf_git_sincronizar_com_recuperacao_token >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: mf_git_sincronizar_com_recuperacao_token indisponível (tools/git_sincronizar_repositorio.sh).${WHITE}\n"
+    trata_erro "git_sync_lib_ausente"
+  fi
+  if [ -n "${commit_atualizacao}" ]; then
+    mf_git_sincronizar_com_recuperacao_token "${commit_atualizacao}" "atualizacao" \
+      "/home/deploy/${empresa}" "${ARQUIVO_VARIAVEIS_USADO}" \
+      || trata_erro "git_sync_token"
+  else
+    mf_git_sincronizar_com_recuperacao_token "" "atualizacao" \
+      "/home/deploy/${empresa}" "${ARQUIVO_VARIAVEIS_USADO}" \
+      || trata_erro "git_sync_token"
+  fi
+  # Recarrega token (pode ter sido renovado no prompt)
+  if [ -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
+    # shellcheck source=/dev/null
+    source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null || true
+  fi
+  printf "${GREEN} >> Repositório sincronizado.${WHITE}\n"
 
   if ! sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
@@ -6125,7 +6143,6 @@ MF_GIT_SYNC_INLINE
       exit 1
     fi
   fi
-${MF_GIT_SYNC_BODY}
   
   APP_DIR="/home/deploy/${empresa}"
   BACKEND_DIR="\${APP_DIR}/backend"
@@ -6173,14 +6190,7 @@ ${MF_GIT_SYNC_BODY}
   fi
   # ==== FIM PASTA ESTÁTICA ====
 
-  if [ -n "${commit_atualizacao}" ]; then
-    printf "${WHITE} >> Atualizando para commit fixo (versão pinada)...\n"
-    mf_git_sincronizar_repositorio "${commit_atualizacao}" "atualizacao" || exit 1
-  else
-    printf "${WHITE} >> Sincronizando com origin (Mais Recente: fetch + reset)...\n"
-    mf_git_sincronizar_repositorio "" || exit 1
-    printf "${WHITE} >> Branch sincronizada: \${MF_GIT_DEPLOY_BRANCH}\n"
-  fi
+  printf "${WHITE} >> Código já sincronizado; seguindo com build...${WHITE}\n"
 
   # Reaplicar porta da transcrição (git reset reverte main.py para o padrão 4002)
   if [ -d "\$APP_DIR/api_transcricao" ] && [ -f "\$APP_DIR/api_transcricao/main.py" ]; then
