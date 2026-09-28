@@ -320,12 +320,25 @@ mf_git_recuperar_token_interativo() {
   . "$arquivo_vars" 2>/dev/null || true
 
   origin_publico=$(mf_git_origin_publico "$app_root" 2>/dev/null || true)
-  repo_alvo="${origin_publico:-${repo_url:-}}"
+  # Fonte da verdade: repo_url das variáveis; origin só se repo_url estiver vazio.
+  if [ -n "${repo_url:-}" ] && mf_git_url_https_github "$repo_url"; then
+    repo_alvo=$(mf_git_url_publica "$repo_url")
+  else
+    repo_alvo="${origin_publico:-}"
+  fi
   if [ -z "$repo_alvo" ]; then
     echo "ERRO: nem origin nem repo_url definidos — não é possível validar o token."
     return 1
   fi
   [[ "$repo_alvo" != *.git ]] && [[ "$repo_alvo" =~ github\.com ]] && repo_alvo="${repo_alvo}.git"
+
+  if [ -n "$origin_publico" ] && [ -n "${repo_url:-}" ]; then
+    _o=$(mf_git_url_publica "$origin_publico" | tr '[:upper:]' '[:lower:]' | sed 's|\.git$||')
+    _r=$(mf_git_url_publica "$repo_url" | tr '[:upper:]' '[:lower:]' | sed 's|\.git$||')
+    if [ -n "$_o" ] && [ -n "$_r" ] && [ "$_o" != "$_r" ]; then
+      echo " >> Aviso: origin (${origin_publico}) difere de repo_url. Validando/aplicando contra repo_url: ${repo_alvo}"
+    fi
+  fi
 
   echo
   echo "=============================================================="
@@ -356,14 +369,14 @@ mf_git_recuperar_token_interativo() {
       return 1
     fi
 
-    echo " >> Token validado. Gravando na instância e aplicando no remote origin..."
+    echo " >> Token validado. Gravando na instância e alinhando origin ao repo_url..."
     if ! mf_git_gravar_token_instancia "$arquivo_vars" "$novo_token" "$repo_alvo"; then
       echo "ERRO: não foi possível gravar github_token em ${arquivo_vars}"
       return 1
     fi
 
+    # Alinha origin ao repo_url (fonte da verdade nas variáveis).
     if ! mf_git_aplicar_token_remote "$app_root" "$novo_token" "$repo_alvo"; then
-      # Fallback: só reaplica token preservando path do origin
       if ! mf_git_aplicar_token_remote "$app_root" "$novo_token"; then
         echo "ERRO: não foi possível aplicar o token no remote origin."
         return 1
@@ -514,15 +527,33 @@ mf_git_sincronizar_com_recuperacao_token() {
     # shellcheck source=/dev/null
     . "$arquivo_vars" 2>/dev/null || true
 
+    # Update: repo_url das variáveis da instância é a fonte da verdade.
+    # Não usar o origin atual se ele divergir (ex.: origin foi sobrescrito para
+    # multiflow-pro por engano enquanto repo_url=ultrawhats).
+    origin_antes=$(mf_git_origin_publico "$app_root" 2>/dev/null || true)
     repo_canonico="${repo_url:-}"
-    if [ -n "${github_token:-}" ]; then
-      echo " >> Aplicando github_token no remote origin (git fetch sem prompt)..."
-      if [ -n "$repo_canonico" ] && mf_git_url_https_github "$repo_canonico"; then
+    if [ -n "$repo_canonico" ] && mf_git_url_https_github "$repo_canonico"; then
+      [[ "$repo_canonico" != *.git ]] && repo_canonico="${repo_canonico}.git"
+      if [ -n "$origin_antes" ]; then
+        origin_norm=$(mf_git_url_publica "$origin_antes" | tr '[:upper:]' '[:lower:]' | sed 's|\.git$||')
+        repo_norm=$(mf_git_url_publica "$repo_canonico" | tr '[:upper:]' '[:lower:]' | sed 's|\.git$||')
+        if [ -n "$origin_norm" ] && [ "$origin_norm" != "$repo_norm" ]; then
+          echo " >> Aviso: origin (${origin_antes}) difere de repo_url (${repo_canonico})."
+          echo " >> Corrigindo remote origin para o repo_url da instância."
+        fi
+      fi
+      echo " >> Repositório da instância (repo_url): ${repo_canonico}"
+      if [ -n "${github_token:-}" ]; then
+        echo " >> Aplicando github_token e alinhando origin ao repo_url..."
         mf_git_aplicar_token_remote "$app_root" "$github_token" "$repo_canonico" \
           || mf_git_aplicar_token_remote "$app_root" "$github_token" || true
       else
-        mf_git_aplicar_token_remote "$app_root" "$github_token" || true
+        # Sem token: ainda assim alinha o path do origin ao repo_url (HTTPS sem credencial).
+        git -c "safe.directory=${app_root}" -C "${app_root}" remote set-url origin "$repo_canonico" 2>/dev/null || true
       fi
+    elif [ -n "${github_token:-}" ]; then
+      echo " >> Aplicando github_token no remote origin (repo_url ausente; preserva path atual)..."
+      mf_git_aplicar_token_remote "$app_root" "$github_token" || true
     fi
 
     # Sync como deploy (ownership correto). Propaga exit code (incl. 42).

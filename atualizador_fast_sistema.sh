@@ -61,6 +61,9 @@ sistema_resolver_empresa() {
     local arq
     for arq in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
       [ -f "$arq" ] || continue
+      case "$arq" in
+        *.backup*|*.bak*|*.old*) continue ;;
+      esac
       local e2
       e2=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
       if [ "$e2" = "$emp_arg" ] && [ -d "/home/deploy/${emp_arg}/backend" ]; then
@@ -216,6 +219,9 @@ detectar_instancias_instaladas() {
   if [ -d "${INSTALADOR_DIR}" ]; then
     for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
       if [ -f "$arquivo_instancia" ]; then
+        case "$arquivo_instancia" in
+          *.backup*|*.bak*|*.old*) continue ;;
+        esac
         # Salvar variáveis atuais
         local empresa_original="${empresa:-}"
         local subdominio_backend_original="${subdominio_backend:-}"

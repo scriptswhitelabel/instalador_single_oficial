@@ -93,6 +93,10 @@ detectar_instancias_instaladas() {
   if [ -d "${INSTALADOR_DIR}" ]; then
     for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
       if [ -f "$arquivo_instancia" ]; then
+        # Ignorar backups (ex.: VARIAVEIS_..._web.backup.20260928_...)
+        case "$arquivo_instancia" in
+          *.backup*|*.bak*|*.old*) continue ;;
+        esac
         # Salvar variáveis atuais
         local empresa_original="${empresa:-}"
         local subdominio_backend_original="${subdominio_backend:-}"
@@ -114,7 +118,7 @@ detectar_instancias_instaladas() {
       fi
     done
   fi
-  
+
   # Retornar arrays (usando variáveis globais)
   declare -g INSTANCIAS_DETECTADAS=("${instancias[@]}")
   declare -g NOMES_EMPRESAS_DETECTADAS=("${nomes_empresas[@]}")
