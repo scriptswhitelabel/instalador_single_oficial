@@ -2,7 +2,7 @@
 # Sincroniza o repositório da instância com o remote origin já configurado
 # (fetch + reset --hard). Não hardcoda um único repo (ultrawhats, multiflow-pro, etc.).
 #
-# Uso (como usuário deploy, dentro do diretório do projeto):
+# Uso (sempre via source — NÃO executar como binário):
 #   . /root/instalador_single_oficial/tools/git_sincronizar_repositorio.sh
 #   mf_git_sincronizar_repositorio ""                    # Mais Recente (origin)
 #   mf_git_sincronizar_repositorio "abc123" "atualizacao"  # commit fixo
@@ -14,12 +14,59 @@
 # Recuperação de token inválido (como root, com TTY):
 #   mf_git_sincronizar_com_recuperacao_token "" "atualizacao" "/home/deploy/EMPRESA" "$ARQUIVO_VARIAVEIS_USADO"
 #   → se o fetch falhar por auth, pede novo PAT, grava na instância, aplica no origin e retenta.
+#   → como deploy não lê /root, a lib é copiada para /tmp antes do source.
 
 # Código de saída dedicado: falha de autenticação Git (token inválido / sem acesso).
 MF_GIT_EXIT_AUTH="${MF_GIT_EXIT_AUTH:-42}"
 
 # Caminho deste arquivo (para re-source as deploy).
 _MF_GIT_SYNC_SH="${BASH_SOURCE[0]:-}"
+
+# Garante +x em tools/*.sh (e leitura) para não falhar com Permission denied / 127.
+# deploy não executa estes arquivos como binário — usamos source — mas +x evita
+# scripts legados e deixa o diretório tools consistente no servidor.
+mf_garantir_tools_executaveis() {
+  local tools_dir="${1:-}"
+  local self_dir=""
+
+  if [ -z "$tools_dir" ]; then
+    if [ -n "${INSTALADOR_DIR:-}" ] && [ -d "${INSTALADOR_DIR}/tools" ]; then
+      tools_dir="${INSTALADOR_DIR}/tools"
+    elif [ -n "${_MF_GIT_SYNC_SH:-}" ] && [ -f "${_MF_GIT_SYNC_SH}" ]; then
+      self_dir="$(cd "$(dirname "${_MF_GIT_SYNC_SH}")" && pwd)"
+      tools_dir="$self_dir"
+    elif [ -d "/root/instalador_single_oficial/tools" ]; then
+      tools_dir="/root/instalador_single_oficial/tools"
+    else
+      return 0
+    fi
+  fi
+  [ -d "$tools_dir" ] || return 0
+  chmod a+rx "$tools_dir"/*.sh 2>/dev/null || true
+}
+
+# Copia lib para caminho legível pelo usuário deploy (/root/* costuma ser inacessível).
+# Retorna o caminho a usar no source (stdout). Caller deve rm se for /tmp.
+mf_git_sync_sh_legivel_deploy() {
+  local src="${1:-}"
+  local tmp=""
+
+  [ -n "$src" ] && [ -f "$src" ] || return 1
+
+  # Já legível por deploy? Reutiliza.
+  if sudo -u deploy test -r "$src" 2>/dev/null; then
+    printf '%s\n' "$src"
+    return 0
+  fi
+
+  tmp=$(mktemp /tmp/mf_git_sync_XXXXXX.sh) || return 1
+  cp -f "$src" "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  chmod 644 "$tmp" 2>/dev/null || true
+  printf '%s\n' "$tmp"
+}
 
 mf_git_urlencode() {
   local length="${#1}"
@@ -423,7 +470,7 @@ mf_git_sincronizar_com_recuperacao_token() {
   local branch_prefix="${2:-atualizacao}"
   local app_root="${3:-}"
   local arquivo_vars="${4:-}"
-  local marker="" sync_sh="" rc=0 repo_canonico=""
+  local marker="" sync_sh="" rc=0 repo_canonico="" sync_for_deploy="" sync_tmp=""
 
   [ -z "$app_root" ] || [ ! -d "${app_root}/.git" ] && {
     echo "ERRO: app_root inválido: ${app_root:-}"
@@ -446,6 +493,19 @@ mf_git_sincronizar_com_recuperacao_token() {
     fi
   fi
 
+  mf_garantir_tools_executaveis "$(cd "$(dirname "$sync_sh")" && pwd)"
+  chmod a+rx "$sync_sh" 2>/dev/null || true
+
+  # deploy não lê /root — source do path original → Permission denied → 127.
+  # Sempre preferir cópia legível em /tmp quando necessário.
+  sync_for_deploy=$(mf_git_sync_sh_legivel_deploy "$sync_sh") || {
+    echo "ERRO: não foi possível preparar git_sincronizar_repositorio.sh legível para deploy."
+    return 1
+  }
+  case "$sync_for_deploy" in
+    /tmp/mf_git_sync_*) sync_tmp="$sync_for_deploy" ;;
+  esac
+
   marker="/tmp/mf_git_auth_failed_$$"
   rm -f "$marker" 2>/dev/null || true
 
@@ -466,6 +526,7 @@ mf_git_sincronizar_com_recuperacao_token() {
     fi
 
     # Sync como deploy (ownership correto). Propaga exit code (incl. 42).
+    # Sempre `source` (nunca executar o .sh como binário) para definir mf_git_*.
     set +e
     sudo -u deploy env \
       MF_GIT_AUTH_MARKER="$marker" \
@@ -476,7 +537,14 @@ mf_git_sincronizar_com_recuperacao_token() {
         set +e
         cd $(printf '%q' "$app_root") || exit 1
         # shellcheck source=/dev/null
-        . $(printf '%q' "$sync_sh")
+        . $(printf '%q' "$sync_for_deploy") || {
+          echo \"ERRO: falha ao source $(printf '%q' "$sync_for_deploy") (permissão/leitura).\"
+          exit 1
+        }
+        if ! type mf_git_sincronizar_repositorio >/dev/null 2>&1; then
+          echo 'ERRO: mf_git_sincronizar_repositorio não definida após source.'
+          exit 1
+        fi
         mf_git_sincronizar_repositorio $(printf '%q' "$commit_alvo") $(printf '%q' "$branch_prefix")
         exit \$?
       "
@@ -484,14 +552,14 @@ mf_git_sincronizar_com_recuperacao_token() {
     set -e
 
     if [ "$rc" -eq 0 ]; then
-      rm -f "$marker" 2>/dev/null || true
+      rm -f "$marker" "$sync_tmp" 2>/dev/null || true
       return 0
     fi
 
     if [ -f "$marker" ] || [ "$rc" -eq "${MF_GIT_EXIT_AUTH}" ]; then
       echo " >> Falha de autenticação no git fetch — solicitando novo token..."
       if ! mf_git_recuperar_token_interativo "$app_root" "$arquivo_vars"; then
-        rm -f "$marker" 2>/dev/null || true
+        rm -f "$marker" "$sync_tmp" 2>/dev/null || true
         return 1
       fi
       # shellcheck source=/dev/null
@@ -500,7 +568,7 @@ mf_git_sincronizar_com_recuperacao_token() {
     fi
 
     echo "ERRO: sincronização git falhou (código ${rc}) — não é falha de token recuperável."
-    rm -f "$marker" 2>/dev/null || true
+    rm -f "$marker" "$sync_tmp" 2>/dev/null || true
     return "$rc"
   done
 }

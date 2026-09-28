@@ -44,6 +44,17 @@ mf_garantir_sudo || {
   exit 1
 }
 
+# tools/*.sh: +x cedo (evita Permission denied / 127 se algum trecho executar em vez de source)
+INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "${INSTALADOR_DIR}/tools" ]; then
+  chmod a+rx "${INSTALADOR_DIR}/tools"/*.sh 2>/dev/null || true
+fi
+if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+  type mf_garantir_tools_executaveis >/dev/null 2>&1 && mf_garantir_tools_executaveis "${INSTALADOR_DIR}/tools"
+fi
+
 # Codename APT (noble, jammy, trixie…) sem depender só de lsb-release (Ubuntu 24 minimal / Debian)
 mf_detectar_codename_apt() {
   local codename id ver
@@ -6091,17 +6102,20 @@ MF_GIT_SYNC_INLINE
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
 
   # Sync ANTES do heredoc: se auth falhar, pede novo PAT no TTY, grava na instância, aplica origin e retenta.
+  chmod a+rx "${INSTALADOR_DIR}/tools"/*.sh 2>/dev/null || true
   if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
     # shellcheck source=/dev/null
     . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+    type mf_garantir_tools_executaveis >/dev/null 2>&1 && mf_garantir_tools_executaveis "${INSTALADOR_DIR}/tools"
   fi
   if [ -z "${ARQUIVO_VARIAVEIS_USADO:-}" ] || [ ! -f "${ARQUIVO_VARIAVEIS_USADO}" ]; then
     printf "${RED} >> ERRO: arquivo de variáveis da instância não definido (ARQUIVO_VARIAVEIS_USADO).${WHITE}\n"
     trata_erro "arquivo_variaveis_ausente_git"
   fi
   printf "${WHITE} >> Sincronizando código com origin (recuperação de token se auth falhar)...${WHITE}\n"
-  if ! type mf_git_sincronizar_com_recuperacao_token >/dev/null 2>&1; then
-    printf "${RED} >> ERRO: mf_git_sincronizar_com_recuperacao_token indisponível (tools/git_sincronizar_repositorio.sh).${WHITE}\n"
+  if ! type mf_git_sincronizar_com_recuperacao_token >/dev/null 2>&1 \
+    || ! type mf_git_sincronizar_repositorio >/dev/null 2>&1; then
+    printf "${RED} >> ERRO: funções mf_git_* indisponíveis (tools/git_sincronizar_repositorio.sh).${WHITE}\n"
     trata_erro "git_sync_lib_ausente"
   fi
   if [ -n "${commit_atualizacao}" ]; then

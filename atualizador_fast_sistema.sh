@@ -31,6 +31,16 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# tools/*.sh: +x cedo (evita Permission denied / 127 se algum trecho executar em vez de source)
+if [ -d "${INSTALADOR_DIR}/tools" ]; then
+  chmod a+rx "${INSTALADOR_DIR}/tools"/*.sh 2>/dev/null || true
+fi
+if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+  type mf_garantir_tools_executaveis >/dev/null 2>&1 && mf_garantir_tools_executaveis "${INSTALADOR_DIR}/tools"
+fi
+
 # --- Modo sistema: empresa por argumento, env ou única instância detectada ---
 sistema_resolver_empresa() {
   local emp_arg="${1:-${MF_EMPRESA:-}}"
@@ -1163,9 +1173,16 @@ baixa_codigo_atualizar() {
   porta_transcricao=${porta_transcricao:-4002}
   ativar_tela_atualizacao_frontend
   INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  chmod a+rx "${INSTALADOR_DIR}/tools"/*.sh 2>/dev/null || true
   if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
     # shellcheck source=/dev/null
     . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+    type mf_garantir_tools_executaveis >/dev/null 2>&1 && mf_garantir_tools_executaveis "${INSTALADOR_DIR}/tools"
+    if ! type mf_git_sincronizar_repositorio >/dev/null 2>&1 \
+      || ! type mf_git_sincronizar_com_recuperacao_token >/dev/null 2>&1; then
+      printf "${RED} >> ERRO: funções mf_git_* ausentes após source de git_sincronizar_repositorio.sh.${WHITE}\n"
+      trata_erro "git_sync_lib_ausente"
+    fi
     MF_GIT_SYNC_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh")
   else
     MF_GIT_SYNC_BODY=$(cat <<'MF_GIT_SYNC_INLINE'
