@@ -6,6 +6,22 @@
 # Aviso exibido na opção [0] Mais Recente (instalação, FAST, atualização completa).
 MF_AVISO_OPCAO_MAIS_RECENTE="( Versão DEMO para Homologação )"
 
+# True se a instância deve mostrar o menu de versões (versoes_multiflow_pro.conf).
+# Apenas multiflow-pro (repo_url ou remote origin).
+mf_repo_usa_menu_versoes() {
+  local repo="${1:-${repo_url:-}}"
+  local emp="${2:-${empresa:-}}"
+  local origin=""
+  if echo "$repo" | grep -Eq "scriptswhitelabel/multiflow-pro"; then
+    return 0
+  fi
+  if [ -n "$emp" ] && [ -d "/home/deploy/${emp}/.git" ]; then
+    origin=$(git -c "safe.directory=/home/deploy/${emp}" -C "/home/deploy/${emp}" remote get-url origin 2>/dev/null || true)
+    echo "$origin" | grep -Eq "scriptswhitelabel/multiflow-pro" && return 0
+  fi
+  return 1
+}
+
 mf_arquivo_versoes_multiflow_pro() {
   if [ -n "${INSTALADOR_DIR:-}" ] && [ -f "${INSTALADOR_DIR}/tools/versoes_multiflow_pro.conf" ]; then
     printf '%s\n' "${INSTALADOR_DIR}/tools/versoes_multiflow_pro.conf"

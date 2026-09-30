@@ -4774,10 +4774,15 @@ selecionar_versao_atualizacao() {
   printf "${WHITE} >> Selecionando versão para atualização...\n"
   echo
 
-  if ! echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
+  INSTALADOR_DIR="${INSTALADOR_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  # shellcheck source=/dev/null
+  source "${INSTALADOR_DIR}/tools/carregar_versoes_multiflow_pro.sh" 2>/dev/null || true
+
+  if ! mf_repo_usa_menu_versoes "${repo_url:-}" "${empresa:-}"; then
     declare -g versao_atualizacao="Mais_Recente"
     declare -g commit_atualizacao=""
     printf "${GREEN} >> Atualização padrão: branch principal do repositório.${WHITE}\n"
+    printf "${YELLOW} >> (Menu de versões só para multiflow-pro — repo atual: ${repo_url:-origem desconhecida})${WHITE}\n"
     echo
     sleep 1
     return 0
