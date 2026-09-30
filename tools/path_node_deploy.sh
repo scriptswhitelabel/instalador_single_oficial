@@ -89,4 +89,8 @@ if [ -f "${_mf_tools_dir}/baileys_hineken_package_json.sh" ]; then
   # shellcheck source=tools/baileys_hineken_package_json.sh
   . "${_mf_tools_dir}/baileys_hineken_package_json.sh"
 fi
+if [ -f "${_mf_tools_dir}/mf_sqlite3_glibc_check.sh" ]; then
+  # shellcheck source=tools/mf_sqlite3_glibc_check.sh
+  . "${_mf_tools_dir}/mf_sqlite3_glibc_check.sh"
+fi
 unset _mf_tools_dir

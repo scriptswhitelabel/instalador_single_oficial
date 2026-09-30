@@ -1284,6 +1284,12 @@ MF_GIT_SYNC_INLINE
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
+  # /root é 700: injeta checagem sqlite3/GLIBC no heredoc (deploy não lê tools sob /root).
+  if [ -f "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh" ]; then
+    MF_SQLITE_CHECK_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh")
+  else
+    MF_SQLITE_CHECK_BODY=""
+  fi
   if ! sudo su - deploy <<EOF
 set -e
 export GIT_TERMINAL_PROMPT=0
@@ -1299,6 +1305,7 @@ else
     export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
   fi
 fi
+${MF_SQLITE_CHECK_BODY}
 
 printf "${WHITE} >> Código já sincronizado; seguindo com build (FAST)...\n"
 echo
@@ -1342,6 +1349,11 @@ export PUPPETEER_SKIP_DOWNLOAD=true
 npm install --legacy-peer-deps --prefer-offline 2>/dev/null \
   || npm install --legacy-peer-deps 2>/dev/null \
   || npm install --force
+
+# sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
+if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then
+  mf_garantir_sqlite3_compativel_glibc "\$(pwd)"
+fi
 
 _MF_HB_SCRIPT="${INSTALADOR_DIR}/tools/mf_npm_build_heartbeat.sh"
 [ -f "\$_MF_HB_SCRIPT" ] || _MF_HB_SCRIPT="/root/instalador_single_oficial/tools/mf_npm_build_heartbeat.sh"

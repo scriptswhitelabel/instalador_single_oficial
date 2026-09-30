@@ -6104,6 +6104,12 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
+  # /root é 700: injeta checagem sqlite3/GLIBC no heredoc.
+  if [ -f "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh" ]; then
+    MF_SQLITE_CHECK_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh")
+  else
+    MF_SQLITE_CHECK_BODY=""
+  fi
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "$frontend_port" \
@@ -6165,6 +6171,7 @@ MF_GIT_SYNC_INLINE
       exit 1
     fi
   fi
+${MF_SQLITE_CHECK_BODY}
   
   APP_DIR="/home/deploy/${empresa}"
   BACKEND_DIR="\${APP_DIR}/backend"
@@ -6254,6 +6261,10 @@ MF_GIT_SYNC_INLINE
   npm install --force
   npm install puppeteer-core --force
   npm i glob
+  # sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
+  if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then
+    mf_garantir_sqlite3_compativel_glibc "\$(pwd)"
+  fi
   npm run build
   sleep 2
   printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
