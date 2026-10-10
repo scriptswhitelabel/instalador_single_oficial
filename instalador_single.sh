@@ -1136,6 +1136,9 @@ ferramentas_resolver_instancia_por_db_name() {
   for arq in "${instalador_dir}/${ARQUIVO_VARIAVEIS:-VARIAVEIS_INSTALACAO}" \
              "${instalador_dir}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arq" ] || continue
+    case "$arq" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     temp_emp=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | tr -d ' ' | tr -d '"' | head -1)
     [ -n "$temp_emp" ] || continue
 
@@ -6718,6 +6721,9 @@ instalar_transcricao_audio_nativa() {
     if [ -z "$ARQUIVO_VARIAVEIS_INSTANCIA" ] || [ ! -f "$ARQUIVO_VARIAVEIS_INSTANCIA" ]; then
       for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
         if [ -f "$arquivo_instancia" ]; then
+          case "$arquivo_instancia" in
+            *.backup*|*.bak*|*.old*) continue ;;
+          esac
           local temp_empresa_inst=""
           source "$arquivo_instancia" 2>/dev/null
           temp_empresa_inst="${empresa:-}"

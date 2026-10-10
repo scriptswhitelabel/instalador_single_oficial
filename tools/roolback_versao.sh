@@ -74,6 +74,9 @@ detectar_instancias_rollback() {
   local arquivo_instancia
   for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arquivo_instancia" ] || continue
+    case "$arquivo_instancia" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     # shellcheck source=/dev/null
     source "$arquivo_instancia" 2>/dev/null
     temp_empresa="${empresa:-}"

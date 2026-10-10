@@ -52,6 +52,9 @@ mf_resolver_porta_transcricao_instancia() {
   shopt -s nullglob
   for f in "${instalador_dir}/VARIAVEIS_INSTALACAO_INSTANCIA_"*; do
     [ -f "$f" ] || continue
+    case "$f" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     _e=$(grep -m1 '^empresa=' "$f" 2>/dev/null | cut -d= -f2- | tr -d '\r" ')
     if [ "$_e" = "$emp" ]; then
       _p=$(grep -m1 '^porta_transcricao=' "$f" 2>/dev/null | cut -d= -f2- | tr -d '\r" ')

@@ -77,6 +77,9 @@ backup_detectar_empresas() {
   shopt -s nullglob
   for arquivo in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arquivo" ] || continue
+    case "$arquivo" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     # shellcheck source=/dev/null
     source "$arquivo" 2>/dev/null
     temp_empresa="${empresa:-}"

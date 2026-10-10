@@ -400,6 +400,10 @@ verificar_conflitos() {
   if [ -d "$INSTALADOR_DIR" ]; then
     for arquivo_instancia in "$INSTALADOR_DIR"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
       if [ -f "$arquivo_instancia" ]; then
+        # Ignorar backups (ex.: VARIAVEIS_..._ago.backup.20261010_...)
+        case "$arquivo_instancia" in
+          *.backup*|*.bak*|*.old*) continue ;;
+        esac
         source "$arquivo_instancia"
         
         if [ "${backend_port}" = "${nova_backend_port}" ]; then

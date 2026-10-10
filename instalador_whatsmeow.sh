@@ -84,6 +84,9 @@ detectar_instancias_instaladas() {
   shopt -s nullglob
   for arquivo_instancia in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arquivo_instancia" ] || continue
+    case "$arquivo_instancia" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     local empresa_original="${empresa:-}"
     # shellcheck source=/dev/null
     source "$arquivo_instancia" 2>/dev/null
@@ -382,6 +385,9 @@ whatsmeow_coletar_portas_em_uso() {
   local arq
   for arq in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arq" ] || continue
+    case "$arq" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     [ "$arq" = "$ARQUIVO_VARIAVEIS" ] && continue
     port=$(grep -m1 '^wuzapi_port=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
     [ -z "$port" ] && continue
@@ -1811,6 +1817,9 @@ whatsmeow_carregar_variaveis_por_empresa() {
   shopt -s nullglob
   for arq in "${INSTALADOR_DIR}"/VARIAVEIS_INSTALACAO_INSTANCIA_*; do
     [ -f "$arq" ] || continue
+    case "$arq" in
+      *.backup*|*.bak*|*.old*) continue ;;
+    esac
     local e2=""
     e2=$(grep -m1 '^empresa=' "$arq" 2>/dev/null | cut -d '=' -f2- | tr -d '\r')
     if [ "$e2" = "$emp" ]; then
