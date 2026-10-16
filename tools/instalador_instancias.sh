@@ -1267,35 +1267,58 @@ baixa_codigo_instancia() {
       exit 1
     fi
 
+    # Evita hang: git pedindo Username/Password no meio da instalação (TTY/heredoc).
+    export GIT_TERMINAL_PROMPT=0
+    export GIT_ASKPASS=true
+    export SSH_ASKPASS=true
+
     github_token_encoded=$(codifica_clone_instancia "${github_token}")
-    github_url=$(echo ${repo_url} | sed "s|https://|https://${github_token_encoded}@|")
+    local repo_host
+    repo_host=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+    [[ "${repo_host}" != *.git ]] && repo_host="${repo_host}.git"
+    github_url="https://${github_token_encoded}@${repo_host}"
 
     dest_dir="/home/deploy/${nova_empresa}/"
 
     # Clonar repositório com todas as branches para ter acesso a commits históricos
     printf "${WHITE} >> Clonando repositório (isso pode levar alguns minutos)...\n"
-    git clone --no-single-branch ${github_url} ${dest_dir}
-    echo
-    if [ $? -eq 0 ]; then
-      printf "${GREEN} >> Código baixado com sucesso!${WHITE}\n"
-      echo
-    else
-      printf "${RED} >> Falha ao baixar o código! Verifique as informações fornecidas...${WHITE}\n"
+    if [ -d "${dest_dir}/.git" ]; then
+      printf "${YELLOW} >> Diretório ${dest_dir} já existe com .git — reutilizando...${WHITE}\n"
+    elif ! git -c credential.helper= clone --no-single-branch "${github_url}" "${dest_dir}"; then
+      printf "${RED} >> Falha ao baixar o código (autenticação Git). Verifique token e URL do repositório.${WHITE}\n"
       echo
       exit 1
+    else
+      printf "${GREEN} >> Código baixado com sucesso!${WHITE}\n"
+      echo
     fi
 
-    # Sempre fazer fetch de todas as branches, tags e commits históricos
-    printf "${WHITE} >> Buscando todas as branches, tags e commits históricos...\n"
-    cd ${dest_dir} || trata_erro "cd para diretório do projeto"
-    chown -R deploy:deploy ${dest_dir} 2>/dev/null || true
-    chmod -R 755 ${dest_dir}/.git 2>/dev/null || true
-    
+    cd "${dest_dir}" || trata_erro "cd para diretório do projeto"
+    chown -R deploy:deploy "${dest_dir}" 2>/dev/null || true
+    chmod -R u+rwX "${dest_dir}/.git" 2>/dev/null || true
+
+    # Garante token no origin (sem isso o fetch como deploy pede Username e trava o script).
+    if type mf_git_aplicar_token_remote >/dev/null 2>&1; then
+      mf_git_aplicar_token_remote "${dest_dir}" "${github_token}" "https://${repo_host}" \
+        || mf_git_aplicar_token_remote "${dest_dir}" "${github_token}" || true
+    else
+      git -c "safe.directory=${dest_dir}" -C "${dest_dir}" remote set-url origin "${github_url}" 2>/dev/null || true
+    fi
+
+    # Fetch sem prompt interativo
+    printf "${WHITE} >> Buscando branches, tags e commits históricos...\n"
     sudo su - deploy <<FETCHALL
-cd ${dest_dir}
-git fetch --all --tags --prune --unshallow 2>/dev/null || git fetch --all --tags --prune 2>/dev/null || true
+set -e
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+export SSH_ASKPASS=true
+cd "${dest_dir}"
+git -c credential.helper= fetch --all --tags --prune --unshallow 2>/dev/null \
+  || git -c credential.helper= fetch --all --tags --prune 2>/dev/null \
+  || git -c credential.helper= fetch origin 2>/dev/null \
+  || true
 FETCHALL
-    
+
     printf "${GREEN} >> Fetch concluído!${WHITE}\n"
     echo
 
@@ -1305,25 +1328,29 @@ FETCHALL
       banner
       printf "${WHITE} >> Instalando versão mais recente disponível no repositório...\n"
       echo
-      
-      cd ${dest_dir} || trata_erro "cd para diretório do projeto"
-      
+
+      cd "${dest_dir}" || trata_erro "cd para diretório do projeto"
+
       sudo su - deploy <<CHECKOUTRECENT
-cd ${dest_dir}
-git fetch --all --prune 2>/dev/null || true
+set -e
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+export SSH_ASKPASS=true
+cd "${dest_dir}"
+git -c credential.helper= fetch --all --prune 2>/dev/null || true
 
 if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
   git checkout MULTI100-OFICIAL-u21 2>/dev/null || git checkout -b MULTI100-OFICIAL-u21 origin/MULTI100-OFICIAL-u21
-  git pull origin MULTI100-OFICIAL-u21 2>/dev/null || true
+  git -c credential.helper= pull origin MULTI100-OFICIAL-u21 2>/dev/null || true
 elif git show-ref --verify --quiet refs/remotes/origin/main; then
   git checkout main 2>/dev/null || git checkout -b main origin/main
-  git pull origin main 2>/dev/null || true
+  git -c credential.helper= pull origin main 2>/dev/null || true
 elif git show-ref --verify --quiet refs/remotes/origin/master; then
   git checkout master 2>/dev/null || git checkout -b master origin/master
-  git pull origin master 2>/dev/null || true
+  git -c credential.helper= pull origin master 2>/dev/null || true
 fi
 CHECKOUTRECENT
-      
+
       printf "${GREEN} >> Versão mais recente do repositório será instalada${WHITE}\n"
       echo
       sleep 2
@@ -1340,73 +1367,63 @@ CHECKOUTRECENT
           exit 1
         fi
       fi
-      
+
       banner
       printf "${WHITE} >> Fazendo checkout para o commit da versão ${versao_instalacao}...\n"
       printf "${WHITE} >> Commit hash: ${commit_instalacao}${WHITE}\n"
       echo
-      
-      cd ${dest_dir} || trata_erro "cd para diretório do projeto"
-      
-      chown -R deploy:deploy ${dest_dir} 2>/dev/null || true
-      chmod -R 755 ${dest_dir}/.git 2>/dev/null || true
-      
-      # Fetch já foi feito acima, mas vamos garantir que temos todos os commits
-      sudo su - deploy <<FETCHCOMMIT
-cd ${dest_dir}
-git fetch --all --tags --prune --unshallow 2>/dev/null || git fetch --all --tags --prune 2>/dev/null || true
+
+      cd "${dest_dir}" || trata_erro "cd para diretório do projeto"
+
+      chown -R deploy:deploy "${dest_dir}" 2>/dev/null || true
+      chmod -R u+rwX "${dest_dir}/.git" 2>/dev/null || true
+
+      # Só busca na rede se o commit ainda não estiver local
+      if ! sudo -u deploy git -c "safe.directory=${dest_dir}" -C "${dest_dir}" cat-file -e "${commit_instalacao}^{commit}" 2>/dev/null; then
+        printf "${WHITE} >> Commit não está no clone local; buscando no remote (sem prompt)...${WHITE}\n"
+        sudo su - deploy <<FETCHCOMMIT
+set -e
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+export SSH_ASKPASS=true
+cd "${dest_dir}"
+git -c credential.helper= fetch --all --tags --prune --unshallow 2>/dev/null \
+  || git -c credential.helper= fetch --all --tags --prune 2>/dev/null \
+  || true
+git -c credential.helper= fetch origin "${commit_instalacao}" 2>/dev/null || true
 FETCHCOMMIT
-      
-      # Verificar se o commit existe
+      fi
+
       printf "${WHITE} >> Verificando se o commit ${commit_instalacao} existe...\n"
-      commit_existe=$(sudo su - deploy -c "cd ${dest_dir} && git cat-file -e '${commit_instalacao}^{commit}' 2>/dev/null && echo 1" || echo "")
-      
-      if [ "${commit_existe}" = "1" ]; then
-        BRANCH_INSTALACAO="instalacao-${versao_instalacao}-$(date +%Y%m%d-%H%M%S)"
-        printf "${WHITE} >> Fazendo checkout para commit ${commit_instalacao}...\n"
-        sudo su - deploy <<CHECKOUTCOMMIT
-cd ${dest_dir}
-# Limpar qualquer alteração local
-git reset --hard HEAD 2>/dev/null || true
-# git clean -fd 2>/dev/null || true  # desativado: não apagar arquivos locais da instância
-
-# Fazer checkout direto para o commit (detached HEAD primeiro)
-git checkout "${commit_instalacao}" 2>/dev/null
-
-# Criar branch a partir do commit
-git checkout -b "${BRANCH_INSTALACAO}" 2>/dev/null || git branch "${BRANCH_INSTALACAO}" && git checkout "${BRANCH_INSTALACAO}"
-CHECKOUTCOMMIT
-        
-        if [ $? -eq 0 ]; then
-          # Verificar se o checkout foi bem-sucedido
-          CURRENT_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
-          if [ "${CURRENT_COMMIT}" = "${commit_instalacao}" ]; then
-            printf "${GREEN} >> Checkout para commit ${commit_instalacao} concluído com sucesso!${WHITE}\n"
-            printf "${GREEN} >> Branch criada: ${BRANCH_INSTALACAO}${WHITE}\n"
-            printf "${GREEN} >> Commit atual confirmado: ${CURRENT_COMMIT}${WHITE}\n"
-            echo
-          else
-            printf "${YELLOW}⚠️  Aviso: Checkout realizado, mas commit atual (${CURRENT_COMMIT}) difere do esperado (${commit_instalacao})${WHITE}\n"
-            printf "${WHITE} >> Tentando corrigir...${WHITE}\n"
-            sudo su - deploy <<FORCECHECKOUT
-cd ${dest_dir}
-git checkout -f "${commit_instalacao}" 2>/dev/null || git checkout -b "${BRANCH_INSTALACAO}" "${commit_instalacao}" 2>/dev/null
-FORCECHECKOUT
-            CURRENT_COMMIT=$(sudo su - deploy -c "cd ${dest_dir} && git rev-parse HEAD 2>/dev/null")
-            if [ "${CURRENT_COMMIT}" = "${commit_instalacao}" ]; then
-              printf "${GREEN} >> Commit corrigido com sucesso!${WHITE}\n"
-            else
-              printf "${RED} >> ERRO: Não foi possível fazer checkout para o commit ${commit_instalacao}${WHITE}\n"
-              printf "${YELLOW} >> Commit atual: ${CURRENT_COMMIT}${WHITE}\n"
-              exit 1
-            fi
-          fi
-        else
-          printf "${RED} >> ERRO: Falha ao fazer checkout do commit ${commit_instalacao}${WHITE}\n"
-          exit 1
-        fi
-      else
+      if ! sudo -u deploy git -c "safe.directory=${dest_dir}" -C "${dest_dir}" cat-file -e "${commit_instalacao}^{commit}" 2>/dev/null; then
         printf "${RED} >> ERRO: Commit ${commit_instalacao} não encontrado no repositório.${WHITE}\n"
+        exit 1
+      fi
+
+      BRANCH_INSTALACAO="instalacao-${versao_instalacao}-$(date +%Y%m%d-%H%M%S)"
+      printf "${WHITE} >> Fazendo checkout para commit ${commit_instalacao}...\n"
+      if ! sudo su - deploy <<CHECKOUTCOMMIT
+set -e
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+cd "${dest_dir}"
+git reset --hard HEAD 2>/dev/null || true
+git checkout -B "${BRANCH_INSTALACAO}" "${commit_instalacao}"
+CHECKOUTCOMMIT
+      then
+        printf "${RED} >> ERRO: Falha ao fazer checkout do commit ${commit_instalacao}${WHITE}\n"
+        exit 1
+      fi
+
+      CURRENT_COMMIT=$(sudo -u deploy git -c "safe.directory=${dest_dir}" -C "${dest_dir}" rev-parse HEAD 2>/dev/null || true)
+      EXPECTED_FULL=$(sudo -u deploy git -c "safe.directory=${dest_dir}" -C "${dest_dir}" rev-parse "${commit_instalacao}" 2>/dev/null || true)
+      if [ -n "${CURRENT_COMMIT}" ] && [ -n "${EXPECTED_FULL}" ] && [ "${CURRENT_COMMIT}" = "${EXPECTED_FULL}" ]; then
+        printf "${GREEN} >> Checkout para commit ${commit_instalacao} concluído com sucesso!${WHITE}\n"
+        printf "${GREEN} >> Branch criada: ${BRANCH_INSTALACAO}${WHITE}\n"
+        printf "${GREEN} >> Commit atual confirmado: ${CURRENT_COMMIT}${WHITE}\n"
+        echo
+      else
+        printf "${RED} >> ERRO: HEAD (${CURRENT_COMMIT}) não corresponde ao commit ${commit_instalacao}${WHITE}\n"
         exit 1
       fi
     fi
