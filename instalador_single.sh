@@ -4508,13 +4508,19 @@ validar_token_git_clone() {
   local mostrar_erro="${2:-0}"
   local repo_alvo="${3:-${repo_url:-}}"
   [ -z "$token" ] && return 1
-  local url_base
-  url_base=$(echo "${repo_alvo}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
-  [ -z "$url_base" ] && return 1
-  [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
-  local token_encoded
-  token_encoded=$(codifica_clone_base "$token")
-  local repo_url_com_token="https://${token_encoded}@${url_base}"
+  token=$(printf '%s' "$token" | tr -d '\r\n ')
+  local repo_url_com_token=""
+  if type mf_git_https_url_com_token >/dev/null 2>&1; then
+    repo_url_com_token=$(mf_git_https_url_com_token "$token" "${repo_alvo}") || return 1
+  else
+    local url_base token_encoded
+    url_base=$(echo "${repo_alvo}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+    [ -z "$url_base" ] && return 1
+    [[ "$url_base" != *.git ]] && url_base="${url_base}.git"
+    token_encoded=$(codifica_clone_base "$token")
+    # Fine-grained PAT: usuário deve ser x-access-token (TOKEN@host sozinho → 401)
+    repo_url_com_token="https://x-access-token:${token_encoded}@${url_base}"
+  fi
   export GIT_TERMINAL_PROMPT=0
 
   # 1) Tentar git ls-remote (leve, só testa acesso)
@@ -4853,11 +4859,20 @@ baixa_codigo_base() {
     export GIT_ASKPASS=true
     export SSH_ASKPASS=true
 
-    github_token_encoded=$(codifica_clone_base "${github_token}")
-    # Normaliza repo_url (aceita com ou sem .git / com ou sem credencial embutida)
+    # Remove espaços/CRLF acidentais do token salvo em VARIAVEIS_INSTALACAO
+    github_token=$(printf '%s' "${github_token}" | tr -d '\r\n ')
     repo_host=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
     [[ "${repo_host}" != *.git ]] && repo_host="${repo_host}.git"
-    github_url="https://${github_token_encoded}@${repo_host}"
+    if type mf_git_https_url_com_token >/dev/null 2>&1; then
+      github_url=$(mf_git_https_url_com_token "${github_token}" "${repo_host}")
+    else
+      github_token_encoded=$(codifica_clone_base "${github_token}")
+      github_url="https://x-access-token:${github_token_encoded}@${repo_host}"
+    fi
+    if [ -z "${github_url}" ]; then
+      printf "${RED} >> Erro ao montar URL autenticada do GitHub.${WHITE}\n"
+      exit 1
+    fi
 
     dest_dir="/home/deploy/${empresa}/"
 
@@ -4866,8 +4881,10 @@ baixa_codigo_base() {
     else
       # Clone sem prompt interativo; se o token falhar, aborta com erro claro
       if ! git -c credential.helper= clone "${github_url}" "${dest_dir}"; then
-        printf "${RED} >> Falha ao baixar o código (autenticação Git).${WHITE}\n"
-        printf "${YELLOW} >> Verifique o Token GitHub e a URL do repositório.${WHITE}\n"
+        printf "${RED} >> Falha ao baixar o código (autenticação Git / HTTP 401).${WHITE}\n"
+        printf "${YELLOW} >> O token em VARIAVEIS_INSTALACAO pode estar expirado, revogado ou sem acesso ao repo.${WHITE}\n"
+        printf "${YELLOW} >> Gere um novo PAT (repo Contents: Read) e atualize github_token, ou use a opção 30 do menu.${WHITE}\n"
+        printf "${YELLOW} >> Repo: ${repo_url}${WHITE}\n"
         echo
         exit 1
       fi

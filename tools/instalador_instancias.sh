@@ -1272,11 +1272,21 @@ baixa_codigo_instancia() {
     export GIT_ASKPASS=true
     export SSH_ASKPASS=true
 
-    github_token_encoded=$(codifica_clone_instancia "${github_token}")
+    github_token=$(printf '%s' "${github_token}" | tr -d '\r\n ')
     local repo_host
     repo_host=$(echo "${repo_url}" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
     [[ "${repo_host}" != *.git ]] && repo_host="${repo_host}.git"
-    github_url="https://${github_token_encoded}@${repo_host}"
+    if type mf_git_https_url_com_token >/dev/null 2>&1; then
+      github_url=$(mf_git_https_url_com_token "${github_token}" "${repo_host}")
+    else
+      github_token_encoded=$(codifica_clone_instancia "${github_token}")
+      # Fine-grained PAT: x-access-token:TOKEN (TOKEN@host sozinho → HTTP 401)
+      github_url="https://x-access-token:${github_token_encoded}@${repo_host}"
+    fi
+    if [ -z "${github_url}" ]; then
+      printf "${RED} >> Erro ao montar URL autenticada do GitHub.${WHITE}\n"
+      exit 1
+    fi
 
     dest_dir="/home/deploy/${nova_empresa}/"
 

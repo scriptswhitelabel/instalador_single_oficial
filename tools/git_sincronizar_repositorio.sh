@@ -80,6 +80,24 @@ mf_git_urlencode() {
   done
 }
 
+# Monta URL HTTPS autenticada.
+# Fine-grained PAT (github_pat_*) e classic (ghp_*) exigem usuário x-access-token;
+# usar só TOKEN@host costuma retornar HTTP 401 no clone/fetch.
+# $1 = token; $2 = host/path ou URL (ex.: github.com/org/repo.git).
+mf_git_https_url_com_token() {
+  local token="${1:-}"
+  local repo_ref="${2:-}"
+  local token_clean tok_enc repo_host
+
+  token_clean=$(printf '%s' "$token" | tr -d '\r\n ')
+  [ -z "$token_clean" ] || [ -z "$repo_ref" ] && return 1
+
+  repo_host=$(printf '%s' "$repo_ref" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
+  [[ "$repo_host" != *.git ]] && [[ "$repo_host" == *github.com* ]] && repo_host="${repo_host}.git"
+  tok_enc=$(mf_git_urlencode "$token_clean")
+  printf 'https://x-access-token:%s@%s' "$tok_enc" "$repo_host"
+}
+
 # Remove credenciais embutidas de uma URL git (https://TOKEN@host/... → https://host/...).
 mf_git_url_publica() {
   local url="${1:-}"
@@ -113,7 +131,7 @@ mf_git_aplicar_token_remote() {
   [ -z "$app_root" ] || [ -z "$token" ] && return 1
   [ ! -d "${app_root}/.git" ] && return 1
 
-  local current path_repo tok_enc new_url
+  local current path_repo new_url
   if [ -n "$repo_canonico" ]; then
     path_repo=$(mf_git_url_publica "$repo_canonico" | sed 's|^https://||' | sed 's|^http://||')
     [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
@@ -127,8 +145,8 @@ mf_git_aplicar_token_remote() {
     [[ "$path_repo" != *.git ]] && path_repo="${path_repo}.git"
   fi
 
-  tok_enc=$(mf_git_urlencode "$token")
-  new_url="https://${tok_enc}@${path_repo}"
+  token=$(printf '%s' "$token" | tr -d '\r\n ')
+  new_url=$(mf_git_https_url_com_token "$token" "$path_repo") || return 1
 
   if git -c "safe.directory=${app_root}" -C "${app_root}" remote set-url origin "$new_url"; then
     return 0
@@ -225,13 +243,11 @@ mf_git_fetch_detectando_auth() {
 mf_git_validar_token_ls_remote() {
   local token="${1:-}"
   local repo_ref="${2:-}"
-  local token_encoded url err_file test_dir repo_host
+  local url err_file test_dir
 
   [ -z "$token" ] || [ -z "$repo_ref" ] && return 1
-  repo_host=$(echo "$repo_ref" | sed 's|^https://||' | sed 's|^http://||' | sed 's|^[^@]*@||')
-  [[ "$repo_host" != *.git ]] && repo_host="${repo_host}.git"
-  token_encoded=$(mf_git_urlencode "$token")
-  url="https://${token_encoded}@${repo_host}"
+  token=$(printf '%s' "$token" | tr -d '\r\n ')
+  url=$(mf_git_https_url_com_token "$token" "$repo_ref") || return 1
 
   mf_git_desabilitar_prompt
   err_file=$(mktemp 2>/dev/null || echo "/tmp/mf_git_val_err_$$")
