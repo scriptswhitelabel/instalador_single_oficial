@@ -6338,12 +6338,16 @@ ${MF_SQLITE_CHECK_BODY}
     exit 1
   fi
 
-  # TOKEN_GITHUB / Baileys: aplica se o package.json pedir (qualquer repo)
-  if grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' package.json 2>/dev/null || echo "${repo_url}" | grep -Eqi 'github\.com'; then
+  # TOKEN_GITHUB / Baileys: PAT fino exige x-access-token:TOKEN (TOKEN@ → HTTP 401)
+  if grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken|tswhitelabel/Hineken' package.json 2>/dev/null || echo "${repo_url}" | grep -Eqi 'github\.com'; then
     if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+      sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${github_token//&/\\&}@#g" package.json
       sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
       echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
     fi
+    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
+    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
+    sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
     if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
       sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
       echo " >> Baileys/Hineken fixado na branch main no package.json."
@@ -6352,6 +6356,8 @@ ${MF_SQLITE_CHECK_BODY}
   
   npm prune --force > /dev/null 2>&1
   export PUPPETEER_SKIP_DOWNLOAD=true
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
   rm -rf node_modules 2>/dev/null || true
   rm -f package-lock.json 2>/dev/null || true
   npm install --force

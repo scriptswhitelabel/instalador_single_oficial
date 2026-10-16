@@ -475,18 +475,22 @@ aplicar_token_baileys_package_json() {
   local repo="${3:-$repo_url}"
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
-  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken|tswhitelabel/Hineken' "$pkg" 2>/dev/null; then
     echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
     return 0
   fi
   [ -z "$tok" ] && return 1
-  if grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null; then
+  if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+    mf_baileys_aplicar_token_package_json "$pkg" "$tok" || return 1
+  else
     local tok_sed="${tok//&/\\&}"
+    sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${tok_sed}@#g" "$pkg"
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-    chown deploy:deploy "$pkg" 2>/dev/null || true
-    printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' "$pkg"
+    mf_baileys_fixar_branch_main_package_json "$pkg" 2>/dev/null || true
   fi
-  mf_baileys_fixar_branch_main_package_json "$pkg"
+  chown deploy:deploy "$pkg" 2>/dev/null || true
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
   return 0
 }
@@ -1324,16 +1328,21 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-# Multiflow-pro / Baileys privado: aplica token se o package.json pedir (não depende só de repo_url).
-if grep -q "TOKEN_GITHUB" package.json 2>/dev/null || grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
-  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
-    if [ -z "${github_token}" ]; then
-      echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
-      exit 1
-    fi
-    sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
-    echo " >> Token GitHub aplicado no package.json (Baileys)."
+# Multiflow-pro / Baileys privado: PAT fino exige x-access-token:TOKEN (TOKEN@ → HTTP 401).
+if grep -q "TOKEN_GITHUB" package.json 2>/dev/null || grep -qE 'Hineken\.git' package.json 2>/dev/null; then
+  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null && [ -z "${github_token}" ]; then
+    echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+    exit 1
   fi
+  sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${github_token//&/\\&}@#g" package.json
+  sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
+  sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
+  sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
+  if [ -f package-lock.json ]; then
+    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package-lock.json
+    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package-lock.json
+  fi
+  sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
   if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
     sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
     echo " >> Baileys/Hineken fixado na branch main no package.json."
@@ -1342,13 +1351,24 @@ if grep -q "TOKEN_GITHUB" package.json 2>/dev/null || grep -q 'scriptswhitelabel
     echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
     exit 1
   fi
+  echo " >> Token GitHub aplicado no package.json (Baileys / x-access-token)."
 fi
 
 printf "${WHITE} >> npm install no backend (sem remover node_modules — FAST)...\n"
 export PUPPETEER_SKIP_DOWNLOAD=true
-npm install --legacy-peer-deps --prefer-offline 2>/dev/null \
-  || npm install --legacy-peer-deps 2>/dev/null \
-  || npm install --force
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+if grep -qE 'Hineken\.git|TOKEN_GITHUB' package.json 2>/dev/null; then
+  echo " >> Baileys/Hineken: removendo package-lock e node_modules/baileys para forçar URL com x-access-token..."
+  rm -f package-lock.json 2>/dev/null || true
+  rm -rf node_modules/baileys 2>/dev/null || true
+fi
+npm install --legacy-peer-deps 2>/dev/null \
+  || npm install --force \
+  || {
+    echo "ERRO: npm install do backend falhou (Baileys/Hineken HTTP 401 = token sem acesso ou URL sem x-access-token:)."
+    exit 1
+  }
 
 # sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
 if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then

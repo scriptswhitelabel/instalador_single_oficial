@@ -1242,9 +1242,13 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-# Reforço: se ainda houver TOKEN@ sem x-access-token, corrige (PAT fino → 401)
+# Reforço: se ainda houver TOKEN@ sem x-access-token, corrige package.json E package-lock (PAT fino → 401)
 sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
 sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
+if [ -f package-lock.json ]; then
+  sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package-lock.json
+  sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package-lock.json
+fi
 if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
   echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
   exit 1
@@ -1252,9 +1256,20 @@ fi
 
 printf "${WHITE} >> npm install no backend (sem remover node_modules — FAST)...\n"
 export PUPPETEER_SKIP_DOWNLOAD=true
-npm install --legacy-peer-deps --prefer-offline 2>/dev/null \
-  || npm install --legacy-peer-deps 2>/dev/null \
-  || npm install --force
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=true
+# Lock antigo com TOKEN@ (sem x-access-token) faz npm ls-remote dar 401 mesmo com package.json certo
+if grep -qE 'Hineken\.git|TOKEN_GITHUB' package.json 2>/dev/null; then
+  echo " >> Baileys/Hineken: removendo package-lock e node_modules/baileys para forçar URL com x-access-token..."
+  rm -f package-lock.json 2>/dev/null || true
+  rm -rf node_modules/baileys 2>/dev/null || true
+fi
+npm install --legacy-peer-deps 2>/dev/null \
+  || npm install --force \
+  || {
+    echo "ERRO: npm install do backend falhou (Baileys/Hineken HTTP 401 = token sem acesso ou URL sem x-access-token:)."
+    exit 1
+  }
 
 # sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
 if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then
