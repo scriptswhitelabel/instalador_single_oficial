@@ -1284,15 +1284,27 @@ MF_GIT_SYNC_INLINE
   carregar_credenciais_instancia
   printf "${GREEN} >> Repositório sincronizado.${WHITE}\n"
 
+  if [ -f "/home/deploy/${empresa}/backend/package.json" ]; then
+    if ! aplicar_token_baileys_package_json "${empresa}" "${github_token}" "${repo_url}"; then
+      printf "${RED} >> ERRO ao aplicar token do Baileys no package.json.${WHITE}\n"
+      trata_erro "aplicar_token_baileys_package_json"
+    fi
+  fi
+
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
   mf_frontend_carregar_lib && mf_frontend_garantir_porta_env "${frontend_port}" \
     || printf "${YELLOW} >> Aviso: nao foi possivel garantir PORT no .env do frontend.${WHITE}\n"
-  # /root é 700: injeta checagem sqlite3/GLIBC no heredoc (deploy não lê tools sob /root).
+  # /root é 700: injeta scripts no heredoc (deploy não lê tools sob /root).
   if [ -f "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh" ]; then
     MF_SQLITE_CHECK_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh")
   else
     MF_SQLITE_CHECK_BODY=""
+  fi
+  if [ -f "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh" ]; then
+    MF_BAILEYS_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh")
+  else
+    MF_BAILEYS_BODY=""
   fi
   if ! sudo su - deploy <<EOF
 set -e
@@ -1328,36 +1340,35 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-# Multiflow-pro / Baileys privado: PAT fino exige x-access-token:TOKEN (TOKEN@ → HTTP 401).
-if grep -q "TOKEN_GITHUB" package.json 2>/dev/null || grep -qE 'Hineken\.git' package.json 2>/dev/null; then
-  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null && [ -z "${github_token}" ]; then
-    echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+${MF_BAILEYS_BODY}
+if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+  if [ -z "${github_token}" ] && grep -qE 'TOKEN_GITHUB|Hineken\.git' package.json 2>/dev/null; then
+    echo "ERRO: package.json exige token (Baileys/Hineken) mas github_token não está no arquivo da instância."
     exit 1
   fi
-  sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${github_token//&/\\&}@#g" package.json
-  sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
-  sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
-  sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
-  if [ -f package-lock.json ]; then
-    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package-lock.json
-    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package-lock.json
-  fi
-  sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
-  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
-    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
-    echo " >> Baileys/Hineken fixado na branch main no package.json."
-  fi
-  if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
-    echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
+  mf_baileys_aplicar_token_package_json "\$(pwd)/package.json" "${github_token}" || {
+    echo "ERRO: falha ao aplicar token Baileys/Hineken (x-access-token)."
     exit 1
-  fi
+  }
   echo " >> Token GitHub aplicado no package.json (Baileys / x-access-token)."
+fi
+if type mf_baileys_git_instead_of_token >/dev/null 2>&1; then
+  mf_baileys_git_instead_of_token "${github_token}" || true
+fi
+if grep -qE '(git\+https://|https://)(github_pat_|ghp_)' package.json 2>/dev/null; then
+  echo "ERRO: package.json ainda tem URL Hineken sem x-access-token: (HTTP 401)."
+  exit 1
+fi
+if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+  echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
+  exit 1
 fi
 
 printf "${WHITE} >> npm install no backend (sem remover node_modules — FAST)...\n"
 export PUPPETEER_SKIP_DOWNLOAD=true
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=true
+export GCM_INTERACTIVE=Never
 if grep -qE 'Hineken\.git|TOKEN_GITHUB' package.json 2>/dev/null; then
   echo " >> Baileys/Hineken: removendo package-lock e node_modules/baileys para forçar URL com x-access-token..."
   rm -f package-lock.json 2>/dev/null || true

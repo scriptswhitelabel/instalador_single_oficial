@@ -1204,11 +1204,16 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
-  # /root é 700: injeta checagem sqlite3/GLIBC no heredoc.
+  # /root é 700: injeta scripts no heredoc (deploy não lê tools sob /root).
   if [ -f "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh" ]; then
     MF_SQLITE_CHECK_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh")
   else
     MF_SQLITE_CHECK_BODY=""
+  fi
+  if [ -f "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh" ]; then
+    MF_BAILEYS_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh")
+  else
+    MF_BAILEYS_BODY=""
   fi
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
@@ -1231,6 +1236,7 @@ MF_GIT_SYNC_INLINE
   fi
 ${MF_GIT_SYNC_BODY}
 ${MF_SQLITE_CHECK_BODY}
+${MF_BAILEYS_BODY}
   if ! command -v mf_git_sincronizar_repositorio >/dev/null 2>&1; then
     echo "ERRO: mf_git_sincronizar_repositorio não disponível após injeção das funções Git."
     exit 1
@@ -1297,20 +1303,24 @@ ${MF_SQLITE_CHECK_BODY}
     exit 1
   fi
 
-  # Multiflow-pro: git reset restaura TOKEN_GITHUB no package.json (Baileys/Hineken).
-  # PAT fino exige x-access-token:TOKEN (TOKEN@ sozinho → HTTP 401).
-  if grep -qE 'TOKEN_GITHUB|Hineken\.git' package.json 2>/dev/null; then
-    if grep -q "TOKEN_GITHUB" package.json 2>/dev/null && [ -z "${github_token}" ]; then
-      echo "ERRO: package.json exige token (TOKEN_GITHUB) mas github_token não está no arquivo da instância."
+  # Baileys/Hineken: força x-access-token (PAT fino com TOKEN@ → HTTP 401)
+  if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+    if grep -qE 'TOKEN_GITHUB|Hineken\.git' package.json 2>/dev/null && [ -z "${github_token}" ]; then
+      echo "ERRO: package.json exige token (Baileys/Hineken) mas github_token não está no arquivo da instância."
       exit 1
     fi
-    sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${github_token//&/\\&}@#g" package.json
-    sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
-    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
-    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
-    sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
-    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
+    mf_baileys_aplicar_token_package_json "\$BACKEND_DIR/package.json" "${github_token}" || {
+      echo "ERRO: falha ao aplicar token Baileys/Hineken (x-access-token)."
+      exit 1
+    }
     echo " >> Token GitHub aplicado no package.json (Baileys / x-access-token)."
+  fi
+  if type mf_baileys_git_instead_of_token >/dev/null 2>&1; then
+    mf_baileys_git_instead_of_token "${github_token}" || true
+  fi
+  if grep -qE '(git\+https://|https://)(github_pat_|ghp_)' package.json 2>/dev/null; then
+    echo "ERRO: package.json ainda tem URL Hineken sem x-access-token: (HTTP 401)."
+    exit 1
   fi
   if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
     echo "ERRO: TOKEN_GITHUB ainda presente no package.json após aplicar token."
@@ -1321,17 +1331,24 @@ ${MF_SQLITE_CHECK_BODY}
   export PUPPETEER_SKIP_DOWNLOAD=true
   export GIT_TERMINAL_PROMPT=0
   export GIT_ASKPASS=true
+  export GCM_INTERACTIVE=Never
   rm -rf node_modules 2>/dev/null || true
   rm -f package-lock.json 2>/dev/null || true
   rm -rf dist 2>/dev/null || true
-  npm install --force
+  if ! npm install --force; then
+    echo "ERRO: npm install do backend falhou (Baileys/Hineken HTTP 401 = token sem acesso ou URL sem x-access-token:)."
+    exit 1
+  fi
   npm install puppeteer-core --force
   npm i glob
   # sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
   if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then
     mf_garantir_sqlite3_compativel_glibc "\$(pwd)"
   fi
-  npm run build
+  if ! npm run build; then
+    echo "ERRO: npm run build do backend falhou."
+    exit 1
+  fi
   sleep 2
   printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
   echo

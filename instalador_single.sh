@@ -6200,11 +6200,16 @@ mf_git_sincronizar_repositorio() {
 MF_GIT_SYNC_INLINE
 )
   fi
-  # /root é 700: injeta checagem sqlite3/GLIBC no heredoc.
+  # /root é 700: injeta scripts no heredoc (deploy não lê tools sob /root).
   if [ -f "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh" ]; then
     MF_SQLITE_CHECK_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/mf_sqlite3_glibc_check.sh")
   else
     MF_SQLITE_CHECK_BODY=""
+  fi
+  if [ -f "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh" ]; then
+    MF_BAILEYS_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh")
+  else
+    MF_BAILEYS_BODY=""
   fi
   _MF_FE_LOADER="${INSTALADOR_DIR}/tools/mf_frontend_carregar_lib.sh"
   [ -f "$_MF_FE_LOADER" ] && . "$_MF_FE_LOADER"
@@ -6243,6 +6248,18 @@ MF_GIT_SYNC_INLINE
     source "${ARQUIVO_VARIAVEIS_USADO}" 2>/dev/null || true
   fi
   printf "${GREEN} >> Repositório sincronizado.${WHITE}\n"
+
+  # Após git reset, package.json volta com TOKEN_GITHUB — aplica token AQUI (root),
+  # antes do heredoc deploy (sed inline no heredoc era frágil e deixava PAT@ sem x-access-token).
+  if ! aplicar_token_baileys_package_json "${empresa}" "${github_token}" "${repo_url:-}"; then
+    printf "${RED} >> ERRO: falha ao aplicar token do Baileys/Hineken no package.json.${WHITE}\n"
+    trata_erro "aplicar_token_baileys_apos_sync"
+  fi
+  if [ -f "/home/deploy/${empresa}/backend/package.json" ]; then
+    chown deploy:deploy "/home/deploy/${empresa}/backend/package.json" 2>/dev/null || true
+    [ -f "/home/deploy/${empresa}/backend/package-lock.json" ] && \
+      chown deploy:deploy "/home/deploy/${empresa}/backend/package-lock.json" 2>/dev/null || true
+  fi
 
   if ! sudo su - deploy <<UPDATEAPP
   # Configura PATH para Node.js e PM2
@@ -6338,36 +6355,47 @@ ${MF_SQLITE_CHECK_BODY}
     exit 1
   fi
 
-  # TOKEN_GITHUB / Baileys: PAT fino exige x-access-token:TOKEN (TOKEN@ → HTTP 401)
-  if grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken|tswhitelabel/Hineken' package.json 2>/dev/null || echo "${repo_url}" | grep -Eqi 'github\.com'; then
-    if grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
-      sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${github_token//&/\\&}@#g" package.json
-      sed -i "s|TOKEN_GITHUB|${github_token//&/\\&}|g" package.json
-      echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
+  # Reforço Baileys (token já aplicado como root): helper injetado (/root é 700)
+${MF_BAILEYS_BODY}
+  if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+    if ! mf_baileys_aplicar_token_package_json "\$BACKEND_DIR/package.json" "${github_token}"; then
+      echo "ERRO: falha ao reforçar token Baileys/Hineken (x-access-token) no package.json."
+      exit 1
     fi
-    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
-    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
-    sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
-    if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
-      sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
-      echo " >> Baileys/Hineken fixado na branch main no package.json."
-    fi
+    echo " >> Token do GitHub aplicado no package.json (baileys/Hineken)."
+    echo " >> Baileys/Hineken fixado na branch main no package.json."
+  fi
+  if type mf_baileys_git_instead_of_token >/dev/null 2>&1; then
+    mf_baileys_git_instead_of_token "${github_token}" || true
+  fi
+  # Guarda: se ainda houver PAT@ sem x-access-token, aborta antes do npm
+  if grep -qE '(git\+https://|https://)(github_pat_|ghp_)' package.json 2>/dev/null; then
+    echo "ERRO: package.json ainda tem URL Hineken sem x-access-token: (HTTP 401)."
+    grep -oE '.{0,40}Hineken\.git.{0,20}' package.json 2>/dev/null | head -3 || true
+    exit 1
   fi
   
   npm prune --force > /dev/null 2>&1
   export PUPPETEER_SKIP_DOWNLOAD=true
   export GIT_TERMINAL_PROMPT=0
   export GIT_ASKPASS=true
+  export GCM_INTERACTIVE=Never
   rm -rf node_modules 2>/dev/null || true
   rm -f package-lock.json 2>/dev/null || true
-  npm install --force
+  if ! npm install --force; then
+    echo "ERRO: npm install do backend falhou (Baileys/Hineken HTTP 401 = token sem acesso ao repo ou URL sem x-access-token:)."
+    exit 1
+  fi
   npm install puppeteer-core --force
   npm i glob
   # sqlite3/GLIBC (Baileys OPENING): detecta ERR_DLOPEN_FAILED e rebuild se necessário
   if type mf_garantir_sqlite3_compativel_glibc >/dev/null 2>&1; then
     mf_garantir_sqlite3_compativel_glibc "\$(pwd)"
   fi
-  npm run build
+  if ! npm run build; then
+    echo "ERRO: npm run build do backend falhou."
+    exit 1
+  fi
   sleep 2
   printf "${WHITE} >> Atualizando Banco da empresa ${empresa}...\n"
   echo
