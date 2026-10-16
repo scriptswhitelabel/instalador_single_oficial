@@ -215,17 +215,25 @@ aplicar_token_baileys_package_json() {
   local emp="${1:-$nova_empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
-  echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
-  grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null || return 0
-  local tok_sed="${tok//&/\\&}"
-  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken|tswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+    echo "$repo" | grep -Eq "scriptswhitelabel/(multiflow-pro|ultrawhats)" || return 0
+    return 0
+  fi
   _mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/baileys_hineken_package_json.sh"
   # shellcheck source=baileys_hineken_package_json.sh
   [ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
-  mf_baileys_fixar_branch_main_package_json "$pkg"
+  if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+    mf_baileys_aplicar_token_package_json "$pkg" "$tok" || return 1
+  else
+    local tok_sed="${tok//&/\\&}"
+    sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${tok_sed}@#g" "$pkg"
+    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' "$pkg"
+  fi
+  chown deploy:deploy "$pkg" 2>/dev/null || true
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys).${WHITE}\n"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
 }
 

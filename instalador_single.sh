@@ -2494,14 +2494,21 @@ atualizar_baileys_pro_heineken_ferramentas() {
     fi
   fi
   cd "${backend_dir}" || exit 1
-  if [ -f package.json ] && grep -q "TOKEN_GITHUB" package.json 2>/dev/null; then
+  if [ -f package.json ]; then
+    # PAT fino exige x-access-token:TOKEN (TOKEN@ sozinho → HTTP 401)
+    sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${tok_sed}@#g" package.json
     sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
+    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
+    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
+    sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
+    if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
+      sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
+      printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
+    fi
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
-  if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
-    sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
-    printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
-  fi
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
   rm -rf node_modules/baileys package-lock.json
   npm i || exit 1
   if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
@@ -4466,25 +4473,41 @@ mf_repo_usa_token_baileys() {
 }
 
 # Substitui TOKEN_GITHUB no backend/package.json (baileys/Hineken) pelo token da instalação.
-# Não depende de um único repo: aplica se o package.json pedir o placeholder.
+# Usa x-access-token:TOKEN (PAT fino com TOKEN@ sozinho → HTTP 401 no npm).
 aplicar_token_baileys_package_json() {
   local emp="${1:-$empresa}"
   local tok="${2:-$github_token}"
   local repo="${3:-$repo_url}"
   local pkg="/home/deploy/${emp}/backend/package.json"
   [ ! -f "$pkg" ] && return 0
-  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken' "$pkg" 2>/dev/null; then
+  if ! grep -qE 'TOKEN_GITHUB|scriptswhitelabel/Hineken|tswhitelabel/Hineken' "$pkg" 2>/dev/null; then
     mf_repo_usa_token_baileys "$repo" "$emp" || return 0
     return 0
   fi
   [ -z "$tok" ] && return 1
-  if grep -q "TOKEN_GITHUB" "$pkg" 2>/dev/null; then
-    local tok_sed="${tok//&/\\&}"
-    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
-    printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+
+  if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+    if mf_baileys_aplicar_token_package_json "$pkg" "$tok"; then
+      printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
+      printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
+      chown deploy:deploy "$pkg" 2>/dev/null || true
+      return 0
+    fi
+    printf "${RED} >> ERRO ao aplicar token do Baileys no package.json.${WHITE}\n"
+    return 1
   fi
-  mf_baileys_fixar_branch_main_package_json "$pkg"
+
+  # Fallback se a lib não estiver disponível
+  local tok_sed="${tok//&/\\&}"
+  tok_sed=$(printf '%s' "$tok_sed" | tr -d '\r\n ')
+  sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${tok_sed}@#g" "$pkg"
+  sed -i "s|TOKEN_GITHUB|${tok_sed}|g" "$pkg"
+  sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' "$pkg"
+  sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' "$pkg"
+  sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' "$pkg"
+  printf "${GREEN} >> Token do GitHub aplicado no package.json (baileys/Hineken).${WHITE}\n"
   printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
+  chown deploy:deploy "$pkg" 2>/dev/null || true
   return 0
 }
 
@@ -5181,8 +5204,17 @@ EOF
     banner
     printf "${WHITE} >> Instalando dependências do ${BLUE}backend${WHITE}...\n"
     echo
-    aplicar_token_baileys_package_json
-    sudo su - deploy <<BACKENDINSTALL
+    if ! aplicar_token_baileys_package_json; then
+      printf "${RED} >> ERRO: falha ao preparar token do Baileys no package.json.${WHITE}\n"
+      trata_erro "aplicar_token_baileys_package_json"
+    fi
+    # Reaplica normalização x-access-token: (evita 401 se o package já veio com PAT no formato antigo)
+    if type mf_baileys_normalizar_url_token_package_json >/dev/null 2>&1; then
+      mf_baileys_normalizar_url_token_package_json "/home/deploy/${empresa}/backend/package.json"
+      chown deploy:deploy "/home/deploy/${empresa}/backend/package.json" 2>/dev/null || true
+    fi
+    if ! sudo su - deploy <<BACKENDINSTALL
+set -e
   if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
     . /root/instalador_single_oficial/tools/path_node_deploy.sh
   else
@@ -5232,13 +5264,22 @@ EOF
   fi
   
   export PUPPETEER_SKIP_DOWNLOAD=true
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_ASKPASS=true
   rm -rf node_modules 2>/dev/null || true
   rm -f package-lock.json 2>/dev/null || true
-  npm install --force
+  if ! npm install --force; then
+    echo "ERRO: npm install do backend falhou (Baileys/Hineken costuma ser HTTP 401 se o token estiver sem x-access-token: ou sem acesso ao repo)."
+    exit 1
+  fi
   npm install puppeteer-core --force
   npm i glob
   npm run build
 BACKENDINSTALL
+    then
+      printf "${RED} >> ERRO: falha no npm install/build do backend.${WHITE}\n"
+      trata_erro "backend_npm_install_build"
+    fi
 
     sleep 2
 
