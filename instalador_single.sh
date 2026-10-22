@@ -8602,6 +8602,10 @@ exec_ferramenta_direta() {
     17) atualizar_whatsmeow ;;
     22) backup_whatsmeow_ferramentas ;;
     23) restaurar_whatsmeow_ferramentas ;;
+    24) instalar_multiflow_voz ;;
+    25) atualizar_multiflow_voz ;;
+    26) instalar_multiflow_hub ;;
+    27) atualizar_multiflow_hub ;;
     30) atualizar_ultrawhats ;;
     *)
       printf "${RED} >> Ferramenta inválida ou não suportada: ${1}${WHITE}\n"
