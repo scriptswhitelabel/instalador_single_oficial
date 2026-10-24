@@ -1385,6 +1385,15 @@ PORT="${frontend_port}" pm2 restart "${empresa}-frontend" --update-env 2>/dev/nu
 pm2 save
 RESTARTPM2ATUALIZACAO
 
+  _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_nginx_static_404.sh"
+  if [ -f "$_mf_nginx_static" ]; then
+    # shellcheck source=/dev/null
+    source "$_mf_nginx_static"
+    printf "${WHITE} >> Garantindo Nginx /static/ =404 (anti-loop SPA)...${WHITE}\n"
+    mf_nginx_garantir_static_404 "${empresa}" \
+      || printf "${YELLOW} >> Aviso: falha ao ajustar Nginx /static/. O server.js do frontend cobre o caso.${WHITE}\n"
+  fi
+
   sudo su - root <<EOF
     if systemctl is-active --quiet nginx; then
       sudo systemctl restart nginx

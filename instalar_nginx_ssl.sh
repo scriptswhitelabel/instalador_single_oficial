@@ -276,6 +276,15 @@ configurar_nginx_frontend() {
     cat > /etc/nginx/sites-available/${empresa}-frontend << EOF
 server {
   server_name ${frontend_hostname};
+  # Assets com hash: 404 real se o arquivo não existir (nunca proxy → HTML do SPA).
+  # Evita Unexpected token '<' / loop no splash após deploy.
+  location ^~ /static/ {
+    root /home/deploy/${empresa}/frontend/build;
+    try_files \$uri =404;
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    access_log off;
+  }
   location / {
     proxy_pass http://127.0.0.1:${frontend_port};
     proxy_http_version 1.1;
@@ -451,6 +460,14 @@ main() {
   # Aplicar certificados SSL (Let's Encrypt)
   aplicar_ssl_backend
   aplicar_ssl_frontend
+
+  # Garante /static/ =404 mesmo se o Certbot reescrever o conf
+  _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_nginx_static_404.sh"
+  if [ -f "$_mf_nginx_static" ]; then
+    # shellcheck source=/dev/null
+    source "$_mf_nginx_static"
+    mf_nginx_garantir_static_404 "${empresa}" || true
+  fi
   
   # Reiniciar Nginx final
   systemctl restart nginx

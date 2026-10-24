@@ -1944,6 +1944,15 @@ config_nginx_instancia() {
 cat > /etc/nginx/sites-available/${nova_empresa}-frontend << 'END'
 server {
   server_name ${frontend_hostname};
+  # Assets com hash: 404 real se o arquivo não existir (nunca proxy → HTML do SPA).
+  # Evita Unexpected token '<' / loop no splash após deploy.
+  location ^~ /static/ {
+    root /home/deploy/${nova_empresa}/frontend/build;
+    try_files \$uri =404;
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    access_log off;
+  }
   location / {
     proxy_pass http://127.0.0.1:${nova_frontend_port};
     proxy_http_version 1.1;
@@ -2030,6 +2039,14 @@ EOF
 EOF
 
     sleep 2
+
+    # Garante /static/ =404 mesmo se o Certbot reescrever o conf
+    _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_nginx_static_404.sh"
+    if [ -f "$_mf_nginx_static" ]; then
+      # shellcheck source=/dev/null
+      source "$_mf_nginx_static"
+      mf_nginx_garantir_static_404 "${nova_empresa}" || true
+    fi
   } || trata_erro "config_nginx_instancia"
 }
 
