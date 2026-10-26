@@ -2,6 +2,13 @@
 # tools/instalador_multiflow_hub.sh
 # Prepara o clone do HUB MultiFlow (token GitHub + modo VPS) e dispara o
 # install.sh oficial do repositório multiflow-hub (Central / Local / atualizar).
+#
+# Credenciais (nao misturar) — detalhe em multiflow-hub/README-INSTALADOR.md:
+#   hub_ = chave do tenant (Multiflow mensageria / Tenants)
+#   hrt_ = token de registro 1x (Central emite COM tenantId; Local cola no Registrar)
+#   hlt_ = token do HUB Local (CENTRAL_HUB_TOKEN; gravado sozinho no registro)
+# Plano WhatsApp no Central grava whatsapp + whatsapp_oficial. Multiflow nao e
+# configurado por este script (Planos → HUB no painel).
 
 set -euo pipefail
 
