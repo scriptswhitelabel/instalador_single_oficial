@@ -6,6 +6,23 @@
 #   source tools/mf_nginx_static_404.sh
 #   mf_nginx_garantir_static_404 "minhaempresa"
 
+# www-data precisa atravessar /home/deploy e ler o build quando location ^~ /static/
+# serve arquivos direto do disco (sem proxy para o Node).
+# Sem o+x em /home/deploy (padrão 750 do useradd), o nginx devolve 404 (Permission denied)
+# e o splash entra em loop de ?_nocache=.
+mf_nginx_ensure_static_readable() {
+  local build_root="${1:-}"
+
+  if [ -d /home/deploy ]; then
+    # Mantém dono; só garante travessia por outros (nginx/www-data).
+    chmod o+x /home/deploy 2>/dev/null || chmod 755 /home/deploy 2>/dev/null || true
+  fi
+
+  if [ -n "$build_root" ] && [ -d "$build_root" ]; then
+    chmod -R a+rX "$build_root" 2>/dev/null || true
+  fi
+}
+
 mf_nginx_static_404_snippet() {
   local empresa="${1:-}"
   local build_root="${2:-/home/deploy/${empresa}/frontend/build}"
@@ -35,13 +52,16 @@ mf_nginx_garantir_static_404() {
   conf="/etc/nginx/sites-available/${empresa}-frontend"
   build_root="/home/deploy/${empresa}/frontend/build"
 
+  # Sempre: mesmo se o location já existir, permissões podem ter voltado a 750 no update.
+  mf_nginx_ensure_static_readable "$build_root"
+
   if [ ! -f "$conf" ]; then
     printf "${YELLOW:-} >> Nginx frontend (%s): conf não encontrada (%s), pulando.${WHITE:-}\n" "$empresa" "$conf"
     return 0
   fi
 
   if grep -qE 'location[[:space:]]+\^~[[:space:]]+/static/' "$conf"; then
-    printf "${GREEN:-} >> Nginx frontend (%s): location /static/ =404 já presente.${WHITE:-}\n" "$empresa"
+    printf "${GREEN:-} >> Nginx frontend (%s): location /static/ =404 já presente (perms /home/deploy ok).${WHITE:-}\n" "$empresa"
     return 0
   fi
 
