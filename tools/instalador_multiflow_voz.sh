@@ -754,9 +754,16 @@ for raw_path in glob.glob("/etc/nginx/sites-available/*"):
             continue
         if "location = /api/v1/calls/incoming" in block:
             continue
+        # Blocos só de redirect Certbot (listen 80 + return) não têm location /
+        if re.search(r"(?m)^[ \t]*return[ \t]+30[12]", block) and not re.search(
+            r"(?m)^[ \t]*location[ \t]+", block
+        ):
+            continue
         location = re.search(r"(?m)^[ \t]*location[ \t]+/(?:api/)?[ \t]*\{", block)
         if not location:
-            raise RuntimeError(f"location genérica não encontrada em {path}")
+            # Não aborta a atualização inteira por um server{} sem location genérica
+            print(f"Aviso: sem location / em server_name={names} ({path}); bloco ignorado")
+            continue
         insert_at = start + location.start()
         replacements.append((insert_at, poll_locations()))
     for insert_at, value in reversed(replacements):
