@@ -13,15 +13,10 @@ ARQUIVO_VARIAVEIS_BASE="VARIAVEIS_INSTALACAO"
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
-voz_bridge_secret=$(openssl rand -hex 24 2>/dev/null || openssl rand -base64 32)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=instalar_docker_compartilhado.sh
 source "${SCRIPT_DIR}/instalar_docker_compartilhado.sh"
-if [ -f "${SCRIPT_DIR}/mf_env_voz_bridge_secret.sh" ]; then
-  # shellcheck source=mf_env_voz_bridge_secret.sh
-  source "${SCRIPT_DIR}/mf_env_voz_bridge_secret.sh"
-fi
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -1561,8 +1556,6 @@ TIMEOUT_TO_IMPORT_MESSAGE=1000
 JWT_SECRET=${jwt_secret}
 JWT_REFRESH_SECRET=${jwt_refresh_secret}
 MASTER_KEY=${senha_master}
-# Ponte Calling Oficial ↔ MultiFlow VOZ (mesmo valor no .env da voz)
-VOZ_BRIDGE_SECRET=${voz_bridge_secret}
 
 VERIFY_TOKEN=whaticket
 FACEBOOK_APP_ID=${facebook_app_id}
@@ -1647,11 +1640,6 @@ WUZAPI_READ_RECEIPT_ENABLE_DELAY_MS=2700000
 EOF
 
     descomentar_env_redis_bull_ack "/home/deploy/${nova_empresa}/backend/.env" "/home/deploy/${nova_empresa}/backend/package.json" "redis://:${senha_deploy}@127.0.0.1:${nova_redis_port}"
-    if type verificar_e_adicionar_voz_bridge_secret >/dev/null 2>&1; then
-      empresa="${nova_empresa}" verificar_e_adicionar_voz_bridge_secret
-    elif type mf_garantir_voz_bridge_secret >/dev/null 2>&1; then
-      mf_garantir_voz_bridge_secret "/home/deploy/${nova_empresa}/backend/.env" "/home/deploy/multiflow-voz/backend/.env"
-    fi
 
     sleep 2
 

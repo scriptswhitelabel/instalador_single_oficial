@@ -20,7 +20,6 @@ FFMPEG_DIR="$(pwd)/ffmpeg"
 ip_atual=$(curl -s http://checkip.amazonaws.com)
 jwt_secret=$(openssl rand -base64 32)
 jwt_refresh_secret=$(openssl rand -base64 32)
-voz_bridge_secret=$(openssl rand -hex 24 2>/dev/null || openssl rand -base64 32)
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -5116,8 +5115,6 @@ TIMEOUT_TO_IMPORT_MESSAGE=1000
 JWT_SECRET=${jwt_secret}
 JWT_REFRESH_SECRET=${jwt_refresh_secret}
 MASTER_KEY=${senha_master}
-# Ponte Calling Oficial ↔ MultiFlow VOZ (mesmo valor no .env da voz)
-VOZ_BRIDGE_SECRET=${voz_bridge_secret}
 
 # PERFEX_URL=${subdominio_perfex}
 # PERFEX_MODULE=Multi100
@@ -5201,7 +5198,6 @@ BAILEYS_LOG_LEVEL=warn
 EOF
 
     descomentar_env_redis_bull_ack "/home/deploy/${empresa}/backend/.env" "/home/deploy/${empresa}/backend/package.json"
-    verificar_e_adicionar_voz_bridge_secret
 
     sleep 2
 
@@ -6146,7 +6142,6 @@ STOPPM2
   verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_whatsapp_web_version
-  verificar_e_adicionar_voz_bridge_secret
 
   # Verifica se a variável empresa está definida (já foi carregada por selecionar_instancia_atualizar)
   if [ -z "${empresa}" ]; then
@@ -6716,16 +6711,6 @@ if [ -f "${_mf_tools_dir}/mf_env_handle_message_queue.sh" ]; then
 else
   verificar_e_adicionar_handle_message_queue_env() {
     printf "${YELLOW} >> tools/mf_env_handle_message_queue.sh não encontrado — pulando filas de mensagem.\n${WHITE}"
-  }
-fi
-
-# Ponte Calling Oficial ↔ MultiFlow VOZ
-if [ -f "${_mf_tools_dir}/mf_env_voz_bridge_secret.sh" ]; then
-  # shellcheck source=tools/mf_env_voz_bridge_secret.sh
-  source "${_mf_tools_dir}/mf_env_voz_bridge_secret.sh"
-else
-  verificar_e_adicionar_voz_bridge_secret() {
-    printf "${YELLOW} >> tools/mf_env_voz_bridge_secret.sh não encontrado — pulando VOZ_BRIDGE_SECRET.\n${WHITE}"
   }
 fi
 

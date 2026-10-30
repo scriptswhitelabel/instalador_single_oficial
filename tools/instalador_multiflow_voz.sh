@@ -15,10 +15,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARQUIVO_VARIAVEIS_VOZ="${INSTALADOR_DIR}/VARIAVEIS_MULTIFLOW_VOZ"
 PATH_NODE_DEPLOY="${SCRIPT_DIR}/path_node_deploy.sh"
-if [ -f "${SCRIPT_DIR}/mf_env_voz_bridge_secret.sh" ]; then
-  # shellcheck source=mf_env_voz_bridge_secret.sh
-  source "${SCRIPT_DIR}/mf_env_voz_bridge_secret.sh"
-fi
 
 VOZ_ROOT="/home/deploy/multiflow-voz"
 REPO_NAME="multiflow-voz"
@@ -484,21 +480,10 @@ clonar_repositorio() {
 }
 
 escrever_env_backend() {
-  local jwt token_key engine_key bridge crm_env=""
+  local jwt token_key engine_key
   jwt=$(gerar_segredo)
   token_key=$(gerar_segredo | head -c 32)
   engine_key=$(gerar_segredo)
-
-  # Reusa segredo já existente no CRM ou na própria voz (não gera outro e quebra a ponte).
-  if [ -n "${empresa:-}" ] && [ -f "/home/deploy/${empresa}/backend/.env" ]; then
-    crm_env="/home/deploy/${empresa}/backend/.env"
-  fi
-  if type mf_resolver_voz_bridge_secret >/dev/null 2>&1; then
-    bridge="$(mf_resolver_voz_bridge_secret "$crm_env" "${VOZ_ROOT}/backend/.env")"
-  else
-    bridge=$(gerar_segredo)
-  fi
-  [ -n "$bridge" ] || bridge=$(gerar_segredo)
 
   cat >"${VOZ_ROOT}/backend/.env" <<EOF
 PORT=${voz_api_port}
@@ -517,23 +502,9 @@ ENGINE_API_KEY=${engine_key}
 PUBLIC_API_URL=https://${voz_api_host}
 PUBLIC_APP_URL=https://${voz_front_host}
 MULTIFLOW_API_URL=${multiflow_api_url}
-VOZ_BRIDGE_SECRET=${bridge}
 EOF
   chmod 600 "${VOZ_ROOT}/backend/.env"
   chown deploy:deploy "${VOZ_ROOT}/backend/.env"
-
-  # Espelha no .env do CRM (UltraWhats / Multiflow) se faltar
-  if type mf_garantir_voz_bridge_secret >/dev/null 2>&1; then
-    mf_garantir_voz_bridge_secret "$crm_env" "${VOZ_ROOT}/backend/.env"
-  elif [ -n "$crm_env" ] && [ -f "$crm_env" ] && ! grep -qE '^VOZ_BRIDGE_SECRET=.+' "$crm_env" \
-    && ! grep -qE '^MULTIFLOW_VOZ_BRIDGE_SECRET=.+' "$crm_env"; then
-    echo "" >> "$crm_env"
-    echo "# Ponte Calling Oficial ↔ MultiFlow VOZ (mesmo valor nos dois lados)" >> "$crm_env"
-    echo "VOZ_BRIDGE_SECRET=${bridge}" >> "$crm_env"
-    chown deploy:deploy "$crm_env" 2>/dev/null || true
-    chmod 600 "$crm_env" 2>/dev/null || true
-    printf "${GREEN} >> VOZ_BRIDGE_SECRET adicionada no CRM (%s).${WHITE}\n" "$crm_env"
-  fi
 
   # Ajusta ecosystem com porta do engine
   if [ -f "${VOZ_ROOT}/ecosystem.config.js" ]; then
@@ -1036,21 +1007,6 @@ atualizar_instalacao_voz() {
     else
       trata_erro "backend/.env sumiu após o git pull"
     fi
-  fi
-
-  # Garante VOZ_BRIDGE_SECRET na voz e no CRM (se houver instância no VPS)
-  local crm_env_upd=""
-  if [ -f "$ARQUIVO_VARIAVEIS_VOZ" ]; then
-    # shellcheck source=/dev/null
-    source "$ARQUIVO_VARIAVEIS_VOZ" 2>/dev/null || true
-  fi
-  if [ -n "${empresa:-}" ] && [ -f "/home/deploy/${empresa}/backend/.env" ]; then
-    crm_env_upd="/home/deploy/${empresa}/backend/.env"
-  fi
-  if type mf_garantir_voz_bridge_secret >/dev/null 2>&1; then
-    mf_garantir_voz_bridge_secret "$crm_env_upd" "${VOZ_ROOT}/backend/.env"
-  elif type verificar_e_adicionar_voz_bridge_secret >/dev/null 2>&1 && [ -n "${empresa:-}" ]; then
-    verificar_e_adicionar_voz_bridge_secret
   fi
 
   mkdir -p "$VOZ_ROOT/logs" "$VOZ_ROOT/storage/recordings" \

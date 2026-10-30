@@ -690,15 +690,6 @@ else
   }
 fi
 
-if [ -f "${_mf_tools_dir}/mf_env_voz_bridge_secret.sh" ]; then
-  # shellcheck source=tools/mf_env_voz_bridge_secret.sh
-  source "${_mf_tools_dir}/mf_env_voz_bridge_secret.sh"
-else
-  verificar_e_adicionar_voz_bridge_secret() {
-    printf "${YELLOW} >> tools/mf_env_voz_bridge_secret.sh não encontrado — pulando VOZ_BRIDGE_SECRET.\n${WHITE}"
-  }
-fi
-
 # Verificar e adicionar WHATSAPP_WEB_VERSION e variáveis LID/Baileys no .env do backend
 verificar_e_adicionar_whatsapp_web_version() {
   if [ -z "${empresa}" ]; then
@@ -831,7 +822,6 @@ baixa_codigo_atualizar() {
   verificar_e_adicionar_disable_disk_usage_cron
   verificar_e_adicionar_handle_message_queue_env
   verificar_e_adicionar_whatsapp_web_version
-  verificar_e_adicionar_voz_bridge_secret
 
   printf "${WHITE} >> Atualizando a Aplicação da Empresa ${empresa}... \n"
   sleep 2
