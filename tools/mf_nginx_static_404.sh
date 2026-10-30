@@ -6,19 +6,32 @@
 #   source tools/mf_nginx_static_404.sh
 #   mf_nginx_garantir_static_404 "minhaempresa"
 
-# www-data precisa atravessar /home/deploy e ler o build quando location ^~ /static/
+# www-data precisa atravessar /home/deploy/... e ler o build quando location ^~ /static/
 # serve arquivos direto do disco (sem proxy para o Node).
-# Sem o+x em /home/deploy (padrão 750 do useradd), o nginx devolve 404 (Permission denied)
-# e o splash entra em loop de ?_nocache=.
+# Sem o+x em /home/deploy (padrão 750 do useradd) — ou em algum pai do caminho —
+# o nginx devolve 403/404 (Permission denied) e o splash entra em loop de ?_nocache=.
 mf_nginx_ensure_static_readable() {
   local build_root="${1:-}"
+  local d
 
   if [ -d /home/deploy ]; then
-    # Mantém dono; só garante travessia por outros (nginx/www-data).
+    # Mantém dono; só garante travessia por others (nginx/www-data).
     chmod o+x /home/deploy 2>/dev/null || chmod 755 /home/deploy 2>/dev/null || true
   fi
 
   if [ -n "$build_root" ] && [ -d "$build_root" ]; then
+    # Cada segmento do caminho até o build precisa de o+x (ex.: empresa/, frontend/).
+    d="$build_root"
+    while [ -n "$d" ] && [ "$d" != "/" ]; do
+      if [ -d "$d" ]; then
+        chmod o+x "$d" 2>/dev/null || true
+      fi
+      case "$d" in
+        /home/deploy) break ;;
+      esac
+      d=$(dirname "$d")
+    done
+    # Arquivos/pastas do CRA: leitura (+ execução em diretórios) para www-data.
     chmod -R a+rX "$build_root" 2>/dev/null || true
   fi
 }

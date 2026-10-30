@@ -1040,6 +1040,8 @@ baixa_codigo_atualizar() {
   sleep 2
   chown deploy -R /home/deploy/${empresa}
   chmod 775 -R /home/deploy/${empresa}
+  # nginx (www-data) precisa atravessar /home/deploy (padrão useradd = 750).
+  chmod o+x /home/deploy 2>/dev/null || chmod 755 /home/deploy 2>/dev/null || true
 
   sleep 2
 

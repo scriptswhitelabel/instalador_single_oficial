@@ -3686,6 +3686,9 @@ cria_deploy_base() {
   {
     sudo useradd -m -p $(openssl passwd -1 ${senha_deploy}) -s /bin/bash -G sudo deploy
     sudo usermod -aG sudo deploy
+    # useradd -m costuma deixar /home/deploy em 750; nginx (www-data) precisa atravessar
+    # para servir /home/deploy/<empresa>/frontend/build/static/ direto do disco.
+    sudo chmod 755 /home/deploy 2>/dev/null || true
     sleep 2
   } || trata_erro "cria_deploy_base"
 }
@@ -5559,6 +5562,14 @@ EOF
   NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider" npm run build
 FRONTENDBUILD
 
+    # Garante que www-data leia o build (antes mesmo do conf Nginx/SSL).
+    _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_nginx_static_404.sh"
+    if [ -f "$_mf_nginx_static" ]; then
+      # shellcheck source=/dev/null
+      source "$_mf_nginx_static"
+      mf_nginx_ensure_static_readable "/home/deploy/${empresa}/frontend/build" || true
+    fi
+
     sleep 2
 
     banner
@@ -6048,6 +6059,12 @@ publicar_build_frontend_atualizado() {
   rm -rf "${backup_dir}"
   chown -R deploy:deploy "${build_dir}"
   chmod -R 775 "${build_dir}"
+  _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_nginx_static_404.sh"
+  if [ -f "$_mf_nginx_static" ]; then
+    # shellcheck source=/dev/null
+    source "$_mf_nginx_static"
+    mf_nginx_ensure_static_readable "${build_dir}" || true
+  fi
 }
 
 restaurar_build_frontend_anterior() {
@@ -6062,6 +6079,12 @@ restaurar_build_frontend_anterior() {
     mv "${backup_dir}" "${build_dir}"
     chown -R deploy:deploy "${build_dir}"
     chmod -R 775 "${build_dir}"
+    _mf_nginx_static="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_nginx_static_404.sh"
+    if [ -f "$_mf_nginx_static" ]; then
+      # shellcheck source=/dev/null
+      source "$_mf_nginx_static"
+      mf_nginx_ensure_static_readable "${build_dir}" || true
+    fi
   fi
 }
 
@@ -6108,6 +6131,8 @@ baixa_codigo_atualizar() {
   sleep 2
   chown deploy -R /home/deploy/${empresa}
   chmod 775 -R /home/deploy/${empresa}
+  # /home/deploy em si (fora da pasta da empresa) precisa de o+x para o nginx.
+  chmod o+x /home/deploy 2>/dev/null || chmod 755 /home/deploy 2>/dev/null || true
 
   sleep 2
 
