@@ -154,12 +154,25 @@ mf_git_aplicar_token_remote() {
   return 1
 }
 
+# Remove só lixo não rastreado (ex.: node_modules órfão). NUNCA apaga dados de instância.
+# backend/public e backend/private costumam ser locais/gitignored (mídia, uploads) —
+# sem -e, "git clean -fd" imprime "Removing backend/public/" e apaga tudo (relato chatdm).
 mf_git_clean_preservando_locais() {
   git clean -fd \
     -e api_transcricao/run_transcricao.sh \
     -e backend/.env \
     -e frontend/.env \
     -e api_oficial/.env \
+    -e backend/public \
+    -e backend/public/ \
+    -e backend/private \
+    -e backend/private/ \
+    -e backend/uploads \
+    -e backend/uploads/ \
+    -e backend/.wwebjs_auth \
+    -e backend/.wwebjs_auth/ \
+    -e backend/.wwebjs_cache \
+    -e backend/.wwebjs_cache/ \
     2>/dev/null || true
 }
 

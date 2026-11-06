@@ -839,7 +839,15 @@ baixa_codigo_atualizar() {
     MF_GIT_SYNC_BODY=$(cat <<'MF_GIT_SYNC_INLINE'
 
 mf_git_clean_preservando_locais() {
-  git clean -fd -e api_transcricao/run_transcricao.sh 2>/dev/null || true
+  git clean -fd \
+    -e api_transcricao/run_transcricao.sh \
+    -e backend/.env -e frontend/.env -e api_oficial/.env \
+    -e backend/public -e backend/public/ \
+    -e backend/private -e backend/private/ \
+    -e backend/uploads -e backend/uploads/ \
+    -e backend/.wwebjs_auth -e backend/.wwebjs_auth/ \
+    -e backend/.wwebjs_cache -e backend/.wwebjs_cache/ \
+    2>/dev/null || true
 }
 mf_git_detectar_deploy_branch() {
   if git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
