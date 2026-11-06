@@ -29,22 +29,8 @@ if [ -f "${_mf_tools_dir}/git_sincronizar_repositorio.sh" ]; then
   . "${_mf_tools_dir}/git_sincronizar_repositorio.sh"
 else
   mf_git_clean_preservando_locais() {
-    git clean -fd \
-      -e api_transcricao/run_transcricao.sh \
-      -e backend/.env \
-      -e frontend/.env \
-      -e api_oficial/.env \
-      -e backend/public \
-      -e backend/public/ \
-      -e backend/private \
-      -e backend/private/ \
-      -e backend/uploads \
-      -e backend/uploads/ \
-      -e backend/.wwebjs_auth \
-      -e backend/.wwebjs_auth/ \
-      -e backend/.wwebjs_cache \
-      -e backend/.wwebjs_cache/ \
-      2>/dev/null || true
+    # git clean -fd desativado (apaga dados locais da instância). Ver git_sincronizar_repositorio.sh
+    return 0
   }
 
   mf_git_detectar_deploy_branch() {
