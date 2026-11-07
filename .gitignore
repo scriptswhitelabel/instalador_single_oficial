@@ -5,6 +5,14 @@
 *.env
 *.env.backup
 
+# Dados locais da instalação (NÃO versionar; git clean não deve apagar)
+VARIAVEIS_INSTALACAO
+VARIAVEIS_INSTALACAO_*
+ETAPA_INSTALACAO
+update.x
+ffmpeg.x
+ffmpeg/
+
 # Installer outputs & temp files
 logs/
 tmp/

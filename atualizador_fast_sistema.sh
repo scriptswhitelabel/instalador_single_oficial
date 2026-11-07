@@ -77,8 +77,32 @@ sistema_resolver_empresa() {
     done
     shopt -u nullglob
     if [ -d "/home/deploy/${emp_arg}/backend" ]; then
+      # Pasta existe, mas VARIAVEIS sumiu (ex.: git clean no instalador). Recria mínimo.
       empresa="$emp_arg"
-      declare -g ARQUIVO_VARIAVEIS_USADO=""
+      local arq_fallback="${INSTALADOR_DIR}/VARIAVEIS_INSTALACAO"
+      if [ ! -f "$arq_fallback" ]; then
+        local origin_url repo_pub tok_emb
+        origin_url=$(git -c "safe.directory=/home/deploy/${emp_arg}" -C "/home/deploy/${emp_arg}" remote get-url origin 2>/dev/null || true)
+        tok_emb=$(printf '%s' "$origin_url" | sed -n 's#.*x-access-token:\([^@]*\)@.*#\1#p')
+        repo_pub=$(printf '%s' "$origin_url" | sed -E 's#^(https?://)[^/@]+@#\1#')
+        {
+          echo "empresa=${emp_arg}"
+          echo "nome_titulo=${emp_arg}"
+          [ -n "$repo_pub" ] && echo "repo_url=${repo_pub}"
+          [ -n "$tok_emb" ] && echo "github_token=${tok_emb}"
+          local fe_host be_host
+          fe_host=$(grep -m1 'server_name' "/etc/nginx/sites-enabled/${emp_arg}-frontend" 2>/dev/null | awk '{print $2}' | tr -d ';' || true)
+          be_host=$(grep -m1 'server_name' "/etc/nginx/sites-enabled/${emp_arg}-backend" 2>/dev/null | awk '{print $2}' | tr -d ';' || true)
+          [ -n "$fe_host" ] && echo "subdominio_frontend=${fe_host}"
+          [ -n "$be_host" ] && echo "subdominio_backend=${be_host}"
+        } >"$arq_fallback"
+        chmod 600 "$arq_fallback" 2>/dev/null || true
+        printf "${YELLOW} >> VARIAVEIS_INSTALACAO ausente — recriado em ${arq_fallback}${WHITE}\n"
+      fi
+      # shellcheck source=/dev/null
+      source "$arq_fallback" 2>/dev/null || true
+      empresa="$emp_arg"
+      declare -g ARQUIVO_VARIAVEIS_USADO="$arq_fallback"
       return 0
     fi
     printf "${RED} >> Instância '${emp_arg}' não encontrada em /home/deploy.${WHITE}\n"
