@@ -1,4 +1,6 @@
 #!/bin/bash
+_mf_wa_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_whatsapp_web_version.sh"
+[ -f "$_mf_wa_tools" ] && . "$_mf_wa_tools"
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -270,7 +272,7 @@ RESTARTPM2
 # Garante WHATSAPP_WEB_VERSION no .env do backend no padrão do instalador (cria ou atualiza se diferente).
 garantir_whatsapp_web_version_env_backend() {
   local env_file="$1"
-  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1042896555"
+  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1053716622"
   local _mf_wa_ver_atual=""
   [ -z "$env_file" ] || [ ! -f "$env_file" ] && return 0
 
@@ -286,6 +288,22 @@ garantir_whatsapp_web_version_env_backend() {
   elif [ "$_mf_wa_ver_atual" != "$MF_WHATSAPP_WEB_VERSION_PADRAO" ]; then
     printf "${WHITE} >> Atualizando WHATSAPP_WEB_VERSION no .env: ${_mf_wa_ver_atual} → ${MF_WHATSAPP_WEB_VERSION_PADRAO}\n${WHITE}"
     sed -i "s|^WHATSAPP_WEB_VERSION=.*|WHATSAPP_WEB_VERSION=${MF_WHATSAPP_WEB_VERSION_PADRAO}|" "$env_file"
+  fi
+
+
+  # Política autônoma WA (checagem diária / expire / soft-recover): só cria se ausente
+  _mf_wa_helper=""
+  if [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_whatsapp_web_version.sh" ]; then
+    _mf_wa_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_whatsapp_web_version.sh"
+  elif [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_whatsapp_web_version.sh" ]; then
+    _mf_wa_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mf_whatsapp_web_version.sh"
+  fi
+  if [ -n "$_mf_wa_helper" ]; then
+    # shellcheck source=/dev/null
+    . "$_mf_wa_helper"
+  fi
+  if type mf_whatsapp_web_version_ensure_policy_env >/dev/null 2>&1; then
+    mf_whatsapp_web_version_ensure_policy_env "$env_file"
   fi
 
   chown deploy:deploy "$env_file" 2>/dev/null || true

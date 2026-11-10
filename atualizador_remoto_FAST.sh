@@ -1,6 +1,8 @@
 #!/bin/bash
 _mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/baileys_hineken_package_json.sh"
 [ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
+_mf_wa_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_whatsapp_web_version.sh"
+[ -f "$_mf_wa_tools" ] && . "$_mf_wa_tools"
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -649,7 +651,7 @@ verificar_e_adicionar_whatsapp_web_version() {
   fi
 
   # Versão padrão do instalador (atualize aqui quando a Meta invalidar a anterior).
-  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1042896555"
+  local MF_WHATSAPP_WEB_VERSION_PADRAO="2.3000.1053716622"
   local _mf_wa_ver_atual=""
   if grep -q '^WHATSAPP_WEB_VERSION=' "$ENV_FILE"; then
     _mf_wa_ver_atual=$(grep '^WHATSAPP_WEB_VERSION=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -667,6 +669,12 @@ verificar_e_adicionar_whatsapp_web_version() {
     printf "${GREEN} >> WHATSAPP_WEB_VERSION atualizada para ${MF_WHATSAPP_WEB_VERSION_PADRAO}.${WHITE}\n"
   else
     printf "${GREEN} >> WHATSAPP_WEB_VERSION já está em ${MF_WHATSAPP_WEB_VERSION_PADRAO}.${WHITE}\n"
+  fi
+
+
+  # Política autônoma WA: cria no .env só se ainda não existir (não duplica/sobrescreve)
+  if type mf_whatsapp_web_version_ensure_policy_env >/dev/null 2>&1; then
+    mf_whatsapp_web_version_ensure_policy_env "$ENV_FILE"
   fi
 
   local _mf_lid_baileys_header=0
