@@ -19,6 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALADOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=instalar_docker_compartilhado.sh
 source "${SCRIPT_DIR}/instalar_docker_compartilhado.sh"
+# shellcheck source=mf_politica_versoes.sh
+[ -f "${SCRIPT_DIR}/mf_politica_versoes.sh" ] && . "${SCRIPT_DIR}/mf_politica_versoes.sh"
 
 if [ "$EUID" -ne 0 ]; then
   echo
@@ -306,6 +308,15 @@ mostrar_lista_versoes_instalacao() {
 
 # Selecionar versão para instalação (mesma do instalador_single.sh)
 selecionar_versao_instalacao() {
+  # Menu oculto: sempre última do Git. Reative: MF_FORCAR_COMMIT_MAIS_RECENTE=0
+  if type mf_politica_forcar_mais_recente >/dev/null 2>&1 && mf_politica_forcar_mais_recente; then
+    banner
+    mf_aplicar_versao_mais_recente_instalacao
+    guardar_dados_instancia_sessao
+    sleep 1
+    return 0
+  fi
+
   banner
   printf "${WHITE} >> Selecionando versão para instalação...\n"
   echo

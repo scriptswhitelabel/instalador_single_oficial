@@ -3,6 +3,8 @@ _mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/baileys_h
 [ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
 _mf_wa_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_whatsapp_web_version.sh"
 [ -f "$_mf_wa_tools" ] && . "$_mf_wa_tools"
+_mf_politica_versoes="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_politica_versoes.sh"
+[ -f "$_mf_politica_versoes" ] && . "$_mf_politica_versoes"
 # Atualização FAST automática (sem menus): sempre última versão Git + API Oficial + WhatsMeow se houver mudança.
 # Uso: bash atualizador_fast_sistema.sh [empresa]
 #      MF_EMPRESA=zapp360 bash atualizador_fast_sistema.sh
@@ -412,6 +414,14 @@ mostrar_lista_versoes_instalacao() {
 }
 
 selecionar_versao_atualizacao() {
+  # Menu oculto: sempre última do Git. Reative: MF_FORCAR_COMMIT_MAIS_RECENTE=0
+  if type mf_politica_forcar_mais_recente >/dev/null 2>&1 && mf_politica_forcar_mais_recente; then
+    banner
+    mf_aplicar_versao_mais_recente_atualizacao
+    sleep 1
+    return 0
+  fi
+
   banner
   printf "${WHITE} >> Selecionando versão para atualização FAST...\n"
   echo

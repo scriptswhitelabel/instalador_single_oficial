@@ -3,6 +3,8 @@ _mf_baileys_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/baileys_h
 [ -f "$_mf_baileys_tools" ] && . "$_mf_baileys_tools"
 _mf_wa_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_whatsapp_web_version.sh"
 [ -f "$_mf_wa_tools" ] && . "$_mf_wa_tools"
+_mf_politica_versoes="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/mf_politica_versoes.sh"
+[ -f "$_mf_politica_versoes" ] && . "$_mf_politica_versoes"
 
 GREEN='\033[1;32m'
 BLUE='\033[1;34m'
@@ -2600,7 +2602,10 @@ menu_ferramentas() {
     printf "   [${BLUE}27${WHITE}] Atualizar HUB MultiFlow\n"
     echo
     printf "  ${BLUE}━━ Versão da aplicação ━━${WHITE}\n"
-    printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
+    # Rollback oculto (código/case 4 preservados). Reative: MF_OCULTAR_MENU_ROLLBACK=0
+    if [ "${MF_OCULTAR_MENU_ROLLBACK:-1}" != "1" ]; then
+      printf "   [${BLUE}4${WHITE}] Roolback Versão\n"
+    fi
     printf "   [${BLUE}30${WHITE}] Atualizar token GitHub + FAST (qualquer repo)\n"
     echo
     printf "  ${BLUE}━━ Backups agendados ━━${WHITE}\n"
@@ -3434,14 +3439,8 @@ questoes_variaveis_base() {
     repo_url="${repo_url_limpo}"
   fi
   
-  # Mostrar seleção de versão/commit apenas para o repositório multiflow-pro
-  if echo "${repo_url}" | grep -q "scriptswhitelabel/multiflow-pro"; then
-    selecionar_versao_instalacao
-  else
-    # Outros repositórios: sempre instalar a versão mais recente, sem menu
-    declare -g versao_instalacao="Mais_Recente"
-    declare -g commit_instalacao=""
-  fi
+  # Sempre última do Git (menu de versões oculto). Legado: só multiflow-pro mostrava lista.
+  selecionar_versao_instalacao
 }
 
 # Define proxy usado
@@ -4751,6 +4750,14 @@ mostrar_lista_versoes_instalacao() {
 
 # Selecionar versão para instalação
 selecionar_versao_instalacao() {
+  # Menu oculto: sempre última do Git. Reative: MF_FORCAR_COMMIT_MAIS_RECENTE=0
+  if type mf_politica_forcar_mais_recente >/dev/null 2>&1 && mf_politica_forcar_mais_recente; then
+    banner
+    mf_aplicar_versao_mais_recente_instalacao
+    sleep 1
+    return 0
+  fi
+
   banner
   printf "${WHITE} >> Selecionando versão para instalação...\n"
   echo
@@ -4807,6 +4814,14 @@ selecionar_versao_instalacao() {
 
 # Selecionar versão para atualização (mesma lista da instalação / rollback; só multiflow-pro)
 selecionar_versao_atualizacao() {
+  # Menu oculto: sempre última do Git. Reative: MF_FORCAR_COMMIT_MAIS_RECENTE=0
+  if type mf_politica_forcar_mais_recente >/dev/null 2>&1 && mf_politica_forcar_mais_recente; then
+    banner
+    mf_aplicar_versao_mais_recente_atualizacao
+    sleep 1
+    return 0
+  fi
+
   banner
   printf "${WHITE} >> Selecionando versão para atualização...\n"
   echo
