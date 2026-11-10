@@ -148,8 +148,11 @@ else
   [ -d /usr/local/n/versions/node/20.19.4/bin ] && export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
 fi
 cd /home/deploy/${empresa}
-git reset --hard
-git pull
+# Evita \"Need to specify how to reconcile divergent branches\" do git pull
+git fetch origin || exit 1
+_branch=\$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+git show-ref --verify --quiet \"refs/remotes/origin/\${_branch}\" || _branch=main
+git reset --hard \"origin/\${_branch}\" || exit 1
 cd /home/deploy/${empresa}/api_oficial
 npm install
 npx prisma generate
