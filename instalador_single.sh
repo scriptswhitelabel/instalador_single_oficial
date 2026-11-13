@@ -2477,10 +2477,29 @@ atualizar_baileys_pro_heineken_ferramentas() {
     return 1
   fi
 
-  # Token no package.json (registry Baileys) também aplicado como deploy — evita arquivo com dono root antes do npm i
-  local tok_sed="${github_token//&/\\&}"
+  # Força URL Hineken com o github_token ATUAL das variáveis (não só promove PAT antigo → x-access-token).
+  # Bug: sed antigo mantinha PAT expirado no package.json → "Invalid username or token".
+  if [ -z "${github_token:-}" ]; then
+    printf "${RED} >> github_token vazio no arquivo da instância — impossível autenticar no Hineken.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  if ! aplicar_token_baileys_package_json "${empresa}" "${github_token}" "${repo_url:-}"; then
+    printf "${RED} >> Falha ao aplicar token do Baileys/Hineken no package.json.${WHITE}\n"
+    sleep 2
+    return 1
+  fi
+  chown deploy:deploy "${backend_dir}/package.json" 2>/dev/null || true
+  [ -f "${backend_dir}/package-lock.json" ] && chown deploy:deploy "${backend_dir}/package-lock.json" 2>/dev/null || true
 
-  printf "${WHITE} >> Como usuário ${BLUE}deploy${WHITE}: TOKEN no package.json (se MultiFlow-PRO), rm baileys + lock, npm i e pm2 restart...${WHITE}\n"
+  INSTALADOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh" ]; then
+    MF_BAILEYS_BODY=$(sed '/^#!/d' "${INSTALADOR_DIR}/tools/baileys_hineken_package_json.sh")
+  else
+    MF_BAILEYS_BODY=""
+  fi
+
+  printf "${WHITE} >> Como usuário ${BLUE}deploy${WHITE}: reforço token, rm baileys + lock, npm i e pm2 restart...${WHITE}\n"
   echo
 
   if ! sudo su - deploy <<BAILEYSDEPLOY
@@ -2497,22 +2516,28 @@ atualizar_baileys_pro_heineken_ferramentas() {
       fi
     fi
   fi
+${MF_BAILEYS_BODY}
   cd "${backend_dir}" || exit 1
   if [ -f package.json ]; then
-    # PAT fino exige x-access-token:TOKEN (TOKEN@ sozinho → HTTP 401)
-    sed -i -E "s#(git\\+https://|https://)TOKEN_GITHUB@#\\1x-access-token:${tok_sed}@#g" package.json
-    sed -i "s|TOKEN_GITHUB|${tok_sed}|g" package.json
-    sed -i -E 's#(git\+https://|https://)(github_pat_[A-Za-z0-9_]+)@#\1x-access-token:\2@#g' package.json
-    sed -i -E 's#(git\+https://|https://)(ghp_[A-Za-z0-9]+)@#\1x-access-token:\2@#g' package.json
-    sed -i 's|github.com/tswhitelabel/Hineken|github.com/scriptswhitelabel/Hineken|g' package.json
-    if grep -q 'scriptswhitelabel/Hineken' package.json 2>/dev/null; then
-      sed -i -E 's|(github\.com/scriptswhitelabel/Hineken\.git)(#[^"]*)?|\1#main|g' package.json
-      printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
+    if type mf_baileys_aplicar_token_package_json >/dev/null 2>&1; then
+      mf_baileys_aplicar_token_package_json "\$(pwd)/package.json" "${github_token}" || {
+        echo "ERRO: falha ao forçar token Baileys/Hineken (x-access-token)."
+        exit 1
+      }
     fi
+    if type mf_baileys_git_instead_of_token >/dev/null 2>&1; then
+      mf_baileys_git_instead_of_token "${github_token}" || true
+    fi
+    if grep -qE '(git\+https://|https://)(github_pat_|ghp_)' package.json 2>/dev/null; then
+      echo "ERRO: package.json ainda tem URL Hineken sem x-access-token:."
+      exit 1
+    fi
+    printf "${GREEN} >> Baileys/Hineken fixado na branch main no package.json.${WHITE}\n"
     printf "${GREEN} >> Token aplicado no package.json (Baileys).${WHITE}\n"
   fi
   export GIT_TERMINAL_PROMPT=0
   export GIT_ASKPASS=true
+  export GCM_INTERACTIVE=Never
   rm -rf node_modules/baileys package-lock.json
   npm i || exit 1
   if pm2 list 2>/dev/null | grep -qE "${empresa}-backend[[:space:]]"; then
