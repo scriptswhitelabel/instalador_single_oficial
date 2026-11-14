@@ -317,7 +317,8 @@ instalar_base_vps_limpo() {
   apt-get install -y \
     curl wget git build-essential openssl \
     nginx redis-server postgresql postgresql-contrib \
-    ufw snapd ca-certificates gnupg || trata_erro "apt packages"
+    ufw snapd ca-certificates gnupg \
+    ffmpeg sqlite3 || trata_erro "apt packages"
 
   timedatectl set-timezone America/Sao_Paulo 2>/dev/null || true
   ufw allow 22/tcp >/dev/null 2>&1 || true
@@ -426,6 +427,79 @@ instalar_golang() {
   go version || trata_erro "go version"
 }
 
+#
+# URA WaCalls precisa de ffmpeg no PATH (áudio de saudação).
+# URA Oficial (server-side) precisa do Chromium do Playwright.
+# npm install só atualiza o pacote — NÃO baixa o browser; após update a
+# revisão muda (ex.: chromium_headless_shell-1234) e a URA quebra sem
+# "npx playwright install chromium".
+#
+garantir_ffmpeg_sistema() {
+  export DEBIAN_FRONTEND=noninteractive
+  if command -v ffmpeg >/dev/null 2>&1 && ffmpeg -version >/dev/null 2>&1; then
+    printf "${GREEN} >> ffmpeg OK: %s${WHITE}\n" "$(command -v ffmpeg)"
+    return 0
+  fi
+  printf "${WHITE} >> Instalando ffmpeg (URA WaCalls / áudio)...${WHITE}\n"
+  apt-get update -qq >/dev/null 2>&1 || apt-get update -y >/dev/null 2>&1 || true
+  apt-get install -y -qq ffmpeg || apt-get install -y ffmpeg || trata_erro "apt ffmpeg"
+  command -v ffmpeg >/dev/null 2>&1 || trata_erro "ffmpeg não ficou no PATH"
+  printf "${GREEN} >> ffmpeg instalado: %s${WHITE}\n" "$(command -v ffmpeg)"
+}
+
+garantir_playwright_chromium_voz() {
+  local backend="${VOZ_ROOT}/backend"
+  export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/bin:/usr/bin:$PATH"
+
+  if [ ! -d "$backend" ]; then
+    printf "${YELLOW} >> backend VOZ ainda não existe — Playwright será instalado no build.${WHITE}\n"
+    return 0
+  fi
+
+  # Libs de sistema que o Chromium headless precisa (idempotente).
+  if [ -d "${backend}/node_modules/playwright" ] || [ -d "${backend}/node_modules/playwright-core" ]; then
+    printf "${WHITE} >> Garantindo libs de sistema do Playwright...${WHITE}\n"
+    (
+      cd "$backend"
+      npx --yes playwright install-deps chromium 2>/dev/null \
+        || npx --yes playwright install-deps 2>/dev/null \
+        || true
+    )
+  fi
+
+  printf "${WHITE} >> Baixando Chromium do Playwright (URA Oficial headless)...${WHITE}\n"
+  sudo -u deploy bash -lc "
+    set -e
+    export HOME=/home/deploy
+    export PATH=/usr/local/n/versions/node/20.19.4/bin:/usr/local/bin:/usr/bin:\$PATH
+    if [ -f '${PATH_NODE_DEPLOY}' ]; then . '${PATH_NODE_DEPLOY}'; fi
+    cd '${backend}'
+    if [ ! -d node_modules/playwright ] && [ ! -d node_modules/playwright-core ]; then
+      echo '>> playwright ainda não está em node_modules — pulando browsers (rode após npm install).'
+      exit 0
+    fi
+    npx playwright install chromium
+  " || trata_erro "playwright install chromium"
+
+  local shell_dir
+  shell_dir=$(ls -d /home/deploy/.cache/ms-playwright/chromium_headless_shell-* 2>/dev/null | tail -1 || true)
+  if [ -n "$shell_dir" ] && [ -x "${shell_dir}/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
+    printf "${GREEN} >> Playwright Chromium OK: %s${WHITE}\n" "$shell_dir"
+  elif [ -n "$(ls -d /home/deploy/.cache/ms-playwright/chromium-* 2>/dev/null | tail -1 || true)" ]; then
+    printf "${GREEN} >> Playwright Chromium OK (cache em ~/.cache/ms-playwright).${WHITE}\n"
+  else
+    printf "${YELLOW} >> Aviso: cache Playwright não encontrado após install — confira logs acima.${WHITE}\n"
+  fi
+}
+
+garantir_deps_runtime_voz() {
+  banner
+  printf "${WHITE} >> Dependências de runtime do VOZ (ffmpeg + Playwright)...${WHITE}\n"
+  garantir_ffmpeg_sistema
+  garantir_playwright_chromium_voz
+  printf "${GREEN} >> Runtime VOZ OK.${WHITE}\n"
+}
+
 garantir_deps_vps_multiflow() {
   banner
   printf "${WHITE} >> VPS com Multiflow: reaproveitando ambiente existente...${WHITE}\n"
@@ -448,6 +522,8 @@ garantir_deps_vps_multiflow() {
   fi
   # Softphone remoto precisa de UDP inbound (ICE host candidates do engine)
   ufw allow 10000:60000/udp >/dev/null 2>&1 || true
+  # ffmpeg já nesta fase (Playwright browsers após npm install no build)
+  garantir_ffmpeg_sistema
   printf "${GREEN} >> Dependências OK (reaproveitando Postgres/Redis/Nginx do Multiflow).${WHITE}\n"
   printf "${WHITE} >> Obs: o MultiFlow VOZ usa SQLite próprio; Postgres/Redis do Multiflow ficam intactos.${WHITE}\n"
   sleep 2
@@ -577,6 +653,9 @@ build_e_seed() {
   printf "${WHITE} >> Build do Engine (Go), Backend e Frontend...${WHITE}\n"
   export PATH="/usr/local/n/versions/node/20.19.4/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:$PATH"
 
+  # Sempre antes do build/update: áudio URA WaCalls
+  garantir_ffmpeg_sistema
+
   preparar_rollup_frontend
   chown -R deploy:deploy "${VOZ_ROOT}/frontend"
 
@@ -601,6 +680,9 @@ build_e_seed() {
     npm install --include=optional
     npm run build
   " || trata_erro "build multiflow-voz"
+
+  # Depois do npm install: Chromium bate com a revisão do pacote playwright
+  garantir_playwright_chromium_voz
 
   chown -R deploy:deploy "$VOZ_ROOT"
 }
@@ -985,6 +1067,9 @@ atualizar_instalacao_voz() {
     instalar_node_pm2
   fi
 
+  # ffmpeg já (Playwright Chromium após npm install no build_e_seed)
+  garantir_ffmpeg_sistema
+
   # Backup do .env (segurança — não versionado, mas por garantia)
   cp -a "${VOZ_ROOT}/backend/.env" "/tmp/multiflow-voz.env.bak.$(date +%s)" 2>/dev/null || true
 
@@ -1053,6 +1138,7 @@ atualizar_instalacao_voz() {
   fi
   echo
   printf "${WHITE} >> .env, banco SQLite e gravações foram preservados.${WHITE}\n"
+  printf "${WHITE} >> Runtime: ffmpeg + Playwright Chromium revalidados (URA WaCalls/Oficial).${WHITE}\n"
   echo
 }
 
