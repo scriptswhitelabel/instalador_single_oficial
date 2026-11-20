@@ -173,6 +173,43 @@ mf_git_detectar_deploy_branch() {
   fi
 }
 
+# Branch de atualização “produto”: prefere main (não segue HEAD local nem branches extras como escala).
+# Fallback: MULTI100-OFICIAL-u21, master.
+mf_git_detectar_branch_atualizacao() {
+  if git show-ref --verify --quiet refs/remotes/origin/main; then
+    printf '%s\n' main
+  elif git show-ref --verify --quiet refs/remotes/origin/MULTI100-OFICIAL-u21; then
+    printf '%s\n' MULTI100-OFICIAL-u21
+  elif git show-ref --verify --quiet refs/remotes/origin/master; then
+    printf '%s\n' master
+  fi
+}
+
+# Garante refs remotas de deploy após fetch (clone parcial / branch nova não remove a necessidade da main).
+mf_git_fetch_branches_deploy() {
+  git fetch origin --prune 2>/dev/null || git fetch origin || return 1
+  git fetch origin main:refs/remotes/origin/main 2>/dev/null || true
+  git fetch origin MULTI100-OFICIAL-u21:refs/remotes/origin/MULTI100-OFICIAL-u21 2>/dev/null || true
+  git fetch origin master:refs/remotes/origin/master 2>/dev/null || true
+  return 0
+}
+
+# Sincroniza o repo da app para a branch de atualização (main por padrão). Não segue escala/HEAD.
+mf_git_sincronizar_branch_atualizacao() {
+  local branch=""
+  mf_git_desabilitar_prompt 2>/dev/null || true
+  mf_git_fetch_branches_deploy || return 1
+  branch=$(mf_git_detectar_branch_atualizacao)
+  if [ -z "$branch" ]; then
+    echo "ERRO: nenhuma branch remota de deploy (main / MULTI100-OFICIAL-u21 / master)."
+    return 1
+  fi
+  echo " >> Git: sincronizando origin/${branch} (atualização — não usa branch escala/HEAD local)"
+  git checkout -B "${branch}" "origin/${branch}" || return 1
+  git reset --hard "origin/${branch}" || return 1
+  return 0
+}
+
 # Evita hang: git pedindo usuário/senha dentro de heredoc sem TTY.
 mf_git_desabilitar_prompt() {
   export GIT_TERMINAL_PROMPT=0

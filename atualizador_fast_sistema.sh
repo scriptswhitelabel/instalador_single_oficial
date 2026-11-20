@@ -141,6 +141,23 @@ sistema_atualizar_api_oficial() {
   fi
 
   printf "${WHITE} >> Atualizando API Oficial (${empresa})...${WHITE}\n"
+  # Sync do repo da app (main) ANTES do heredoc — não seguir HEAD/escala; origin/main pode faltar se o fetch só trouxe branch nova.
+  if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+  fi
+  if type mf_git_sincronizar_branch_atualizacao >/dev/null 2>&1; then
+    if ! ( cd "/home/deploy/${empresa}" && mf_git_sincronizar_branch_atualizacao ); then
+      printf "${RED} >> Falha ao sincronizar git (main) antes da API Oficial.${WHITE}\n"
+      return 1
+    fi
+  else
+    if ! sudo -u deploy bash -c "cd /home/deploy/${empresa} && git fetch origin --prune && (git fetch origin main:refs/remotes/origin/main || true) && git show-ref --verify --quiet refs/remotes/origin/main && git checkout -B main origin/main && git reset --hard origin/main"; then
+      printf "${RED} >> Falha ao sincronizar origin/main antes da API Oficial.${WHITE}\n"
+      return 1
+    fi
+  fi
+
   if ! sudo su - deploy <<EOF
 set -e
 if [ -f /root/instalador_single_oficial/tools/path_node_deploy.sh ]; then
@@ -149,12 +166,6 @@ else
   export PATH="/usr/local/bin:/usr/bin:\${PATH:-}"
   [ -d /usr/local/n/versions/node/20.19.4/bin ] && export PATH="/usr/local/n/versions/node/20.19.4/bin:\$PATH"
 fi
-cd /home/deploy/${empresa}
-# Evita \"Need to specify how to reconcile divergent branches\" do git pull
-git fetch origin || exit 1
-_branch=\$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
-git show-ref --verify --quiet \"refs/remotes/origin/\${_branch}\" || _branch=main
-git reset --hard \"origin/\${_branch}\" || exit 1
 cd /home/deploy/${empresa}/api_oficial
 npm install
 npx prisma generate

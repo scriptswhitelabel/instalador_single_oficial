@@ -200,13 +200,20 @@ atualizar_codigo_apioficial() {
   printf "${WHITE} >> Atualizando código da API Oficial...\n"
   echo
   {
+    # Sempre main (não segue HEAD/escala). Evita: fatal: ambiguous argument 'origin/main'
+    if [ -f "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh" ]; then
+      # shellcheck source=/dev/null
+      . "${INSTALADOR_DIR}/tools/git_sincronizar_repositorio.sh"
+    fi
+    printf "${WHITE} >> Sincronizando repositório da app (branch main / deploy)...\n"
+    if type mf_git_sincronizar_branch_atualizacao >/dev/null 2>&1; then
+      ( cd "/home/deploy/${empresa}" && mf_git_sincronizar_branch_atualizacao ) || trata_erro "git_sync_main_api_oficial"
+    else
+      sudo -u deploy bash -c "cd /home/deploy/${empresa} && git fetch origin --prune && (git fetch origin main:refs/remotes/origin/main || true) && git checkout -B main origin/main && git reset --hard origin/main" \
+        || trata_erro "git_sync_main_api_oficial"
+    fi
+
     sudo su - deploy <<EOF
-cd /home/deploy/${empresa}
-
-printf "${WHITE} >> Fazendo pull das atualizações...\n"
-git reset --hard
-git pull
-
 cd /home/deploy/${empresa}/api_oficial
 
 printf "${WHITE} >> Instalando dependências atualizadas...\n"
